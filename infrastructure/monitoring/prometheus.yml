@@ -1,0 +1,25 @@
+# Scrape config stub (blueprint §102: Prometheus + Grafana + Loki +
+# OpenTelemetry + Sentry). No service exposes a /metrics endpoint yet — none of
+# the targets below will resolve to anything real until one does. This file
+# exists so the shape of the observability stack is decided (what gets scraped,
+# how often) before the first metric is wired.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "iecp-api"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:4000"]
+
+  - job_name: "iecp-worker"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["worker:9090"]
+
+  - job_name: "iecp-notification-worker"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["notification-worker:9090"]

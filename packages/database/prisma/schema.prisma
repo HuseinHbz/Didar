@@ -1,0 +1,44 @@
+// IECP database schema.
+//
+// This is intentionally NOT the full domain model yet. Per docs/product/blueprint.md
+// ("وضعیت فعلی" / Phase 1), the complete ERD — every table, column, type, PK/FK,
+// index, enum, and relation — is dedicated follow-up work, done deliberately rather
+// than improvised while scaffolding the repo. See docs/database/README.md.
+//
+// What IS a real, load-bearing decision made here:
+//   1. PostgreSQL, one database, split into domain-based schemas (blueprint §4/§57)
+//      instead of one flat 400-table namespace.
+//   2. Conventions every future model follows: UUID primary keys (blueprint §58),
+//      `created_at`/`updated_at` audit timestamps, `deleted_at` soft delete
+//      (blueprint §59) for anything user- or business-facing.
+//
+// The `User` model below exists only to prove those conventions compile end to end
+// (`prisma generate`, migrations, multi-schema mapping) — it is a placeholder, not
+// the identity domain's real shape.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// NOTE: multiSchema is GA as of Prisma 6 — no `previewFeatures` flag needed. The
+// `schemas` array must every schema any model's `@@schema(...)` refers to, and
+// (quirk confirmed against Prisma 6.19.3's parser) must be a single-line array —
+// a multi-line one fails with "not a valid definition within a datasource".
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["identity", "customer", "catalog", "commerce", "inventory", "procurement", "retail", "crm", "marketing", "cms", "finance", "communication", "analytics", "system"]
+}
+
+/// Placeholder — see file header. Full identity schema (users, credentials,
+/// sessions, devices, OTP, 2FA, roles/permissions) is Phase 1 work.
+model User {
+  id        String    @id @default(uuid()) @db.Uuid
+  phone     String    @unique
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@map("users")
+  @@schema("identity")
+}

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "IECP Base",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "composite": false,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    // NOT incremental: true. tsup's dts rollup step (rollup-plugin-dts under the
+    // hood) invokes tsc in a way that trips TS5074 ("--incremental can only be
+    // specified using tsconfig, emitting to single file, or when
+    // --tsBuildInfoFile is specified") against tsup 8.5.1 + TS 5.9.3 — confirmed
+    // by actually building every tsup-based package in this repo. Incremental
+    // buildinfo also buys little here anyway: CI runs are always cold, and
+    // tsup/turbo already do their own caching.
+    "incremental": false,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": false,
+
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "allowJs": false,
+    "verbatimModuleSyntax": false
+  },
+  "exclude": ["node_modules", "dist", "build", ".next", ".turbo", "coverage"]
+}

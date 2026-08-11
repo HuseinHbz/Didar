@@ -1,0 +1,12 @@
+node_modules
+.pnpm-store
+.next
+.turbo
+dist
+build
+out
+coverage
+pnpm-lock.yaml
+packages/database/generated
+apps/mobile
+docs/product/blueprint.md

@@ -1,0 +1,33 @@
+{
+  "name": "@iecp/eslint-config",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared ESLint flat configs for the IECP monorepo (base, Next.js, NestJS/Node).",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./base": "./base.mjs",
+    "./next": "./next.mjs",
+    "./nestjs": "./nestjs.mjs",
+    "./react-library": "./react-library.mjs"
+  },
+  "files": [
+    "base.mjs",
+    "next.mjs",
+    "nestjs.mjs",
+    "react-library.mjs"
+  ],
+  "dependencies": {
+    "@eslint/js": "9.39.5",
+    "@next/eslint-plugin-next": "16.3.0",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-import": "2.32.0",
+    "eslint-plugin-react": "7.37.5",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.9.0",
+    "typescript-eslint": "8.67.0"
+  },
+  "peerDependencies": {
+    "eslint": "^9.0.0"
+  }
+}

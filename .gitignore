@@ -3,22 +3,56 @@
 Thumbs.db
 
 # Editors
-.vscode/
+.vscode/*
+!.vscode/extensions.json
 .idea/
 
 # Logs
 *.log
+npm-debug.log*
+pnpm-debug.log*
 
 # Env
 .env
 .env.local
+.env.*.local
+!.env.example
 
-# Dependencies (uncomment as needed once a stack is chosen)
-# node_modules/
-# venv/
-# __pycache__/
+# Node / JS
+node_modules/
+.pnpm-store/
 
 # Build output
 dist/
 build/
 out/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# Prisma
+packages/database/generated/
+
+# Serwist (generated service worker + precache manifest)
+apps/*/public/sw.js
+apps/*/public/sw.js.map
+apps/*/public/swe-worker-*.js
+
+# Testing
+coverage/
+
+# Docker
+infrastructure/postgres/data/
+infrastructure/redis/data/
+
+# Flutter
+apps/mobile/.dart_tool/
+apps/mobile/.flutter-plugins
+apps/mobile/.flutter-plugins-dependencies
+apps/mobile/build/
+apps/mobile/**/generated_plugin_registrant.*
+
+# Terraform (if/when used)
+*.tfstate
+*.tfstate.*
+.terraform/

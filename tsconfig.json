@@ -1,0 +1,16 @@
+{
+  "files": [],
+  "references": [
+    { "path": "apps/storefront" },
+    { "path": "apps/admin" },
+    { "path": "apps/pwa" },
+    { "path": "services/api" },
+    { "path": "services/worker" },
+    { "path": "services/notification-worker" },
+    { "path": "services/scheduler" },
+    { "path": "packages/ui" },
+    { "path": "packages/types" },
+    { "path": "packages/validation" },
+    { "path": "packages/database" }
+  ]
+}

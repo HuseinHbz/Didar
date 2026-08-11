@@ -1,0 +1,40 @@
+{
+  "name": "@iecp/pwa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Installable, offline-capable mobile-first PWA shell (primary iPhone/Safari client) — Next.js App Router.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "next dev -p 3002 --webpack",
+    "build": "next build --webpack",
+    "start": "next start -p 3002",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf .next"
+  },
+  "dependencies": {
+    "@iecp/types": "workspace:*",
+    "@iecp/ui": "workspace:*",
+    "@iecp/validation": "workspace:*",
+    "@tanstack/react-query": "5.101.4",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "serwist": "9.5.12",
+    "zod": "4.4.3",
+    "zustand": "5.0.14"
+  },
+  "devDependencies": {
+    "@iecp/eslint-config": "workspace:*",
+    "@iecp/tsconfig": "workspace:*",
+    "@serwist/cli": "9.5.12",
+    "@serwist/next": "9.5.12",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "26.2.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "eslint": "9.39.5",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@iecp/tsconfig",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared TypeScript strict-mode base configs for the IECP monorepo.",
+  "license": "MIT",
+  "files": [
+    "base.json",
+    "nextjs.json",
+    "nestjs.json",
+    "react-library.json"
+  ]
+}

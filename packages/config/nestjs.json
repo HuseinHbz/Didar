@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "IECP NestJS",
+  "extends": "./base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "module": "CommonJS",
+    "moduleResolution": "Node10",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "allowSyntheticDefaultImports": true,
+    "removeComments": true,
+    "noEmit": false
+    // Deliberately NOT setting outDir/rootDir/baseUrl here: TypeScript resolves
+    // relative path options in an `extends`-ed base config relative to THAT
+    // file's own location, not the consuming project's — `"outDir": "./dist"`
+    // here would resolve to packages/config/dist for every service that extends
+    // this file, not <service>/dist (confirmed the hard way: `nest build`
+    // silently "succeeded" while writing every service's output there). Every
+    // consumer sets outDir/rootDir/baseUrl itself — see services/api/tsconfig.json.
+  }
+}

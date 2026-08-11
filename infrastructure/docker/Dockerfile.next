@@ -1,0 +1,55 @@
+# Multi-stage Dockerfile for the Next.js apps (storefront, admin, pwa), using
+# `turbo prune` to build an image containing only what the target app actually
+# depends on. Build from the MONOREPO ROOT (not this directory):
+#
+#   docker build \
+#     -f infrastructure/docker/Dockerfile.next \
+#     --build-arg PACKAGE_NAME=@iecp/storefront \
+#     --build-arg APP_PATH=apps/storefront \
+#     --build-arg PORT=3000 \
+#     -t iecp-storefront .
+#
+# NOTE: not build-tested in the environment this scaffold was authored in (no
+# full `docker build` run against it) — see infrastructure/docker/README.md.
+# Validate in CI (infrastructure/docker jobs) before relying on it for a real
+# deployment.
+
+FROM node:22-alpine AS base
+RUN corepack enable
+
+# ---- 1. Prune the monorepo to just what PACKAGE_NAME needs ----------------
+FROM base AS pruner
+ARG PACKAGE_NAME
+WORKDIR /app
+RUN apk add --no-cache libc6-compat
+COPY . .
+RUN npx turbo prune "${PACKAGE_NAME}" --docker
+
+# ---- 2. Install deps + build the pruned subset -----------------------------
+FROM base AS builder
+ARG PACKAGE_NAME
+WORKDIR /app
+RUN apk add --no-cache libc6-compat
+COPY --from=pruner /app/out/json/ .
+RUN pnpm install --frozen-lockfile
+COPY --from=pruner /app/out/full/ .
+RUN pnpm turbo run build --filter="${PACKAGE_NAME}"
+
+# ---- 3. Runtime image -------------------------------------------------------
+FROM base AS runner
+ARG APP_PATH
+ARG PORT=3000
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=${PORT}
+RUN addgroup --system --gid 1001 iecp && adduser --system --uid 1001 iecp
+USER iecp
+
+COPY --from=builder --chown=iecp:iecp /app .
+WORKDIR /app/${APP_PATH}
+
+EXPOSE ${PORT}
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+  CMD wget -qO- "http://localhost:${PORT}/" || exit 1
+
+CMD ["pnpm", "start"]

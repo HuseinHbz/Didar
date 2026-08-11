@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # `prisma generate` (part of @iecp/database's build script, which every other
+  # package/app/service depends on via turbo.json's `dependsOn: ["^build"]")
+  # resolves env("DATABASE_URL") at schema-parse time even though it never
+  # connects — a placeholder is enough for lint/typecheck/build. Real e2e tests
+  # that need a reachable Postgres set up their own service container/env below.
+  DATABASE_URL: "postgresql://iecp:iecp@localhost:5432/iecp?schema=public"
+  JWT_SECRET: "ci-placeholder-secret"
+
+jobs:
+  validate:
+    name: structure / lint / typecheck / build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate repository structure
+        run: pnpm validate:structure
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+  test:
+    name: unit tests
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Unit tests
+        run: pnpm test

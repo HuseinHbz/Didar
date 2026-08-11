@@ -1,0 +1,12 @@
+**/node_modules
+**/.next
+**/.turbo
+**/dist
+**/build
+**/coverage
+**/.git
+**/*.tsbuildinfo
+**/.env
+**/.env.local
+apps/mobile/.dart_tool
+apps/mobile/build

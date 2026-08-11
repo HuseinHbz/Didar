@@ -1,0 +1,20 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    # Mirrors the monorepo-wide "no any type" rule (see root CONTRIBUTING.md) —
+    # `dynamic` is Dart's closest equivalent to TypeScript's `any`.
+    avoid_dynamic_calls: true
+    always_declare_return_types: true
+    prefer_final_locals: true
+    prefer_final_in_for_each: true
+    unnecessary_lambdas: true
+
+analyzer:
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"

@@ -1,0 +1,32 @@
+name: didar_mobile
+description: "Didar (IECP) — Android app. Same backend as storefront/admin/pwa."
+publish_to: "none"
+version: 0.1.0
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+# NOTE: dependency versions below have NOT been resolved against `flutter pub get`
+# in this environment — the Flutter SDK is not installed here (see README.md).
+# Verify/update these against `flutter pub outdated` before first real use.
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  dio: ^5.7.0 # HTTP client for services/api
+  flutter_riverpod: ^2.6.1 # state management
+  go_router: ^14.6.2 # declarative routing + deep linking (blueprint §73)
+  flutter_secure_storage: ^9.2.2 # token/session storage
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  build_runner: ^2.4.13
+  freezed: ^2.5.7
+  json_serializable: ^6.9.0
+
+flutter:
+  uses-material-design: true

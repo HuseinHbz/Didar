@@ -1,0 +1,60 @@
+# Multi-stage Dockerfile for the NestJS services (api, worker,
+# notification-worker, scheduler), using `turbo prune`. Build from the MONOREPO
+# ROOT (not this directory):
+#
+#   docker build \
+#     -f infrastructure/docker/Dockerfile.nest \
+#     --build-arg PACKAGE_NAME=@iecp/api \
+#     --build-arg APP_PATH=services/api \
+#     --build-arg PORT=4000 \
+#     -t iecp-api .
+#
+# `worker`/`notification-worker`/`scheduler` have no HTTP port (they're
+# `NestFactory.createApplicationContext`, not a server) — omit PORT/EXPOSE for
+# those, or just ignore the unused EXPOSE.
+#
+# NOTE: not build-tested in the environment this scaffold was authored in — see
+# infrastructure/docker/README.md. Validate in CI before relying on it.
+
+FROM node:22-alpine AS base
+RUN corepack enable
+
+# ---- 1. Prune the monorepo to just what PACKAGE_NAME needs ----------------
+FROM base AS pruner
+ARG PACKAGE_NAME
+WORKDIR /app
+RUN apk add --no-cache libc6-compat
+COPY . .
+RUN npx turbo prune "${PACKAGE_NAME}" --docker
+
+# ---- 2. Install deps + build the pruned subset -----------------------------
+FROM base AS builder
+ARG PACKAGE_NAME
+WORKDIR /app
+RUN apk add --no-cache libc6-compat
+COPY --from=pruner /app/out/json/ .
+RUN pnpm install --frozen-lockfile
+COPY --from=pruner /app/out/full/ .
+# turbo's own dependency graph (turbo.json: build.dependsOn = ["^build"]) already
+# runs @iecp/database's build script first, which includes `prisma generate` — no
+# separate step needed here. `prisma generate` resolves env("DATABASE_URL") at
+# schema-parse time even though it never connects, so a placeholder is enough.
+ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
+RUN pnpm turbo run build --filter="${PACKAGE_NAME}"
+
+# ---- 3. Runtime image -------------------------------------------------------
+FROM base AS runner
+ARG APP_PATH
+ARG PORT=4000
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=${PORT}
+RUN addgroup --system --gid 1001 iecp && adduser --system --uid 1001 iecp
+USER iecp
+
+COPY --from=builder --chown=iecp:iecp /app .
+WORKDIR /app/${APP_PATH}
+
+EXPOSE ${PORT}
+
+CMD ["node", "dist/main.js"]

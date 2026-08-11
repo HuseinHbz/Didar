@@ -1,0 +1,44 @@
+{
+  "name": "@iecp/database",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prisma ORM client for PostgreSQL — the only way any service talks to the database.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "generate": "prisma generate",
+    "build": "prisma generate && tsup",
+    "dev": "tsup --watch",
+    "clean": "rm -rf dist",
+    "lint": "eslint .",
+    "typecheck": "prisma generate && tsc --noEmit",
+    "migrate:dev": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "studio": "prisma studio",
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3"
+  },
+  "devDependencies": {
+    "@iecp/eslint-config": "workspace:*",
+    "@iecp/tsconfig": "workspace:*",
+    "@types/node": "26.2.0",
+    "eslint": "9.39.5",
+    "prisma": "6.19.3",
+    "tsup": "8.5.1",
+    "tsx": "4.23.12",
+    "typescript": "5.9.3"
+  }
+}

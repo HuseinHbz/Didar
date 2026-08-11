@@ -36,6 +36,25 @@ truth; if it's flushed, the system keeps working (just slower). Application code
 
 No business logic is duplicated across clients — it all lives in the backend.
 
+In the actual repo, "Web App" and "PWA" became two separate apps —
+`apps/storefront` (desktop-first) and `apps/pwa` (mobile-first, installable,
+Serwist service worker) — rather than one app with a PWA layer, per the Phase 001
+foundation task's explicit `apps: [storefront, admin, pwa, mobile]` structure.
+This is an open question, not a settled reversal of the point above — see
+`docs/architecture/README.md`'s "Open question" section before assuming either
+shape is final.
+
+## Repository layout
+
+pnpm workspaces + Turborepo monorepo. `apps/` (storefront, admin, pwa Next.js
+apps + mobile Flutter app), `services/` (api, worker, notification-worker,
+scheduler — NestJS), `packages/` (ui, database, types, validation, config,
+eslint-config — shared, pre-built via tsup), `infrastructure/` (docker, nginx,
+postgres, redis, monitoring), `docs/` (architecture, database, api, security,
+deployment — status docs distinguishing what's real vs. planned). Full picture:
+`docs/architecture/README.md`. Every directory has its own `README.md` — read
+the local one before working in it.
+
 ## Stack
 
 - **Backend**: NestJS + TypeScript (modular, DI, RBAC, OpenAPI, event-driven, queues)
@@ -87,13 +106,24 @@ ERP Integration.
 
 ## Current status
 
-Repository was just initialized (README/LICENSE/.gitignore only). The blueprint (`docs/product/blueprint.md`)
-covers Phase 0 (product/architecture definition) at a "design scope" level — nothing has been built yet.
+Phase 0 (product/architecture definition, `docs/product/blueprint.md`) is done at
+a "design scope" level. The Phase 001 foundation task built the monorepo
+**structure and toolchain** — pnpm+Turborepo workspace, all seven `apps`/`services`
+scaffolded and buildable, five shared `packages`, local-dev infrastructure
+(`docker-compose.yml`), CI (lint/typecheck/build), and status docs. This is
+scaffolding, not features: `services/api` has exactly two modules (`health`, real;
+`identity`, structurally real but backed by one placeholder DB model), no
+auth/RBAC exists anywhere, and every notification-channel adapter is a stub. See
+`docs/architecture/README.md`, `docs/security/README.md`, and
+`docs/deployment/README.md` for precise "what's real vs. planned" breakdowns —
+don't assume a piece works just because a file for it exists.
 
-**Next up is Phase 1** (see end of blueprint doc "وضعیت فعلی"): the actual PostgreSQL ERD (every table, column,
-type, PK/FK, index, enum, relation), migration/seed strategy, audit/soft-delete/versioning model, API contract,
-permission matrix, event map, and the precise order state machine — *before* any UI/design-system work starts.
-The stated ordering principle: settle the database/domain skeleton first, then design system + admin panel
-structure + web/PWA sitemap + Android structure.
+**Next up is still Phase 1** (see end of blueprint doc "وضعیت فعلی"): the actual
+PostgreSQL ERD (every table, column, type, PK/FK, index, enum, relation),
+migration/seed strategy, audit/soft-delete/versioning model, API contract,
+permission matrix, event map, and the precise order state machine — *before* any
+further UI/design-system work or real domain modules. The stated ordering
+principle: settle the database/domain skeleton first, then design system + admin
+panel structure + web/PWA sitemap + Android structure.
 
 Treat any new architectural decision as needing to stay consistent with this document, or update it explicitly.

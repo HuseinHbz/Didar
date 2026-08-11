@@ -1,0 +1,48 @@
+{
+  "name": "@iecp/notification-worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Multi-channel notification dispatch (SMS/Telegram/WhatsApp/Email/Push/In-App) behind adapters, with SMS fallback (blueprint §38-§44).",
+  "license": "MIT",
+  "scripts": {
+    "build": "nest build",
+    "dev": "nest start --watch",
+    "start": "node dist/main.js",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "jest",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@iecp/types": "workspace:*",
+    "@iecp/validation": "workspace:*",
+    "@nestjs/bullmq": "11.0.5",
+    "@nestjs/common": "11.1.29",
+    "@nestjs/config": "4.0.4",
+    "@nestjs/core": "11.1.29",
+    "bullmq": "6.0.11",
+    "ioredis": "6.0.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@iecp/eslint-config": "workspace:*",
+    "@iecp/tsconfig": "workspace:*",
+    "@nestjs/cli": "11.0.24",
+    "@nestjs/testing": "11.1.29",
+    "@types/jest": "30.0.0",
+    "@types/node": "26.2.0",
+    "eslint": "9.39.5",
+    "jest": "30.4.2",
+    "ts-jest": "29.4.12",
+    "typescript": "5.9.3"
+  },
+  "jest": {
+    "moduleFileExtensions": ["js", "json", "ts"],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": { "^.+\\.(t|j)s$": "ts-jest" },
+    "testEnvironment": "node"
+  }
+}

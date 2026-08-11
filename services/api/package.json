@@ -1,0 +1,65 @@
+{
+  "name": "@iecp/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "IECP API gateway — NestJS, domain-based modules, clean architecture layering.",
+  "license": "MIT",
+  "scripts": {
+    "build": "nest build",
+    "dev": "nest start --watch",
+    "start": "node dist/main.js",
+    "start:debug": "nest start --debug --watch",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@iecp/database": "workspace:*",
+    "@iecp/types": "workspace:*",
+    "@iecp/validation": "workspace:*",
+    "@nestjs/common": "11.1.29",
+    "@nestjs/config": "4.0.4",
+    "@nestjs/core": "11.1.29",
+    "@nestjs/platform-express": "11.1.29",
+    "@nestjs/swagger": "11.4.6",
+    "@nestjs/terminus": "11.1.1",
+    "class-transformer": "0.5.1",
+    "class-validator": "0.15.1",
+    "helmet": "8.3.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "swagger-ui-express": "5.0.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@iecp/eslint-config": "workspace:*",
+    "@iecp/tsconfig": "workspace:*",
+    "@nestjs/cli": "11.0.24",
+    "@nestjs/testing": "11.1.29",
+    "@types/express": "5.0.6",
+    "@types/jest": "30.0.0",
+    "@types/node": "26.2.0",
+    "@types/supertest": "7.2.1",
+    "eslint": "9.39.5",
+    "jest": "30.4.2",
+    "source-map-support": "0.5.21",
+    "supertest": "7.2.2",
+    "ts-jest": "29.4.12",
+    "tsx": "4.23.12",
+    "typescript": "5.9.3"
+  },
+  "jest": {
+    "moduleFileExtensions": ["js", "json", "ts"],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "collectCoverageFrom": ["**/*.(t|j)s"],
+    "coverageDirectory": "../coverage",
+    "testEnvironment": "node"
+  }
+}

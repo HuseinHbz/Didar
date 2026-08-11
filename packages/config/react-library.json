@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "IECP React Library",
+  "extends": "./base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": false
+    // No outDir here on purpose — see the comment in nestjs.json. Consumers
+    // (packages/ui) build via tsup, which has its own outDir and ignores this
+    // anyway, but don't rely on that: set outDir locally if a future consumer
+    // ever emits via raw tsc.
+  }
+}
