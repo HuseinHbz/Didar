@@ -21,8 +21,11 @@ No direct `local → production` DB connection, ever (blueprint §108). Only
 - **Containerization templates**: `infrastructure/docker/Dockerfile.next` and
   `Dockerfile.nest`, `turbo prune`-based, one per app/service — not build-tested
   yet, see that directory's `README.md`.
-- **CI**: `.github/workflows/ci.yml` runs install → lint → typecheck → build on
-  every push/PR. It does not deploy anything, and there is no CD pipeline yet.
+- **CI**: `.github/workflows/ci.yml` — four jobs (`lint`, `test`, `security`,
+  `build`) gated by a `quality-gate` job, on every push/PR to `main`/`develop`.
+  Full detail, branch strategy, and what still needs manual GitHub-admin setup
+  (branch protection rules): [`ci-pipeline.md`](ci-pipeline.md). CI does not
+  deploy anything yet — there is no CD pipeline.
 - **Env vars**: every app/service ships `.env.example`; nothing is hardcoded,
   nothing is committed as a real secret (blueprint §109).
 

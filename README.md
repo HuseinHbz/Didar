@@ -73,22 +73,29 @@ pnpm build                                  # builds shared packages, then every
 pnpm dev                                    # runs every app/service in watch mode
 ```
 
-| App/service           | URL                              |
-| ----------------------- | ----------------------------------- |
-| `storefront`            | http://localhost:3000              |
-| `admin`                 | http://localhost:3001              |
-| `pwa`                   | http://localhost:3002              |
-| `api`                    | http://localhost:4000/api/v1 (docs at `/api/v1/docs`) |
+| App/service  | URL                                                   |
+| ------------ | ----------------------------------------------------- |
+| `storefront` | http://localhost:3000                                 |
+| `admin`      | http://localhost:3001                                 |
+| `pwa`        | http://localhost:3002                                 |
+| `api`        | http://localhost:4000/api/v1 (docs at `/api/v1/docs`) |
 
 ### Other commands
 
 ```bash
 pnpm lint          # eslint across every workspace
+pnpm format:check   # prettier --check
 pnpm typecheck      # tsc --noEmit across every workspace
 pnpm test           # unit tests (jest/vitest) across every workspace
 pnpm validate:structure   # verifies the required repo layout exists (see scripts/validate-structure.mjs)
+pnpm audit --audit-level high   # dependency vulnerability scan
 pnpm format         # prettier --write
 ```
+
+CI runs all of these (plus a secret scan and an integration-test pass) as four
+independently-reported jobs — `lint`, `test`, `security`, `build` — behind a
+single `quality-gate` check. See `docs/deployment/ci-pipeline.md` for the full
+branch strategy and pipeline breakdown.
 
 Run any of these against one workspace with `pnpm --filter <name> <script>`, e.g.
 `pnpm --filter @iecp/api test:e2e`.

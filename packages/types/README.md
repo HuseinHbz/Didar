@@ -11,7 +11,7 @@ Shared, framework-agnostic TypeScript types used by every app and service:
   notification channels.
 - **`result.ts`** — a small `Result<T, E>` type for typed, expected failures.
 
-## What does *not* live here
+## What does _not_ live here
 
 Anything that's admin-editable business content — products, categories, prices,
 promotions, CMS pages/menus/banners — is **not** modeled as static TypeScript here.

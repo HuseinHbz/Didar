@@ -14,7 +14,7 @@ generated from the same `@nestjs/swagger` decorators the controllers use).
 - **REST**, with GraphQL left as a documented possibility (blueprint §91) for a
   future complex-frontend need, not something in place today.
 - **Validation is server-side and rejects unknowns**: `ValidationPipe({ whitelist:
-  true, forbidNonWhitelisted: true, transform: true })` on every request — an
+true, forbidNonWhitelisted: true, transform: true })` on every request — an
   unexpected field in a request body is a `400`, not silently dropped or accepted.
 - **DTOs are Zod-shaped where possible** — `@iecp/validation` schemas are meant to
   be reused for both a NestJS DTO and a React Hook Form on the client, so a

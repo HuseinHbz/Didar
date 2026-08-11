@@ -41,7 +41,7 @@ read as "the schema", only as "the rules the schema will follow".
 - Index strategy (which FKs get an index, which columns need composite indexes for
   the filter/search patterns in blueprint §16-§17).
 - The exact `order_status_history`/`inventory_transactions` ledger shapes
-  (blueprint §19/§24 already specify the *values*, not the *columns*).
+  (blueprint §19/§24 already specify the _values_, not the _columns_).
 - Migration + seed strategy for the full model (blueprint §106-§107).
 - Whether `multiSchema` FKs across schemas (e.g. an `order` in `commerce`
   referencing a `customer` in `customer`) behave the way early testing assumed —

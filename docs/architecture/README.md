@@ -51,7 +51,7 @@ and no client hardcodes business/content data (root `CLAUDE.md`).
 - **Shared packages are pre-built**, not consumed as raw TS source
   (`packages/{types,validation,database,ui}` each ship a `tsup` build to `dist/`).
   This is more moving parts than "just-in-time" TS workspace packages, but it's
-  the one approach that works cleanly for *both* a bundler-based consumer
+  the one approach that works cleanly for _both_ a bundler-based consumer
   (Next.js) and a `tsc`-based one (NestJS) without fragile path-mapping tricks.
 - **TypeScript is pinned to 5.9.3**, not "latest" (which is a 7.x line under active
   rewrite) — `@typescript-eslint` only supports `<6.1.0` as of this writing. Revisit
@@ -71,16 +71,16 @@ lands once its slice of the Phase 1 ERD is designed.
 
 ## Four backend services, not one
 
-| Service                | Entry point                              | Why separate |
-| ------------------------ | ------------------------------------------ | ------------- |
-| `services/api`          | HTTP (`NestFactory.create`)                | The only thing clients talk to. |
-| `services/worker`        | No HTTP (`createApplicationContext`)       | Generic background jobs (image processing, PDF, search indexing) — must never block a request. |
-| `services/notification-worker` | No HTTP                             | Multi-channel notification fan-out with adapter-per-channel + SMS fallback (blueprint §41) — isolated so a notification-provider outage can't affect order processing. |
-| `services/scheduler`     | No HTTP                                    | Cron-driven (blueprint §69/§128), not queue-driven — a different trigger model from the other two. |
+| Service                        | Entry point                          | Why separate                                                                                                                                                           |
+| ------------------------------ | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `services/api`                 | HTTP (`NestFactory.create`)          | The only thing clients talk to.                                                                                                                                        |
+| `services/worker`              | No HTTP (`createApplicationContext`) | Generic background jobs (image processing, PDF, search indexing) — must never block a request.                                                                         |
+| `services/notification-worker` | No HTTP                              | Multi-channel notification fan-out with adapter-per-channel + SMS fallback (blueprint §41) — isolated so a notification-provider outage can't affect order processing. |
+| `services/scheduler`           | No HTTP                              | Cron-driven (blueprint §69/§128), not queue-driven — a different trigger model from the other two.                                                                     |
 
 ## Open question: `apps/storefront` vs `apps/pwa`
 
-The original blueprint (§1) frames Web and PWA as *one* client ("نسخه 1: Web App"
+The original blueprint (§1) frames Web and PWA as _one_ client ("نسخه 1: Web App"
 already includes a PWA checkbox). The Phase 001 task brief lists `storefront` and
 `pwa` as two separate `apps/*` entries instead. This scaffold built them as two
 apps — `storefront` desktop-first/SSR, `pwa` mobile-first/installable/offline

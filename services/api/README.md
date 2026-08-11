@@ -14,9 +14,9 @@ layering example.
 
 ## Modules that exist so far
 
-| Module     | What's real                                              |
-| ---------- | --------------------------------------------------------- |
-| `health`   | Fully real — DB liveness check via `@iecp/database`.     |
+| Module     | What's real                                                                                                                                         |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `health`   | Fully real — DB liveness check via `@iecp/database`.                                                                                                |
 | `identity` | Structurally real (full clean-architecture layering, DI, tests), but backed by the placeholder `User` model — see `src/modules/identity/README.md`. |
 
 Every other domain in blueprint §2 (`customer`, `catalog`, `order`, `inventory`, …)

@@ -1,7 +1,14 @@
 packages:
-  - "apps/*"
-  - "services/*"
-  - "packages/*"
+  - 'apps/*'
+  - 'services/*'
+  - 'packages/*'
+overrides:
+  # @nestjs/swagger@11.4.6 depends directly on the vulnerable js-yaml@5.2.1
+  # (GHSA-pm4m-ph32-ghv5, exponential parsing time / DoS) — force the patched
+  # line everywhere until @nestjs/swagger bumps its own dependency. Caught by
+  # the `security` CI job's `pnpm audit --audit-level high`; remove this once
+  # that job passes without it.
+  js-yaml@>=5.0.0 <5.2.2: '>=5.2.2'
 allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true

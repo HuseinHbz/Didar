@@ -6,7 +6,7 @@ for anything not covered here.
 
 ## Positioning
 
-This is **not** an Iranian clone of Lenskart. Lenskart is the *benchmark*, not the spec. The product is an
+This is **not** an Iranian clone of Lenskart. Lenskart is the _benchmark_, not the spec. The product is an
 **Iranian Eyewear Commerce Platform (IECP)** — an enterprise-grade commerce platform (catalog + CMS + CRM +
 inventory + POS + loyalty + marketing + AI + mobile + PWA + notifications + analytics) that must exceed Lenskart
 specifically in: ERP-like operations, multi-warehouse inventory, CRM, loyalty, CMS, Iranian localization
@@ -26,7 +26,7 @@ Admin → CMS → PostgreSQL → API → Web / Android / PWA
 
 PostgreSQL is the **single source of truth**. Redis is cache/session/queue/rate-limit only — never a source of
 truth; if it's flushed, the system keeps working (just slower). Application code (services, business logic) is
-*code*, not data — don't confuse "everything from the database" with "the app is generated from the database."
+_code_, not data — don't confuse "everything from the database" with "the app is generated from the database."
 
 ## Three clients, one backend
 
@@ -67,7 +67,7 @@ the local one before working in it.
 - **Search**: PostgreSQL full-text search first, OpenSearch later (index built from PG via events, not source of truth)
 - **Storage**: Object storage for binaries, PostgreSQL holds metadata only
 - **Notifications**: multi-channel adapters (SMS, Telegram, WhatsApp, Email, Push, In-App) behind one interface;
-  WhatsApp/Telegram are *not* load-bearing for Iran — SMS is the reliable fallback
+  WhatsApp/Telegram are _not_ load-bearing for Iran — SMS is the reliable fallback
 - **Payments**: gateway-abstraction layer (`createPayment/verifyPayment/refundPayment/getTransaction`) — never
   lock the system to one Iranian provider
 
@@ -110,18 +110,28 @@ Phase 0 (product/architecture definition, `docs/product/blueprint.md`) is done a
 a "design scope" level. The Phase 001 foundation task built the monorepo
 **structure and toolchain** — pnpm+Turborepo workspace, all seven `apps`/`services`
 scaffolded and buildable, five shared `packages`, local-dev infrastructure
-(`docker-compose.yml`), CI (lint/typecheck/build), and status docs. This is
-scaffolding, not features: `services/api` has exactly two modules (`health`, real;
-`identity`, structurally real but backed by one placeholder DB model), no
-auth/RBAC exists anywhere, and every notification-channel adapter is a stub. See
-`docs/architecture/README.md`, `docs/security/README.md`, and
-`docs/deployment/README.md` for precise "what's real vs. planned" breakdowns —
-don't assume a piece works just because a file for it exists.
+(`docker-compose.yml`), and status docs. This is scaffolding, not features:
+`services/api` has exactly two modules (`health`, real; `identity`, structurally
+real but backed by one placeholder DB model), no auth/RBAC exists anywhere, and
+every notification-channel adapter is a stub. See `docs/architecture/README.md`,
+`docs/security/README.md`, and `docs/deployment/README.md` for precise
+"what's real vs. planned" breakdowns — don't assume a piece works just because a
+file for it exists.
+
+Phase 002 added the enterprise git workflow + CI quality gate: `main`
+(production) / `develop` (integration) / `feature`+`bugfix`+`hotfix` branches
+(`docs/deployment/ci-pipeline.md`), and `.github/workflows/ci.yml`'s four jobs
+(`lint`, `test` — unit + integration against a real Postgres service container,
+`security` — dependency + secret scan, `build` — frontend/backend split) gated
+by a `quality-gate` job. Branch protection requiring that check is still a
+manual GitHub-admin step (not configurable from inside the repo) — see that
+doc. `develop` currently equals `feature/foundation-monorepo`'s content since
+that branch was never merged to `main` (no PR was requested).
 
 **Next up is still Phase 1** (see end of blueprint doc "وضعیت فعلی"): the actual
 PostgreSQL ERD (every table, column, type, PK/FK, index, enum, relation),
 migration/seed strategy, audit/soft-delete/versioning model, API contract,
-permission matrix, event map, and the precise order state machine — *before* any
+permission matrix, event map, and the precise order state machine — _before_ any
 further UI/design-system work or real domain modules. The stated ordering
 principle: settle the database/domain skeleton first, then design system + admin
 panel structure + web/PWA sitemap + Android structure.

@@ -7,16 +7,19 @@ below marked "not yet" is covered just because the blueprint calls for it.
 
 ## In place today
 
-| Control | Where |
-| ------- | ----- |
-| `helmet()` security headers | `services/api/src/main.ts` |
-| CORS restricted to a configured origin | `services/api/src/main.ts` (`CORS_ORIGIN` env var) |
-| Request body whitelisting (unknown fields rejected, not dropped) | `ValidationPipe` in `services/api/src/main.ts` |
-| Env vars validated at startup, fail-fast | `@iecp/validation`'s `parseEnv()`, used by every service's `src/config/env.ts` |
-| Secrets never committed | `.env` gitignored everywhere; every service ships an `.env.example` instead |
-| `no-explicit-any` / `no-unsafe-*` hard-errored | `@iecp/eslint-config/base` — reduces a whole class of type-confusion bugs that turn into security bugs |
-| Admin panel not indexed | `robots: { index: false, follow: false }` in `apps/admin`'s root layout |
-| Dependency versions pinned exactly (no `^`/`~` ranges) | every `package.json` in the monorepo |
+| Control                                                          | Where                                                                                                             |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `helmet()` security headers                                      | `services/api/src/main.ts`                                                                                        |
+| CORS restricted to a configured origin                           | `services/api/src/main.ts` (`CORS_ORIGIN` env var)                                                                |
+| Request body whitelisting (unknown fields rejected, not dropped) | `ValidationPipe` in `services/api/src/main.ts`                                                                    |
+| Env vars validated at startup, fail-fast                         | `@iecp/validation`'s `parseEnv()`, used by every service's `src/config/env.ts`                                    |
+| Secrets never committed                                          | `.env` gitignored everywhere; every service ships an `.env.example` instead                                       |
+| `no-explicit-any` / `no-unsafe-*` hard-errored                   | `@iecp/eslint-config/base` — reduces a whole class of type-confusion bugs that turn into security bugs            |
+| Admin panel not indexed                                          | `robots: { index: false, follow: false }` in `apps/admin`'s root layout                                           |
+| Dependency versions pinned exactly (no `^`/`~` ranges)           | every `package.json` in the monorepo                                                                              |
+| Dependency scan in CI (fails on high/critical)                   | `security` job, `.github/workflows/ci.yml` — `pnpm audit --audit-level high`                                      |
+| Secret scan in CI                                                | `security` job, `.github/workflows/ci.yml` — [gitleaks](https://github.com/gitleaks/gitleaks)                     |
+| Known high-severity transitive vuln pinned to patched version    | `pnpm-workspace.yaml` `overrides` — `@nestjs/swagger`'s `js-yaml@5.2.1` (GHSA-pm4m-ph32-ghv5) forced to `>=5.2.2` |
 
 ## Not yet — explicitly open
 
@@ -32,9 +35,10 @@ below marked "not yet" is covered just because the blueprint calls for it.
   started. This matters a lot once real price/inventory-changing endpoints exist.
 - **Four-eyes / approval workflows** for sensitive actions (blueprint §57-§58,
   §105) — not started.
-- **Dependency/secret/container scanning in CI** — `.github/workflows/ci.yml`
-  runs lint/typecheck/build only; no `npm audit`/SCA/Trivy/secret-scan step yet
-  (blueprint §112-§113).
+- **Container scanning** — dependency + secret scanning are now real CI checks
+  (see the table above), but nothing scans the `infrastructure/docker/`
+  Dockerfiles/images yet (Trivy or similar — blueprint §112-§113). Those images
+  aren't build-tested at all yet either, see `infrastructure/docker/README.md`.
 - **OWASP ASVS / Top 10 review** — not performed. Do this before any endpoint
   handles real customer data or payment.
 

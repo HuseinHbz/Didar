@@ -4,11 +4,11 @@ Shared ESLint 10 flat configs for every TypeScript project in the monorepo.
 
 ## Exports
 
-| Import                            | Use in                                      |
-| ---------------------------------- | -------------------------------------------- |
-| `@iecp/eslint-config/base`        | Plain TypeScript packages (`packages/*`)     |
-| `@iecp/eslint-config/next`        | Next.js apps (`storefront`, `admin`, `pwa`)  |
-| `@iecp/eslint-config/nestjs`      | NestJS services (`services/*`)               |
+| Import                              | Use in                                          |
+| ----------------------------------- | ----------------------------------------------- |
+| `@iecp/eslint-config/base`          | Plain TypeScript packages (`packages/*`)        |
+| `@iecp/eslint-config/next`          | Next.js apps (`storefront`, `admin`, `pwa`)     |
+| `@iecp/eslint-config/nestjs`        | NestJS services (`services/*`)                  |
 | `@iecp/eslint-config/react-library` | Plain React component libraries (`packages/ui`) |
 
 ## Usage

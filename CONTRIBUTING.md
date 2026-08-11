@@ -17,8 +17,8 @@ non-negotiable, not style preferences:
 2. **No `any`.** `@typescript-eslint/no-explicit-any` and every `no-unsafe-*` rule
    are hard errors in `packages/eslint-config/base.mjs`, which every workspace's
    `eslint.config.mjs` extends. If you're reaching for `any`, you want `unknown`
-   + a type guard, a generic, or (rarely) a precise `as` assertion with a comment
-   explaining why it's safe.
+   - a type guard, a generic, or (rarely) a precise `as` assertion with a comment
+     explaining why it's safe.
 3. **No business-critical data hardcoded in frontend code.** No
    `const products = [...]`, no `const categories = [...]`, no
    `const menuItems = [...]` — anywhere in `apps/*`. Product, price, category,
@@ -45,20 +45,29 @@ not modeled there, it's not real yet.
 
 ## Workflow
 
-- **Branches**: `feature/*`, `fix/*`, `hotfix/*`, `release/*` off `main`
-  (blueprint §96).
+- **Branches** — `main` (production) and `develop` (integration) are both
+  protected; nobody pushes to either directly.
+  - `feature/*` — new work, branched from `develop`, merged back to `develop`.
+  - `bugfix/*` — non-urgent fixes, branched from `develop`, merged back to `develop`.
+  - `hotfix/*` — urgent production fixes, branched from `main`, merged to
+    **both** `main` and `develop`.
+  - Full diagram and rationale: `docs/deployment/ci-pipeline.md`.
 - **Commits**: [Conventional Commits](https://www.conventionalcommits.org) —
-  `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`, `security:`.
+  `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`, `ci:`, `security:`.
 - **Before opening a PR**, from the repo root:
   ```bash
   pnpm validate:structure   # repo layout sanity check
   pnpm typecheck
   pnpm lint
+  pnpm format:check
   pnpm test
   pnpm build
+  pnpm audit --audit-level high
   ```
-  All of these also run in CI (`.github/workflows/ci.yml`) — a red CI check means
-  don't merge, not "merge and fix later".
+  All of these also run in CI (`.github/workflows/ci.yml` — `lint`, `test`,
+  `security`, `build` jobs, gated by a final `quality-gate` job) — a red CI
+  check means don't merge, not "merge and fix later". See
+  `docs/deployment/ci-pipeline.md` for exactly what each job runs and why.
 - **PRs**: use the template in `.github/pull_request_template.md`. Keep them
   scoped to one module/domain where possible — this repo has a lot of surface
   area, and a 40-file PR touching four unrelated domains is hard to review
@@ -75,9 +84,9 @@ not modeled there, it's not real yet.
   (`DATABASE_URL` reachable) — see each service's `README.md` for exact
   requirements.
 - No repo-wide coverage threshold is enforced yet. Blueprint §98 targets
-  >85% overall / >95% for payment, order, inventory, pricing, coupon, loyalty,
-  auth once those domains exist — treat that as the bar once you're writing
-  those modules, not before.
+  > 85% overall / >95% for payment, order, inventory, pricing, coupon, loyalty,
+  > auth once those domains exist — treat that as the bar once you're writing
+  > those modules, not before.
 
 ## Adding a shared package
 

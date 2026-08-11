@@ -1,8 +1,9 @@
 # @iecp/ui
 
 Shared React component library for `storefront`, `admin`, and `pwa` — Tailwind CSS 4
-+ [shadcn/ui](https://ui.shadcn.com) conventions (Radix primitives,
-`class-variance-authority` variants, a `cn()` class-merge helper).
+
+- [shadcn/ui](https://ui.shadcn.com) conventions (Radix primitives,
+  `class-variance-authority` variants, a `cn()` class-merge helper).
 
 ## Usage
 
@@ -27,8 +28,8 @@ lives outside each app's tree in the monorepo. Without it, classes used only ins
 `src/styles.css` currently ships shadcn/ui's stock neutral OKLCH palette as
 `@theme` tokens — **not** a reviewed brand/design system. The real design system is
 explicit future work (see `docs/product/blueprint.md`, ordered right after the
-Phase 1 database/domain work). Change the token *values* there when it lands; keep
-consuming apps pointed at the same token *names*.
+Phase 1 database/domain work). Change the token _values_ there when it lands; keep
+consuming apps pointed at the same token _names_.
 
 ## Adding a component
 

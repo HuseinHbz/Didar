@@ -20,15 +20,15 @@ both using [`turbo prune`](https://turborepo.com/docs/reference/prune) so each
 image only contains the one target app/service and what it actually depends on —
 not the whole monorepo. Build from the **repo root**, not this directory.
 
-| Target                    | Dockerfile        | `PACKAGE_NAME`              | `APP_PATH`                    | `PORT`  |
-| -------------------------- | ------------------ | ----------------------------- | -------------------------------- | ------- |
-| storefront                 | `Dockerfile.next`  | `@iecp/storefront`            | `apps/storefront`                | 3000    |
-| admin                      | `Dockerfile.next`  | `@iecp/admin`                 | `apps/admin`                     | 3001    |
-| pwa                        | `Dockerfile.next`  | `@iecp/pwa`                   | `apps/pwa`                       | 3002    |
-| api                        | `Dockerfile.nest`  | `@iecp/api`                   | `services/api`                   | 4000    |
-| worker                     | `Dockerfile.nest`  | `@iecp/worker`                | `services/worker`                | (none)  |
-| notification-worker        | `Dockerfile.nest`  | `@iecp/notification-worker`   | `services/notification-worker`   | (none)  |
-| scheduler                  | `Dockerfile.nest`  | `@iecp/scheduler`             | `services/scheduler`             | (none)  |
+| Target              | Dockerfile        | `PACKAGE_NAME`              | `APP_PATH`                     | `PORT` |
+| ------------------- | ----------------- | --------------------------- | ------------------------------ | ------ |
+| storefront          | `Dockerfile.next` | `@iecp/storefront`          | `apps/storefront`              | 3000   |
+| admin               | `Dockerfile.next` | `@iecp/admin`               | `apps/admin`                   | 3001   |
+| pwa                 | `Dockerfile.next` | `@iecp/pwa`                 | `apps/pwa`                     | 3002   |
+| api                 | `Dockerfile.nest` | `@iecp/api`                 | `services/api`                 | 4000   |
+| worker              | `Dockerfile.nest` | `@iecp/worker`              | `services/worker`              | (none) |
+| notification-worker | `Dockerfile.nest` | `@iecp/notification-worker` | `services/notification-worker` | (none) |
+| scheduler           | `Dockerfile.nest` | `@iecp/scheduler`           | `services/scheduler`           | (none) |
 
 ```bash
 docker build \

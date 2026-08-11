@@ -3,12 +3,12 @@
 Shared `tsconfig.json` bases. All strict — this is the enforcement mechanism for the
 project rule "use TypeScript strict mode".
 
-| File                   | Extend from                          |
-| ----------------------- | ------------------------------------- |
-| `base.json`            | Universal strict flags (no lib/module/jsx — set by the environment-specific configs below) |
-| `nextjs.json`           | Next.js apps                          |
-| `nestjs.json`           | NestJS services                       |
-| `react-library.json`    | Shared React component packages       |
+| File                 | Extend from                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------ |
+| `base.json`          | Universal strict flags (no lib/module/jsx — set by the environment-specific configs below) |
+| `nextjs.json`        | Next.js apps                                                                               |
+| `nestjs.json`        | NestJS services                                                                            |
+| `react-library.json` | Shared React component packages                                                            |
 
 ## Usage
 
@@ -17,7 +17,7 @@ project rule "use TypeScript strict mode".
 {
   "extends": "@iecp/tsconfig/nextjs.json",
   "compilerOptions": { "paths": { "@/*": ["./src/*"] } },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"]
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
 }
 ```
 

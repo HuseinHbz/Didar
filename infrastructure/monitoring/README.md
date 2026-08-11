@@ -2,7 +2,7 @@
 
 ## ⚠️ Stub — nothing here is wired up yet
 
-`prometheus.yml` declares the *intended* scrape targets (blueprint §102), but no
+`prometheus.yml` declares the _intended_ scrape targets (blueprint §102), but no
 service currently exposes a `/metrics` endpoint, so none of them resolve to
 anything real. Nothing runs this config anywhere yet either — there's no
 Prometheus/Grafana service in `infrastructure/docker/docker-compose.yml`.

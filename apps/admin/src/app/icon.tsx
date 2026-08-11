@@ -6,24 +6,22 @@ export const contentType = 'image/png';
 // Generated icon — placeholder until the real brand mark exists (see packages/ui/README.md).
 export default function Icon() {
   return new ImageResponse(
-    (
-      <div
-        style={{
-          width: '100%',
-          height: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: '#2563eb',
-          color: '#fafafa',
-          fontSize: 16,
-          fontWeight: 700,
-          borderRadius: 6,
-        }}
-      >
-        A
-      </div>
-    ),
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: '#2563eb',
+        color: '#fafafa',
+        fontSize: 16,
+        fontWeight: 700,
+        borderRadius: 6,
+      }}
+    >
+      A
+    </div>,
     { ...size },
   );
 }

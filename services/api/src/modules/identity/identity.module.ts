@@ -7,9 +7,6 @@ import { IdentityController } from './presentation/identity.controller';
 
 @Module({
   controllers: [IdentityController],
-  providers: [
-    GetUserByIdUseCase,
-    { provide: USER_REPOSITORY, useClass: PrismaUserRepository },
-  ],
+  providers: [GetUserByIdUseCase, { provide: USER_REPOSITORY, useClass: PrismaUserRepository }],
 })
 export class IdentityModule {}

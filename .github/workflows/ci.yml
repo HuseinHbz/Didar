@@ -1,9 +1,16 @@
 name: CI
 
+# Enterprise quality gate (see docs/deployment/ci-pipeline.md): every push to
+# main/develop and every PR into them runs lint, test, security, and build as
+# four independently-reported jobs, then `quality-gate` requires all four to
+# have passed. Configure branch protection on `main`/`develop` to require the
+# `quality-gate` check — see that doc for exactly how and why.
+
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
+    branches: [main, develop]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -11,16 +18,17 @@ concurrency:
 
 env:
   # `prisma generate` (part of @iecp/database's build script, which every other
-  # package/app/service depends on via turbo.json's `dependsOn: ["^build"]")
+  # package/app/service depends on via turbo.json's `dependsOn: ["^build"]`)
   # resolves env("DATABASE_URL") at schema-parse time even though it never
-  # connects — a placeholder is enough for lint/typecheck/build. Real e2e tests
-  # that need a reachable Postgres set up their own service container/env below.
-  DATABASE_URL: "postgresql://iecp:iecp@localhost:5432/iecp?schema=public"
-  JWT_SECRET: "ci-placeholder-secret"
+  # connects — a placeholder is enough for lint/typecheck/build. The `test` job
+  # below points this at a real Postgres service container instead, for the
+  # integration suite that needs one to be reachable.
+  DATABASE_URL: 'postgresql://iecp:iecp@localhost:5432/iecp?schema=public'
+  JWT_SECRET: 'ci-placeholder-secret'
 
 jobs:
-  validate:
-    name: structure / lint / typecheck / build
+  lint:
+    name: lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,8 +37,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version-file: ".nvmrc"
-          cache: "pnpm"
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -38,19 +46,32 @@ jobs:
       - name: Validate repository structure
         run: pnpm validate:structure
 
-      - name: Lint
+      - name: ESLint
         run: pnpm lint
+
+      - name: Prettier check
+        run: pnpm format:check
 
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Build
-        run: pnpm build
-
   test:
-    name: unit tests
+    name: test
     runs-on: ubuntu-latest
-    needs: validate
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: iecp
+          POSTGRES_PASSWORD: iecp
+          POSTGRES_DB: iecp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U iecp -d iecp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -58,11 +79,82 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version-file: ".nvmrc"
-          cache: "pnpm"
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Unit tests
         run: pnpm test
+
+      - name: Sync database schema (no migration history yet — see docs/database/README.md)
+        run: pnpm --filter @iecp/database exec prisma db push --skip-generate
+
+      - name: Integration tests (services/api e2e, against real Postgres)
+        run: pnpm --filter @iecp/api test:e2e
+
+  security:
+    name: security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks scans history, not just the working tree
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Dependency scan (pnpm audit, high+critical only)
+        # `pnpm audit` fails the step itself on a match at/above --audit-level;
+        # low/moderate transitive advisories are common and often unactionable
+        # without an upstream fix, so they're reported, not gate-blocking.
+        run: pnpm audit --audit-level high
+
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend build (apps/*)
+        run: pnpm turbo run build --filter="./apps/*"
+
+      - name: Backend build (services/*)
+        run: pnpm turbo run build --filter="./services/*"
+
+  quality-gate:
+    name: quality gate
+    runs-on: ubuntu-latest
+    needs: [lint, test, security, build]
+    if: always()
+    steps:
+      - name: Require lint, test, security, and build to have all passed
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "One or more required checks failed — see the lint/test/security/build jobs above."
+            exit 1
+          fi
+          echo "All required checks passed."
