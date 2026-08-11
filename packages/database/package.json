@@ -27,6 +27,7 @@
     "typecheck": "prisma generate && tsc --noEmit",
     "migrate:dev": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
+    "migrate:rollback": "bash scripts/db-rollback.sh",
     "studio": "prisma studio",
     "seed": "tsx prisma/seed.ts"
   },

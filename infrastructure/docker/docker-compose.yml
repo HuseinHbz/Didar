@@ -12,6 +12,12 @@ services:
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
+    # POSTGRES_USER/PASSWORD here is the container's bootstrap superuser —
+    # its only job is running init/*.sql once against an empty volume.
+    # Nothing application-facing connects as `iecp`: 02-roles.sql (run by
+    # that bootstrap user) creates the two real roles every service and
+    # every migration actually uses — iecp_migrator and iecp_app. See
+    # docs/database/README.md#roles--least-privilege.
     environment:
       POSTGRES_USER: iecp
       POSTGRES_PASSWORD: iecp

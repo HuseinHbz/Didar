@@ -25,8 +25,8 @@ doesn't exist yet — it lands once its slice of the Phase 1 ERD is designed.
 ## Running locally
 
 ```bash
-cp .env.example .env                          # then point DATABASE_URL at a real Postgres
-pnpm --filter @iecp/database migrate:dev      # creates the `users` table
+cp .env.example .env                          # then point DATABASE_URL at a real Postgres (iecp_app role)
+pnpm --filter @iecp/database migrate:dev      # applies the schema (11 domain schemas, see docs/database/)
 pnpm --filter @iecp/api dev                   # http://localhost:4000/api/v1
 ```
 

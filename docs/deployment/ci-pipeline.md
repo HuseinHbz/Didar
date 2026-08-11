@@ -49,12 +49,12 @@ access is available, set on both `main` and `develop`:
 
 ## The four CI jobs
 
-| Job        | What it runs                                                                                                                                       | Why these two together                                                                                                                                                    |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lint`     | repo structure validation, ESLint, Prettier check, `tsc --noEmit`                                                                                  | All static analysis, no artifacts, fast fail                                                                                                                              |
-| `test`     | unit tests (`pnpm test`, every workspace), then integration tests (`services/api`'s e2e suite against a real ephemeral Postgres service container) | Unit tests need nothing external; the integration suite specifically needs a reachable DB, so it runs after and only in this job                                          |
-| `security` | `pnpm audit --audit-level high` (dependency scan), [gitleaks](https://github.com/gitleaks/gitleaks) (secret scan)                                  | Both are "did we introduce something we shouldn't have," independent of whether the code itself works                                                                     |
-| `build`    | `apps/*` (frontend) then `services/*` (backend), as two separate steps                                                                             | Turbo's dependency graph builds the shared `packages/*` each depends on automatically either way; splitting the steps just makes it obvious which side broke if one fails |
+| Job        | What it runs                                                                                                                                                                                                                                                                                       | Why these two together                                                                                                                                                    |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lint`     | repo structure validation, ESLint, Prettier check, `tsc --noEmit`                                                                                                                                                                                                                                  | All static analysis, no artifacts, fast fail                                                                                                                              |
+| `test`     | unit tests, then a real Postgres service container is bootstrapped (schemas + least-privilege roles, same `infrastructure/postgres/init/*.sql` every environment uses), migrated (`prisma migrate deploy`), and seeded — then `services/api`'s e2e suite runs against it under the `iecp_app` role | Unit tests need nothing external; the integration suite specifically needs a reachable, migrated, least-privilege-enforced DB — see `docs/database/README.md`             |
+| `security` | `pnpm audit --audit-level high` (dependency scan), [gitleaks](https://github.com/gitleaks/gitleaks) (secret scan)                                                                                                                                                                                  | Both are "did we introduce something we shouldn't have," independent of whether the code itself works                                                                     |
+| `build`    | `apps/*` (frontend) then `services/*` (backend), as two separate steps                                                                                                                                                                                                                             | Turbo's dependency graph builds the shared `packages/*` each depends on automatically either way; splitting the steps just makes it obvious which side broke if one fails |
 
 `apps/mobile` (Flutter) isn't in the `build` job — the Flutter SDK isn't part
 of this pipeline yet, and there's nothing to build without it. See
@@ -92,7 +92,12 @@ Every CI step has a local command — see root `README.md` and `CONTRIBUTING.md`
 
 ```bash
 pnpm validate:structure && pnpm lint && pnpm format:check && pnpm typecheck   # lint job
-pnpm test && pnpm --filter @iecp/database exec prisma db push --skip-generate && pnpm --filter @iecp/api test:e2e   # test job (needs local Postgres — see infrastructure/docker)
+pnpm test                                                                     # test job, part 1 (no DB needed)
+psql ... -f infrastructure/postgres/init/01-schemas.sql   # test job, part 2 — needs local Postgres, see
+psql ... -f infrastructure/postgres/init/02-roles.sql     # infrastructure/postgres/README.md for the one-time setup
+pnpm --filter @iecp/database migrate:deploy                                  # (as iecp_migrator)
+pnpm --filter @iecp/database seed                                            # (as iecp_migrator)
+pnpm --filter @iecp/api test:e2e                                             # (as iecp_app — DATABASE_URL points at it)
 pnpm audit --audit-level high                                                 # security job (dependency half)
 pnpm turbo run build --filter="./apps/*" && pnpm turbo run build --filter="./services/*"   # build job
 ```

@@ -21,9 +21,9 @@ env:
   # package/app/service depends on via turbo.json's `dependsOn: ["^build"]`)
   # resolves env("DATABASE_URL") at schema-parse time even though it never
   # connects — a placeholder is enough for lint/typecheck/build. The `test` job
-  # below points this at a real Postgres service container instead, for the
-  # integration suite that needs one to be reachable.
-  DATABASE_URL: 'postgresql://iecp:iecp@localhost:5432/iecp?schema=public'
+  # below overrides this at the job level with real iecp_migrator/iecp_app
+  # connection strings, for the steps that need a reachable Postgres.
+  DATABASE_URL: 'postgresql://iecp_app:change-me-app@localhost:5432/iecp?schema=public'
   JWT_SECRET: 'ci-placeholder-secret'
 
 jobs:
@@ -59,19 +59,35 @@ jobs:
     name: test
     runs-on: ubuntu-latest
     services:
+      # Bootstrapped as the superuser (`postgres`) so the "Bootstrap schemas
+      # and least-privilege roles" step below can create iecp_migrator/
+      # iecp_app the same way infrastructure/postgres/init/*.sql does for
+      # every other environment — nothing after that step connects as
+      # `postgres` again.
       postgres:
         image: postgres:17-alpine
         env:
-          POSTGRES_USER: iecp
-          POSTGRES_PASSWORD: iecp
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
           POSTGRES_DB: iecp
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U iecp -d iecp"
+          --health-cmd "pg_isready -U postgres -d iecp"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+    env:
+      # iecp_migrator: DDL — migrations and seed run under this role, same
+      # as local dev (packages/database/.env.example).
+      MIGRATOR_DATABASE_URL: 'postgresql://iecp_migrator:change-me-migrator@localhost:5432/iecp?schema=public'
+      # iecp_app: DML only — overrides the workflow-level placeholder for
+      # this job. services/api's e2e suite runs under this role on purpose:
+      # it's what production actually grants the running service, so a test
+      # that only passes with iecp_migrator's extra DDL rights would be
+      # masking a real deployment bug. See
+      # docs/database/README.md#roles--least-privilege.
+      DATABASE_URL: 'postgresql://iecp_app:change-me-app@localhost:5432/iecp?schema=public'
     steps:
       - uses: actions/checkout@v4
 
@@ -88,10 +104,24 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
-      - name: Sync database schema (no migration history yet — see docs/database/README.md)
-        run: pnpm --filter @iecp/database exec prisma db push --skip-generate
+      - name: Bootstrap schemas and least-privilege roles
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d iecp -f infrastructure/postgres/init/01-schemas.sql
+          psql -h localhost -U postgres -d iecp -f infrastructure/postgres/init/02-roles.sql
 
-      - name: Integration tests (services/api e2e, against real Postgres)
+      - name: Apply migrations (iecp_migrator)
+        run: pnpm --filter @iecp/database exec prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ env.MIGRATOR_DATABASE_URL }}
+
+      - name: Seed (regression check — fails if seed.ts drifts out of sync with schema.prisma)
+        run: pnpm --filter @iecp/database seed
+        env:
+          DATABASE_URL: ${{ env.MIGRATOR_DATABASE_URL }}
+
+      - name: Integration tests (services/api e2e, against real Postgres, iecp_app role)
         run: pnpm --filter @iecp/api test:e2e
 
   security:

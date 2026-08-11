@@ -45,6 +45,9 @@ coverage/
 infrastructure/postgres/data/
 infrastructure/redis/data/
 
+# Database backups (local dump files produced by infrastructure/postgres/scripts/backup.sh)
+infrastructure/postgres/backups/
+
 # Flutter
 apps/mobile/.dart_tool/
 apps/mobile/.flutter-plugins

@@ -1,44 +1,1378 @@
-// IECP database schema.
+// IECP database schema — Phase 1 foundation.
 //
-// This is intentionally NOT the full domain model yet. Per docs/product/blueprint.md
-// ("وضعیت فعلی" / Phase 1), the complete ERD — every table, column, type, PK/FK,
-// index, enum, and relation — is dedicated follow-up work, done deliberately rather
-// than improvised while scaffolding the repo. See docs/database/README.md.
+// Scope: this is the enterprise database FOUNDATION (per Phase 003's own
+// title), covering the primary entities across all 11 domain schemas — not
+// full coverage of every table docs/product/blueprint.md eventually wants.
+// Deliberately deferred for a later pass: procurement/supplier management,
+// retail/POS/appointments, full rule-engine promotions, the complete lens
+// pricing engine. See docs/database/README.md for exactly what's in vs. out
+// and why.
 //
-// What IS a real, load-bearing decision made here:
-//   1. PostgreSQL, one database, split into domain-based schemas (blueprint §4/§57)
-//      instead of one flat 400-table namespace.
-//   2. Conventions every future model follows: UUID primary keys (blueprint §58),
-//      `created_at`/`updated_at` audit timestamps, `deleted_at` soft delete
-//      (blueprint §59) for anything user- or business-facing.
-//
-// The `User` model below exists only to prove those conventions compile end to end
-// (`prisma generate`, migrations, multi-schema mapping) — it is a placeholder, not
-// the identity domain's real shape.
+// Conventions (see docs/database/README.md for the full rationale):
+//   - UUID primary keys everywhere (blueprint §58).
+//   - Money is always BigInt (Rial, integer, blueprint §90) — never Float.
+//   - "Lifecycle" entities (created, edited, eventually soft-deleted by a
+//     human) get the full createdAt/updatedAt/deletedAt trio.
+//   - Append-only records (a fact captured once, never edited) get
+//     createdAt only — a fabricated updatedAt/deletedAt on an immutable log
+//     row would be actively misleading, not extra compliance.
+//   - Pure join tables get a composite PK and createdAt only.
+//   - snake_case in Postgres (@@map/@map), camelCase/PascalCase in Prisma.
+//   - One PostgreSQL schema per business domain (multiSchema, GA since
+//     Prisma 6 — see the file-level note on the `schemas` line below).
 
 generator client {
   provider = "prisma-client-js"
 }
 
-// NOTE: multiSchema is GA as of Prisma 6 — no `previewFeatures` flag needed. The
-// `schemas` array must every schema any model's `@@schema(...)` refers to, and
-// (quirk confirmed against Prisma 6.19.3's parser) must be a single-line array —
-// a multi-line one fails with "not a valid definition within a datasource".
+// NOTE: `schemas` must be a single-line array — Prisma 6.19.3's parser
+// rejects a multi-line one here (confirmed the hard way in Phase 001; see
+// git history). Order matches docs/database/README.md, not creation order.
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["identity", "customer", "catalog", "commerce", "inventory", "procurement", "retail", "crm", "marketing", "cms", "finance", "communication", "analytics", "system"]
+  schemas  = ["identity", "customer", "catalog", "commerce", "inventory", "marketing", "cms", "finance", "notification", "analytics", "system"]
 }
 
-/// Placeholder — see file header. Full identity schema (users, credentials,
-/// sessions, devices, OTP, 2FA, roles/permissions) is Phase 1 work.
+// =============================================================================
+// Shared enums (declared once, used across schemas; each still needs its own
+// @@schema since Postgres enum types are schema-scoped)
+// =============================================================================
+
+enum OrderStatus {
+  CREATED
+  PAYMENT_PENDING
+  PAID
+  CONFIRMED
+  PROCESSING
+  PRESCRIPTION_REVIEW
+  LENS_PRODUCTION
+  QUALITY_CONTROL
+  PACKED
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  RETURN_REQUESTED
+  RETURN_APPROVED
+  RETURNED
+  REFUND_PENDING
+  REFUNDED
+
+  @@schema("commerce")
+}
+
+enum InventoryTransactionType {
+  PURCHASE
+  SALE
+  RESERVATION
+  RELEASE
+  TRANSFER_OUT
+  TRANSFER_IN
+  DAMAGE
+  ADJUSTMENT
+  RETURN
+  COUNT_ADJUSTMENT
+
+  @@schema("inventory")
+}
+
+enum NotificationChannel {
+  SMS
+  TELEGRAM
+  WHATSAPP
+  EMAIL
+  PUSH
+  IN_APP
+
+  @@schema("notification")
+}
+
+// =============================================================================
+// identity — users, credentials/sessions, OTP, RBAC (blueprint §5)
+// =============================================================================
+
 model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  phone           String    @unique
+  email           String?   @unique
+  passwordHash    String?   @map("password_hash")
+  isActive        Boolean   @default(true) @map("is_active")
+  phoneVerifiedAt DateTime? @map("phone_verified_at")
+  emailVerifiedAt DateTime? @map("email_verified_at")
+  lastLoginAt     DateTime? @map("last_login_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  sessions UserSession[]
+  roles    UserRole[]
+
+  @@map("users")
+  @@schema("identity")
+}
+
+/// Device/session tracking (blueprint §55/§56) — one row per active login.
+model UserSession {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  refreshTokenHash String    @unique @map("refresh_token_hash")
+  userAgent        String?   @map("user_agent")
+  ipAddress        String?   @map("ip_address")
+  expiresAt        DateTime  @map("expires_at")
+  revokedAt        DateTime? @map("revoked_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_sessions")
+  @@schema("identity")
+}
+
+/// Mobile OTP (blueprint §56: primary auth mechanism). Append-only — a
+/// consumed/expired code is never edited, only superseded by a new request.
+model OtpRequest {
+  id         String    @id @default(uuid()) @db.Uuid
+  phone      String
+  codeHash   String    @map("code_hash")
+  purpose    String // LOGIN | REGISTER | RESET_PASSWORD — kept as a string, not an enum, since new purposes are cheap to add and don't need a migration
+  attempts   Int       @default(0)
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([phone, purpose])
+  @@map("otp_requests")
+  @@schema("identity")
+}
+
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?
+  isSystem    Boolean  @default(false) @map("is_system")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  permissions RolePermission[]
+  users       UserRole[]
+
+  @@map("roles")
+  @@schema("identity")
+}
+
+/// e.g. key = "product.publish" (blueprint §53's fine-grained permission model).
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  roles RolePermission[]
+
+  @@map("permissions")
+  @@schema("identity")
+}
+
+model RolePermission {
+  roleId       String   @map("role_id") @db.Uuid
+  permissionId String   @map("permission_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+  @@schema("identity")
+}
+
+model UserRole {
+  userId    String   @map("user_id") @db.Uuid
+  roleId    String   @map("role_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+  @@schema("identity")
+}
+
+// =============================================================================
+// customer — the person, their addresses/family, and their loyalty/wallet
+// accounts (blueprint §6/§15/§32/§35, USPs #5-#6)
+// =============================================================================
+
+enum CustomerGender {
+  MALE
+  FEMALE
+  OTHER
+
+  @@schema("customer")
+}
+
+enum FamilyRelation {
+  SELF
+  SPOUSE
+  CHILD
+  PARENT
+  OTHER
+
+  @@schema("customer")
+}
+
+enum LoyaltyTier {
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+  VIP
+
+  @@schema("customer")
+}
+
+enum LoyaltyTransactionType {
+  EARN
+  REDEEM
+  EXPIRE
+  ADJUST
+
+  @@schema("customer")
+}
+
+enum WalletTransactionType {
+  CASHBACK
+  REFUND
+  GIFT
+  CREDIT
+  DEBIT
+  EXPIRATION
+
+  @@schema("customer")
+}
+
+model Customer {
+  id         String          @id @default(uuid()) @db.Uuid
+  userId     String          @unique @map("user_id") @db.Uuid
+  firstName  String          @map("first_name")
+  lastName   String          @map("last_name")
+  nationalId String?         @unique @map("national_id")
+  birthDate  DateTime?       @map("birth_date") @db.Date
+  gender     CustomerGender?
+  createdAt  DateTime        @default(now()) @map("created_at")
+  updatedAt  DateTime        @updatedAt @map("updated_at")
+  deletedAt  DateTime?       @map("deleted_at")
+
+  addresses      CustomerAddress[]
+  familyMembers  FamilyMember[]
+  segments       CustomerSegmentMember[]
+  loyaltyAccount LoyaltyAccount?
+  walletAccount  WalletAccount?
+
+  @@map("customers")
+  @@schema("customer")
+}
+
+model CustomerAddress {
+  id            String    @id @default(uuid()) @db.Uuid
+  customerId    String    @map("customer_id") @db.Uuid
+  label         String? // "خانه", "محل کار", ...
+  recipientName String    @map("recipient_name")
+  phone         String
+  province      String
+  city          String
+  addressLine1  String    @map("address_line1")
+  addressLine2  String?   @map("address_line2")
+  postalCode    String?   @map("postal_code")
+  isDefault     Boolean   @default(false) @map("is_default")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@map("customer_addresses")
+  @@schema("customer")
+}
+
+/// blueprint §15 — a family member is a lightweight profile, not necessarily
+/// its own User/Customer account (a child may never log in themselves).
+model FamilyMember {
+  id         String         @id @default(uuid()) @db.Uuid
+  customerId String         @map("customer_id") @db.Uuid
+  relation   FamilyRelation
+  firstName  String         @map("first_name")
+  lastName   String         @map("last_name")
+  birthDate  DateTime?      @map("birth_date") @db.Date
+  createdAt  DateTime       @default(now()) @map("created_at")
+  updatedAt  DateTime       @updatedAt @map("updated_at")
+  deletedAt  DateTime?      @map("deleted_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@map("family_members")
+  @@schema("customer")
+}
+
+/// blueprint §70 — segments are admin-defined (e.g. "VIP", "Cart Abandoner");
+/// membership is computed/assigned, not a fixed enum.
+model CustomerSegment {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique
+  name        String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  members CustomerSegmentMember[]
+
+  @@map("customer_segments")
+  @@schema("customer")
+}
+
+model CustomerSegmentMember {
+  customerId String   @map("customer_id") @db.Uuid
+  segmentId  String   @map("segment_id") @db.Uuid
+  addedAt    DateTime @default(now()) @map("added_at")
+
+  customer Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  segment  CustomerSegment @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+
+  @@id([customerId, segmentId])
+  @@map("customer_segment_members")
+  @@schema("customer")
+}
+
+/// blueprint §32 — points are a ledger (LoyaltyTransaction), not a single
+/// mutable counter; pointsBalance here is a maintained cache of the sum.
+model LoyaltyAccount {
+  id            String      @id @default(uuid()) @db.Uuid
+  customerId    String      @unique @map("customer_id") @db.Uuid
+  pointsBalance Int         @default(0) @map("points_balance")
+  tier          LoyaltyTier @default(BRONZE)
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  customer     Customer             @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  transactions LoyaltyTransaction[]
+
+  @@map("loyalty_accounts")
+  @@schema("customer")
+}
+
+model LoyaltyTransaction {
+  id               String                 @id @default(uuid()) @db.Uuid
+  loyaltyAccountId String                 @map("loyalty_account_id") @db.Uuid
+  type             LoyaltyTransactionType
+  points           Int
+  reason           String?
+  createdAt        DateTime               @default(now()) @map("created_at")
+
+  loyaltyAccount LoyaltyAccount @relation(fields: [loyaltyAccountId], references: [id], onDelete: Cascade)
+
+  @@index([loyaltyAccountId])
+  @@map("loyalty_transactions")
+  @@schema("customer")
+}
+
+/// blueprint §35/§116 — same ledger discipline as loyalty, in Rial.
+model WalletAccount {
+  id         String   @id @default(uuid()) @db.Uuid
+  customerId String   @unique @map("customer_id") @db.Uuid
+  balance    BigInt   @default(0)
+  currency   String   @default("IRR")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  customer     Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+
+  @@map("wallet_accounts")
+  @@schema("customer")
+}
+
+model WalletTransaction {
+  id              String                @id @default(uuid()) @db.Uuid
+  walletAccountId String                @map("wallet_account_id") @db.Uuid
+  type            WalletTransactionType
+  amount          BigInt
+  balanceAfter    BigInt                @map("balance_after")
+  reference       String?
+  createdAt       DateTime              @default(now()) @map("created_at")
+
+  walletAccount WalletAccount @relation(fields: [walletAccountId], references: [id], onDelete: Cascade)
+
+  @@index([walletAccountId])
+  @@map("wallet_transactions")
+  @@schema("customer")
+}
+
+// =============================================================================
+// catalog — products, variants, attributes/filters, brands/categories
+// (blueprint §7-§11)
+// =============================================================================
+
+enum ProductGender {
+  MALE
+  FEMALE
+  UNISEX
+  KIDS
+
+  @@schema("catalog")
+}
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+
+  @@schema("catalog")
+}
+
+model Brand {
   id        String    @id @default(uuid()) @db.Uuid
-  phone     String    @unique
+  name      String    @unique
+  slug      String    @unique
+  logoUrl   String?   @map("logo_url")
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
-  @@map("users")
-  @@schema("identity")
+  products Product[]
+
+  @@map("brands")
+  @@schema("catalog")
+}
+
+/// Self-referencing tree (blueprint §10).
+model Category {
+  id        String    @id @default(uuid()) @db.Uuid
+  parentId  String?   @map("parent_id") @db.Uuid
+  name      String
+  slug      String    @unique
+  imageUrl  String?   @map("image_url")
+  sortOrder Int       @default(0) @map("sort_order")
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  parent   Category?  @relation("CategoryToParent", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryToParent")
+  products Product[]
+
+  @@index([parentId])
+  @@map("categories")
+  @@schema("catalog")
+}
+
+model Product {
+  id          String         @id @default(uuid()) @db.Uuid
+  brandId     String         @map("brand_id") @db.Uuid
+  categoryId  String         @map("category_id") @db.Uuid
+  sku         String         @unique
+  name        String
+  slug        String         @unique
+  description String?
+  gender      ProductGender?
+  status      ProductStatus  @default(DRAFT)
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+  deletedAt   DateTime?      @map("deleted_at")
+
+  brand    Brand            @relation(fields: [brandId], references: [id])
+  category Category         @relation(fields: [categoryId], references: [id])
+  variants ProductVariant[]
+  images   ProductImage[]
+
+  @@index([brandId])
+  @@index([categoryId])
+  @@index([status])
+  @@map("products")
+  @@schema("catalog")
+}
+
+/// One product, many purchasable variants (e.g. color × size — blueprint §8).
+/// Inventory and pricing key off the variant, never the bare product.
+model ProductVariant {
+  id          String        @id @default(uuid()) @db.Uuid
+  productId   String        @map("product_id") @db.Uuid
+  sku         String        @unique
+  barcode     String?       @unique
+  color       String?
+  size        String?
+  weightGrams Int?          @map("weight_grams")
+  isDefault   Boolean       @default(false) @map("is_default")
+  status      ProductStatus @default(DRAFT)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  deletedAt   DateTime?     @map("deleted_at")
+
+  product         Product                        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  images          ProductImage[]
+  attributeValues ProductVariantAttributeValue[]
+
+  @@index([productId])
+  @@map("product_variants")
+  @@schema("catalog")
+}
+
+/// Attribute *definitions* (blueprint §9/§11: admin-defined, drives the
+/// Dynamic Filter Engine without a Frontend/Backend redeploy).
+model ProductAttribute {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       String   @unique // e.g. "frame_shape"
+  name      String // e.g. "شکل فریم"
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  values ProductAttributeValue[]
+
+  @@map("product_attributes")
+  @@schema("catalog")
+}
+
+model ProductAttributeValue {
+  id          String   @id @default(uuid()) @db.Uuid
+  attributeId String   @map("attribute_id") @db.Uuid
+  value       String // e.g. "Round"
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  attribute ProductAttribute               @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  variants  ProductVariantAttributeValue[]
+
+  @@unique([attributeId, value])
+  @@map("product_attribute_values")
+  @@schema("catalog")
+}
+
+model ProductVariantAttributeValue {
+  variantId        String   @map("variant_id") @db.Uuid
+  attributeValueId String   @map("attribute_value_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  variant        ProductVariant        @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  attributeValue ProductAttributeValue @relation(fields: [attributeValueId], references: [id], onDelete: Cascade)
+
+  @@id([variantId, attributeValueId])
+  @@map("product_variant_attribute_values")
+  @@schema("catalog")
+}
+
+model ProductImage {
+  id        String   @id @default(uuid()) @db.Uuid
+  productId String   @map("product_id") @db.Uuid
+  variantId String?  @map("variant_id") @db.Uuid
+  url       String
+  altText   String?  @map("alt_text")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  product Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@map("product_images")
+  @@schema("catalog")
+}
+
+/// blueprint §13 — minimal lookup tables only. The full lens configuration +
+/// compatibility engine (index, coating combinations, pricing rules) is
+/// deliberately out of scope for this foundation pass.
+model LensType {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("lens_types")
+  @@schema("catalog")
+}
+
+model LensCoating {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("lens_coatings")
+  @@schema("catalog")
+}
+
+// =============================================================================
+// inventory — warehouses, stock ledger, reservations (blueprint §23-§28)
+// =============================================================================
+
+enum ReservationStatus {
+  ACTIVE
+  RELEASED
+  CONSUMED
+
+  @@schema("inventory")
+}
+
+model Warehouse {
+  id        String    @id @default(uuid()) @db.Uuid
+  code      String    @unique
+  name      String
+  address   String?
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  items InventoryItem[]
+
+  @@map("warehouses")
+  @@schema("inventory")
+}
+
+/// blueprint §23 — stock/reserved/available are tracked explicitly;
+/// `available` is computed (stock - reserved), never stored redundantly.
+model InventoryItem {
+  id               String   @id @default(uuid()) @db.Uuid
+  warehouseId      String   @map("warehouse_id") @db.Uuid
+  productVariantId String   @map("product_variant_id") @db.Uuid
+  quantityOnHand   Int      @default(0) @map("quantity_on_hand")
+  quantityReserved Int      @default(0) @map("quantity_reserved")
+  reorderPoint     Int?     @map("reorder_point")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  warehouse    Warehouse              @relation(fields: [warehouseId], references: [id])
+  transactions InventoryTransaction[]
+  reservations StockReservation[]
+
+  @@unique([warehouseId, productVariantId])
+  @@index([productVariantId])
+  @@map("inventory_items")
+  @@schema("inventory")
+}
+
+/// blueprint §24/§27 — the ledger. `quantityOnHand` above is a maintained
+/// cache of the sum of these; this table is the source of truth for *why*.
+model InventoryTransaction {
+  id              String                   @id @default(uuid()) @db.Uuid
+  inventoryItemId String                   @map("inventory_item_id") @db.Uuid
+  type            InventoryTransactionType
+  quantityDelta   Int                      @map("quantity_delta")
+  reference       String? // e.g. an order id, a transfer id — not an FK, deliberately polymorphic
+  note            String?
+  createdBy       String?                  @map("created_by") @db.Uuid
+  createdAt       DateTime                 @default(now()) @map("created_at")
+
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id])
+
+  @@index([inventoryItemId])
+  @@map("inventory_transactions")
+  @@schema("inventory")
+}
+
+model StockReservation {
+  id              String            @id @default(uuid()) @db.Uuid
+  inventoryItemId String            @map("inventory_item_id") @db.Uuid
+  orderId         String?           @map("order_id") @db.Uuid
+  quantity        Int
+  status          ReservationStatus @default(ACTIVE)
+  expiresAt       DateTime?         @map("expires_at")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id])
+
+  @@index([inventoryItemId])
+  @@index([orderId])
+  @@map("stock_reservations")
+  @@schema("inventory")
+}
+
+// =============================================================================
+// commerce — cart, checkout, orders, payments (blueprint §16-§19, §24-§25)
+// =============================================================================
+
+enum CartStatus {
+  ACTIVE
+  CONVERTED
+  ABANDONED
+
+  @@schema("commerce")
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+
+  @@schema("commerce")
+}
+
+enum RefundStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+
+  @@schema("commerce")
+}
+
+model Cart {
+  id           String     @id @default(uuid()) @db.Uuid
+  customerId   String?    @map("customer_id") @db.Uuid // nullable — guest checkout (blueprint §115)
+  sessionToken String?    @unique @map("session_token")
+  status       CartStatus @default(ACTIVE)
+  currency     String     @default("IRR")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  items CartItem[]
+
+  @@index([customerId])
+  @@map("carts")
+  @@schema("commerce")
+}
+
+model CartItem {
+  id                String   @id @default(uuid()) @db.Uuid
+  cartId            String   @map("cart_id") @db.Uuid
+  productVariantId  String   @map("product_variant_id") @db.Uuid
+  quantity          Int
+  unitPriceSnapshot BigInt   @map("unit_price_snapshot")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  cart Cart @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, productVariantId])
+  @@map("cart_items")
+  @@schema("commerce")
+}
+
+/// blueprint §17/§25 — Order ≠ live Product: every price/name/sku field an
+/// order needs is snapshotted at creation (on OrderItem), never re-read from
+/// the live catalog. Status transitions are recorded in OrderStatusHistory,
+/// never silently overwritten.
+model Order {
+  id                      String      @id @default(uuid()) @db.Uuid
+  orderNumber             String      @unique @map("order_number")
+  customerId              String      @map("customer_id") @db.Uuid
+  status                  OrderStatus @default(CREATED)
+  currency                String      @default("IRR")
+  subtotal                BigInt
+  discountTotal           BigInt      @default(0) @map("discount_total")
+  taxTotal                BigInt      @default(0) @map("tax_total")
+  shippingTotal           BigInt      @default(0) @map("shipping_total")
+  grandTotal              BigInt      @map("grand_total")
+  shippingAddressSnapshot Json        @map("shipping_address_snapshot")
+  billingAddressSnapshot  Json?       @map("billing_address_snapshot")
+  placedAt                DateTime    @default(now()) @map("placed_at")
+  createdAt               DateTime    @default(now()) @map("created_at")
+  updatedAt               DateTime    @updatedAt @map("updated_at")
+  deletedAt               DateTime?   @map("deleted_at")
+
+  items         OrderItem[]
+  statusHistory OrderStatusHistory[]
+  payments      Payment[]
+
+  @@index([customerId])
+  @@index([status])
+  @@map("orders")
+  @@schema("commerce")
+}
+
+model OrderItem {
+  id                String   @id @default(uuid()) @db.Uuid
+  orderId           String   @map("order_id") @db.Uuid
+  productVariantId  String?  @map("product_variant_id") @db.Uuid // nullable: the variant may later be deleted; snapshot fields below carry the truth regardless
+  skuSnapshot       String   @map("sku_snapshot")
+  nameSnapshot      String   @map("name_snapshot")
+  unitPriceSnapshot BigInt   @map("unit_price_snapshot")
+  quantity          Int
+  lineTotal         BigInt   @map("line_total")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("order_items")
+  @@schema("commerce")
+}
+
+model OrderStatusHistory {
+  id         String       @id @default(uuid()) @db.Uuid
+  orderId    String       @map("order_id") @db.Uuid
+  fromStatus OrderStatus? @map("from_status")
+  toStatus   OrderStatus  @map("to_status")
+  changedBy  String?      @map("changed_by") @db.Uuid
+  note       String?
+  createdAt  DateTime     @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("order_status_history")
+  @@schema("commerce")
+}
+
+model Payment {
+  id             String        @id @default(uuid()) @db.Uuid
+  orderId        String        @map("order_id") @db.Uuid
+  provider       String // adapter name, e.g. "zarinpal" — see docs/product/blueprint.md §75
+  status         PaymentStatus @default(PENDING)
+  amount         BigInt
+  currency       String        @default("IRR")
+  transactionRef String?       @map("transaction_ref")
+  idempotencyKey String?       @unique @map("idempotency_key") // blueprint §67 — one payment per key, no double-charges on retry
+  paidAt         DateTime?     @map("paid_at")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  order   Order    @relation(fields: [orderId], references: [id])
+  refunds Refund[]
+
+  @@index([orderId])
+  @@map("payments")
+  @@schema("commerce")
+}
+
+model Refund {
+  id          String       @id @default(uuid()) @db.Uuid
+  paymentId   String       @map("payment_id") @db.Uuid
+  amount      BigInt
+  reason      String?
+  status      RefundStatus @default(PENDING)
+  requestedBy String?      @map("requested_by") @db.Uuid
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+
+  @@index([paymentId])
+  @@map("refunds")
+  @@schema("commerce")
+}
+
+// =============================================================================
+// marketing — coupons, promotions, campaigns (blueprint §33-§37, §69)
+// =============================================================================
+
+enum CouponType {
+  PERCENTAGE
+  FIXED_AMOUNT
+
+  @@schema("marketing")
+}
+
+enum CampaignChannel {
+  SMS
+  EMAIL
+  PUSH
+  IN_APP
+
+  @@schema("marketing")
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  COMPLETED
+  CANCELLED
+
+  @@schema("marketing")
+}
+
+model Coupon {
+  id                String     @id @default(uuid()) @db.Uuid
+  code              String     @unique
+  type              CouponType
+  value             BigInt // percentage (0-10000 basis points) or a Rial amount, per `type`
+  minOrderAmount    BigInt?    @map("min_order_amount")
+  maxDiscountAmount BigInt?    @map("max_discount_amount")
+  usageLimit        Int?       @map("usage_limit")
+  perUserLimit      Int?       @map("per_user_limit")
+  startsAt          DateTime?  @map("starts_at")
+  endsAt            DateTime?  @map("ends_at")
+  isActive          Boolean    @default(true) @map("is_active")
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+  deletedAt         DateTime?  @map("deleted_at")
+
+  redemptions CouponRedemption[]
+
+  @@map("coupons")
+  @@schema("marketing")
+}
+
+model CouponRedemption {
+  id             String   @id @default(uuid()) @db.Uuid
+  couponId       String   @map("coupon_id") @db.Uuid
+  orderId        String   @map("order_id") @db.Uuid
+  customerId     String   @map("customer_id") @db.Uuid
+  discountAmount BigInt   @map("discount_amount")
+  redeemedAt     DateTime @default(now()) @map("redeemed_at")
+
+  coupon Coupon @relation(fields: [couponId], references: [id])
+
+  @@index([couponId])
+  @@index([orderId])
+  @@index([customerId])
+  @@map("coupon_redemptions")
+  @@schema("marketing")
+}
+
+/// blueprint §14 — a basic, ruleless promotion (all-or-nothing % or fixed
+/// off, scoped to specific products). The full condition/rule engine
+/// (customer segment + category + cart-total conditions) is future work.
+model Promotion {
+  id            String     @id @default(uuid()) @db.Uuid
+  name          String
+  description   String?
+  discountType  CouponType @map("discount_type")
+  discountValue BigInt     @map("discount_value")
+  startsAt      DateTime   @map("starts_at")
+  endsAt        DateTime   @map("ends_at")
+  isActive      Boolean    @default(true) @map("is_active")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+  deletedAt     DateTime?  @map("deleted_at")
+
+  products PromotionProduct[]
+
+  @@map("promotions")
+  @@schema("marketing")
+}
+
+model PromotionProduct {
+  promotionId String   @map("promotion_id") @db.Uuid
+  productId   String   @map("product_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  promotion Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+
+  @@id([promotionId, productId])
+  @@map("promotion_products")
+  @@schema("marketing")
+}
+
+model Campaign {
+  id          String          @id @default(uuid()) @db.Uuid
+  name        String
+  key         String          @unique
+  channel     CampaignChannel
+  status      CampaignStatus  @default(DRAFT)
+  scheduledAt DateTime?       @map("scheduled_at")
+  startedAt   DateTime?       @map("started_at")
+  endedAt     DateTime?       @map("ended_at")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  @@map("campaigns")
+  @@schema("marketing")
+}
+
+// =============================================================================
+// cms — pages, content, navigation (blueprint §45-§49)
+// =============================================================================
+
+enum ContentStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+
+  @@schema("cms")
+}
+
+model Page {
+  id             String        @id @default(uuid()) @db.Uuid
+  slug           String        @unique
+  title          String
+  status         ContentStatus @default(DRAFT)
+  publishedAt    DateTime?     @map("published_at")
+  seoTitle       String?       @map("seo_title")
+  seoDescription String?       @map("seo_description")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  deletedAt      DateTime?     @map("deleted_at")
+
+  sections PageSection[]
+
+  @@map("pages")
+  @@schema("cms")
+}
+
+/// blueprint §46 — `type` + `config` (JSON) is the Section Builder: new
+/// section types are data, not a schema migration or a frontend redeploy.
+model PageSection {
+  id        String   @id @default(uuid()) @db.Uuid
+  pageId    String   @map("page_id") @db.Uuid
+  type      String // "Hero" | "ProductCarousel" | "Banner" | ...
+  sortOrder Int      @default(0) @map("sort_order")
+  config    Json
+  isVisible Boolean  @default(true) @map("is_visible")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  page Page @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@index([pageId])
+  @@map("page_sections")
+  @@schema("cms")
+}
+
+model Banner {
+  id        String    @id @default(uuid()) @db.Uuid
+  title     String
+  imageUrl  String    @map("image_url")
+  linkUrl   String?   @map("link_url")
+  placement String // "HOME_HERO" | "CATEGORY_TOP" | ... — free-form, admin-managed
+  startsAt  DateTime? @map("starts_at")
+  endsAt    DateTime? @map("ends_at")
+  sortOrder Int       @default(0) @map("sort_order")
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@map("banners")
+  @@schema("cms")
+}
+
+model Article {
+  id            String        @id @default(uuid()) @db.Uuid
+  slug          String        @unique
+  title         String
+  excerpt       String?
+  contentHtml   String        @map("content_html")
+  coverImageUrl String?       @map("cover_image_url")
+  authorId      String?       @map("author_id") @db.Uuid
+  status        ContentStatus @default(DRAFT)
+  publishedAt   DateTime?     @map("published_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  deletedAt     DateTime?     @map("deleted_at")
+
+  @@map("articles")
+  @@schema("cms")
+}
+
+model Menu {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       String   @unique // "header" | "footer" | ...
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  items MenuItem[]
+
+  @@map("menus")
+  @@schema("cms")
+}
+
+model MenuItem {
+  id        String   @id @default(uuid()) @db.Uuid
+  menuId    String   @map("menu_id") @db.Uuid
+  parentId  String?  @map("parent_id") @db.Uuid
+  label     String
+  url       String
+  sortOrder Int      @default(0) @map("sort_order")
+  isVisible Boolean  @default(true) @map("is_visible")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  menu     Menu       @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  parent   MenuItem?  @relation("MenuItemToParent", fields: [parentId], references: [id])
+  children MenuItem[] @relation("MenuItemToParent")
+
+  @@index([menuId])
+  @@map("menu_items")
+  @@schema("cms")
+}
+
+model Faq {
+  id        String   @id @default(uuid()) @db.Uuid
+  question  String
+  answer    String
+  category  String?
+  sortOrder Int      @default(0) @map("sort_order")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("faqs")
+  @@schema("cms")
+}
+
+// =============================================================================
+// finance — pricing (kept independent of catalog per blueprint §12), price
+// history, invoices (blueprint §12-§13, §39)
+// =============================================================================
+
+/// blueprint §12 — Pricing is its own domain, not a bare column on Product.
+/// Exactly one active price row per variant; changes go through
+/// PriceHistory, never a silent overwrite.
+model ProductPrice {
+  id               String   @id @default(uuid()) @db.Uuid
+  productVariantId String   @unique @map("product_variant_id") @db.Uuid
+  basePrice        BigInt   @map("base_price")
+  costPrice        BigInt?  @map("cost_price")
+  currency         String   @default("IRR")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("product_prices")
+  @@schema("finance")
+}
+
+/// blueprint §13 — append-only, mirrors the exact example in the blueprint
+/// (SKU, old price, new price, changed by, reason).
+model PriceHistory {
+  id               String   @id @default(uuid()) @db.Uuid
+  productVariantId String   @map("product_variant_id") @db.Uuid
+  oldPrice         BigInt?  @map("old_price")
+  newPrice         BigInt   @map("new_price")
+  changedBy        String?  @map("changed_by") @db.Uuid
+  reason           String?
+  changedAt        DateTime @default(now()) @map("changed_at")
+
+  @@index([productVariantId])
+  @@map("price_history")
+  @@schema("finance")
+}
+
+model Invoice {
+  id            String   @id @default(uuid()) @db.Uuid
+  orderId       String   @unique @map("order_id") @db.Uuid
+  invoiceNumber String   @unique @map("invoice_number")
+  issuedAt      DateTime @default(now()) @map("issued_at")
+  subtotal      BigInt
+  taxTotal      BigInt   @default(0) @map("tax_total")
+  grandTotal    BigInt   @map("grand_total")
+  pdfUrl        String?  @map("pdf_url")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  lines InvoiceLine[]
+
+  @@map("invoices")
+  @@schema("finance")
+}
+
+model InvoiceLine {
+  id          String @id @default(uuid()) @db.Uuid
+  invoiceId   String @map("invoice_id") @db.Uuid
+  description String
+  quantity    Int
+  unitPrice   BigInt @map("unit_price")
+  lineTotal   BigInt @map("line_total")
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_lines")
+  @@schema("finance")
+}
+
+// =============================================================================
+// notification — templates, delivery log, per-customer channel consent
+// (blueprint §38-§44, §75)
+// =============================================================================
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  FAILED
+  DELIVERED
+
+  @@schema("notification")
+}
+
+/// blueprint §44 — `body` holds `{{variable}}` placeholders; admin-editable,
+/// no code deploy needed to change copy.
+model NotificationTemplate {
+  id        String              @id @default(uuid()) @db.Uuid
+  key       String              @unique // "ORDER_CREATED", "OTP", ...
+  channel   NotificationChannel
+  subject   String?
+  body      String
+  isActive  Boolean             @default(true) @map("is_active")
+  createdAt DateTime            @default(now()) @map("created_at")
+  updatedAt DateTime            @updatedAt @map("updated_at")
+
+  logs NotificationLog[]
+
+  @@map("notification_templates")
+  @@schema("notification")
+}
+
+model NotificationLog {
+  id           String              @id @default(uuid()) @db.Uuid
+  templateId   String?             @map("template_id") @db.Uuid
+  channel      NotificationChannel
+  recipient    String
+  customerId   String?             @map("customer_id") @db.Uuid
+  status       NotificationStatus  @default(QUEUED)
+  providerRef  String?             @map("provider_ref")
+  errorMessage String?             @map("error_message")
+  sentAt       DateTime?           @map("sent_at")
+  createdAt    DateTime            @default(now()) @map("created_at")
+
+  template NotificationTemplate? @relation(fields: [templateId], references: [id])
+
+  @@index([customerId])
+  @@index([status])
+  @@map("notification_logs")
+  @@schema("notification")
+}
+
+/// blueprint §75 — explicit per-channel consent, checked before every send.
+model NotificationPreference {
+  id              String   @id @default(uuid()) @db.Uuid
+  customerId      String   @unique @map("customer_id") @db.Uuid
+  smsEnabled      Boolean  @default(true) @map("sms_enabled")
+  emailEnabled    Boolean  @default(true) @map("email_enabled")
+  pushEnabled     Boolean  @default(true) @map("push_enabled")
+  whatsappEnabled Boolean  @default(true) @map("whatsapp_enabled")
+  telegramEnabled Boolean  @default(true) @map("telegram_enabled")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("notification_preferences")
+  @@schema("notification")
+}
+
+// =============================================================================
+// analytics — event capture (blueprint §67-§68)
+// =============================================================================
+
+/// One generic, append-only event table rather than a bespoke table per
+/// event type — `eventType` + `metadata` (JSON) covers product views,
+/// searches, filters, cart actions, etc. Promote a specific event type to
+/// its own structured table only once it needs real relational querying.
+model AnalyticsEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  eventType  String   @map("event_type") // "PRODUCT_VIEW" | "SEARCH" | "ADD_TO_CART" | ...
+  customerId String?  @map("customer_id") @db.Uuid
+  sessionId  String?  @map("session_id")
+  productId  String?  @map("product_id") @db.Uuid
+  orderId    String?  @map("order_id") @db.Uuid
+  metadata   Json?
+  occurredAt DateTime @map("occurred_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([eventType, occurredAt])
+  @@index([customerId])
+  @@map("analytics_events")
+  @@schema("analytics")
+}
+
+// =============================================================================
+// system — audit log, API keys, webhooks, feature flags, settings
+// (blueprint §54-§55, §86-§87)
+// =============================================================================
+
+enum WebhookDeliveryStatus {
+  PENDING
+  SUCCESS
+  FAILED
+
+  @@schema("system")
+}
+
+/// blueprint §54 — the append-only "who changed what" record. Every
+/// sensitive mutation (price change, role change, refund approval, ...)
+/// should write one of these; nothing here is ever updated after insert.
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @map("actor_id") @db.Uuid
+  actorIp    String?  @map("actor_ip")
+  action     String // "PRODUCT_PRICE_CHANGED", "ROLE_ASSIGNED", ...
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  oldValue   Json?    @map("old_value")
+  newValue   Json?    @map("new_value")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@map("audit_logs")
+  @@schema("system")
+}
+
+model ApiKey {
+  id         String    @id @default(uuid()) @db.Uuid
+  name       String
+  keyHash    String    @unique @map("key_hash")
+  ownerId    String?   @map("owner_id") @db.Uuid
+  scopes     String[]
+  lastUsedAt DateTime? @map("last_used_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  @@map("api_keys")
+  @@schema("system")
+}
+
+model Webhook {
+  id        String   @id @default(uuid()) @db.Uuid
+  url       String
+  secret    String
+  events    String[]
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  deliveries WebhookDelivery[]
+
+  @@map("webhooks")
+  @@schema("system")
+}
+
+model WebhookDelivery {
+  id          String                @id @default(uuid()) @db.Uuid
+  webhookId   String                @map("webhook_id") @db.Uuid
+  event       String
+  payload     Json
+  status      WebhookDeliveryStatus @default(PENDING)
+  attempt     Int                   @default(1)
+  respondedAt DateTime?             @map("responded_at")
+  createdAt   DateTime              @default(now()) @map("created_at")
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId])
+  @@map("webhook_deliveries")
+  @@schema("system")
+}
+
+model FeatureFlag {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique
+  name        String
+  description String?
+  isEnabled   Boolean  @default(false) @map("is_enabled")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("feature_flags")
+  @@schema("system")
+}
+
+/// blueprint §87 — generic key-value store for business settings (company
+/// info, order/payment/shipping/SEO config, ...). `value` is JSON so the
+/// shape is whatever that setting needs, not a fixed column set.
+model Setting {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique
+  value       Json
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
+  @@schema("system")
 }
