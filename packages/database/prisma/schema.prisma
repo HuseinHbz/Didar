@@ -570,8 +570,12 @@ model WalletTransaction {
 }
 
 // =============================================================================
-// catalog — products, variants, attributes/filters, brands/categories
-// (blueprint §7-§11)
+// catalog — brands, categories, collections, products, variants, SKUs,
+// attributes/filters, media (blueprint §7-§13). Phase 005 — see
+// docs/adr/ADR-005-catalog-architecture.md for why variant and SKU are two
+// different models (decision 1), why SEO/AR fields are typed JSON columns
+// (decision 3), and why dynamic collections store a narrow rule bag instead
+// of a general rule engine (decision 4).
 // =============================================================================
 
 enum ProductGender {
@@ -583,8 +587,93 @@ enum ProductGender {
   @@schema("catalog")
 }
 
-enum ProductStatus {
+/// blueprint §7 / Phase 005 `business_context.product_domain`.
+enum ProductType {
+  EYEGLASSES
+  SUNGLASSES
+  COMPUTER_GLASSES
+  READING_GLASSES
+  CONTACT_LENSES
+  OPTICAL_FRAME
+  LENS
+  ACCESSORY
+
+  @@schema("catalog")
+}
+
+/// Product publication state machine (Phase 005 `product_lifecycle`),
+/// enforced by ProductLifecycleStateMachine (domain layer) before it ever
+/// reaches the database — see services/api/src/modules/catalog/README.md.
+enum ProductLifecycleStatus {
   DRAFT
+  IN_REVIEW
+  APPROVED
+  PUBLISHED
+  UNPUBLISHED
+  ARCHIVED
+
+  @@schema("catalog")
+}
+
+/// Simple on/off switch for merchandising entities that don't need the full
+/// product publication workflow (brand, category, collection, variant).
+enum CatalogStatus {
+  ACTIVE
+  INACTIVE
+
+  @@schema("catalog")
+}
+
+/// DISCONTINUED is distinct from INACTIVE: a discontinued SKU stays
+/// queryable (existing orders/inventory history still reference it) but can
+/// never be reactivated for sale the way a merely-inactive one can.
+enum SkuStatus {
+  ACTIVE
+  INACTIVE
+  DISCONTINUED
+
+  @@schema("catalog")
+}
+
+enum CollectionType {
+  MANUAL
+  DYNAMIC
+
+  @@schema("catalog")
+}
+
+/// Storage abstraction (ADR-005 decision 3) — the catalog domain never
+/// imports a specific object-storage SDK; swapping providers is a new value
+/// here plus a new infrastructure/storage adapter, not a schema change.
+enum MediaProvider {
+  LOCAL
+  S3
+  CDN
+
+  @@schema("catalog")
+}
+
+enum MediaKind {
+  IMAGE
+  VIDEO
+  MODEL_3D
+  AR_ASSET
+
+  @@schema("catalog")
+}
+
+enum MediaRole {
+  PRIMARY
+  GALLERY
+  THUMBNAIL
+  SWATCH
+  VIDEO
+  MODEL_3D
+
+  @@schema("catalog")
+}
+
+enum MediaStatus {
   ACTIVE
   ARCHIVED
 
@@ -592,86 +681,191 @@ enum ProductStatus {
 }
 
 model Brand {
-  id        String    @id @default(uuid()) @db.Uuid
-  name      String    @unique
-  slug      String    @unique
-  logoUrl   String?   @map("logo_url")
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
-  deletedAt DateTime? @map("deleted_at")
+  id            String        @id @default(uuid()) @db.Uuid
+  name          String        @unique
+  slug          String        @unique
+  /// `{ "fa": "...", "en": "..." }` — see ADR-005 decision 3.
+  localizedName Json?         @map("localized_name")
+  description   String?
+  logoMediaId   String?       @map("logo_media_id") @db.Uuid
+  status        CatalogStatus @default(ACTIVE)
+  sortOrder     Int           @default(0) @map("sort_order")
+  /// title/metaDescription/canonicalUrl/ogImage/noIndex — see ADR-005 decision 3.
+  seo           Json?
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  deletedAt     DateTime?     @map("deleted_at")
 
-  products Product[]
+  logoMedia Media?    @relation("BrandLogo", fields: [logoMediaId], references: [id])
+  products  Product[]
 
+  @@index([status])
   @@map("brands")
   @@schema("catalog")
 }
 
-/// Self-referencing tree (blueprint §10).
+/// Self-referencing tree, unlimited depth (blueprint §10). `status` is the
+/// active/inactive switch; `publishedAt` is the separate "is this browsable
+/// on the storefront" gate the brief asks for (null = not published).
 model Category {
-  id        String    @id @default(uuid()) @db.Uuid
-  parentId  String?   @map("parent_id") @db.Uuid
-  name      String
-  slug      String    @unique
-  imageUrl  String?   @map("image_url")
-  sortOrder Int       @default(0) @map("sort_order")
-  isActive  Boolean   @default(true) @map("is_active")
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
-  deletedAt DateTime? @map("deleted_at")
+  id            String        @id @default(uuid()) @db.Uuid
+  parentId      String?       @map("parent_id") @db.Uuid
+  name          String
+  slug          String        @unique
+  localizedName Json?         @map("localized_name")
+  description   String?
+  imageMediaId  String?       @map("image_media_id") @db.Uuid
+  sortOrder     Int           @default(0) @map("sort_order")
+  status        CatalogStatus @default(ACTIVE)
+  publishedAt   DateTime?     @map("published_at")
+  seo           Json?
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  deletedAt     DateTime?     @map("deleted_at")
 
-  parent   Category?  @relation("CategoryToParent", fields: [parentId], references: [id])
-  children Category[] @relation("CategoryToParent")
-  products Product[]
+  parent     Category?  @relation("CategoryToParent", fields: [parentId], references: [id])
+  children   Category[] @relation("CategoryToParent")
+  imageMedia Media?     @relation("CategoryImage", fields: [imageMediaId], references: [id])
+  products   Product[]
 
   @@index([parentId])
+  @@index([status])
   @@map("categories")
   @@schema("catalog")
 }
 
-model Product {
-  id          String         @id @default(uuid()) @db.Uuid
-  brandId     String         @map("brand_id") @db.Uuid
-  categoryId  String         @map("category_id") @db.Uuid
-  sku         String         @unique
-  name        String
-  slug        String         @unique
-  description String?
-  gender      ProductGender?
-  status      ProductStatus  @default(DRAFT)
-  createdAt   DateTime       @default(now()) @map("created_at")
-  updatedAt   DateTime       @updatedAt @map("updated_at")
-  deletedAt   DateTime?      @map("deleted_at")
+/// Manual (explicit `CollectionProduct` membership) or dynamic (`rules`
+/// evaluated at query time by CollectionRuleEvaluator — see ADR-005 decision
+/// 4; not a general rule engine, a fixed filter shape).
+model Collection {
+  id            String         @id @default(uuid()) @db.Uuid
+  name          String
+  slug          String         @unique
+  localizedName Json?          @map("localized_name")
+  description   String?
+  type          CollectionType @default(MANUAL)
+  /// Only read when type = DYNAMIC: `{ brandId?, categoryId?, tags?, gender?, productType? }`.
+  rules         Json?
+  priority      Int            @default(0)
+  startAt       DateTime?      @map("start_at")
+  endAt         DateTime?      @map("end_at")
+  status        CatalogStatus  @default(ACTIVE)
+  publishedAt   DateTime?      @map("published_at")
+  imageMediaId  String?        @map("image_media_id") @db.Uuid
+  seo           Json?
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  deletedAt     DateTime?      @map("deleted_at")
 
-  brand    Brand            @relation(fields: [brandId], references: [id])
-  category Category         @relation(fields: [categoryId], references: [id])
-  variants ProductVariant[]
-  images   ProductImage[]
+  imageMedia Media?              @relation("CollectionImage", fields: [imageMediaId], references: [id])
+  products   CollectionProduct[]
+
+  @@index([type])
+  @@index([status])
+  @@map("collections")
+  @@schema("catalog")
+}
+
+/// MANUAL collection membership, with its own admin-controlled sort order
+/// independent of the product's own catalog position.
+model CollectionProduct {
+  collectionId String   @map("collection_id") @db.Uuid
+  productId    String   @map("product_id") @db.Uuid
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  product    Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([collectionId, productId])
+  @@index([productId])
+  @@map("collection_products")
+  @@schema("catalog")
+}
+
+/// The merchandising aggregate root. Not itself sellable/priced/inventoried
+/// — see ProductVariant/ProductSku below (ADR-005 decision 1). Status is
+/// ProductLifecycleStatus, driven only through ProductLifecycleStateMachine.
+model Product {
+  id                String                 @id @default(uuid()) @db.Uuid
+  productType       ProductType            @map("product_type")
+  brandId           String                 @map("brand_id") @db.Uuid
+  categoryId        String                 @map("category_id") @db.Uuid
+  name              String
+  slug              String                 @unique
+  localizedName     Json?                  @map("localized_name")
+  shortDescription  String?                @map("short_description")
+  longDescription   String?                @map("long_description")
+  /// Free-form spec sheet (varies hugely by productType — frame vs. contact
+  /// lens), e.g. `{ "lensWidth": "52mm", "material": "acetate" }`.
+  specifications    Json?
+  tags              String[]               @default([])
+  status            ProductLifecycleStatus @default(DRAFT)
+  reviewedBy        String?                @map("reviewed_by") @db.Uuid
+  approvedBy        String?                @map("approved_by") @db.Uuid
+  approvedAt        DateTime?              @map("approved_at")
+  publishedAt       DateTime?              @map("published_at")
+  unpublishedAt     DateTime?              @map("unpublished_at")
+  archivedAt        DateTime?              @map("archived_at")
+  /// AR-readiness (Phase 005 `ar_readiness` — schema only, no AR engine).
+  arModelMediaId    String?                @map("ar_model_media_id") @db.Uuid
+  faceTryOnMetadata Json?                  @map("face_try_on_metadata")
+  seo               Json?
+  createdAt         DateTime               @default(now()) @map("created_at")
+  updatedAt         DateTime               @updatedAt @map("updated_at")
+  deletedAt         DateTime?              @map("deleted_at")
+
+  brand        Brand               @relation(fields: [brandId], references: [id])
+  category     Category            @relation(fields: [categoryId], references: [id])
+  arModelMedia Media?              @relation("ProductArModel", fields: [arModelMediaId], references: [id])
+  variants     ProductVariant[]
+  skus         ProductSku[]
+  media        ProductMedia[]
+  collections  CollectionProduct[]
 
   @@index([brandId])
   @@index([categoryId])
   @@index([status])
+  @@index([productType])
   @@map("products")
   @@schema("catalog")
 }
 
-/// One product, many purchasable variants (e.g. color × size — blueprint §8).
-/// Inventory and pricing key off the variant, never the bare product.
+/// One product, many merchandising configurations (e.g. color × size —
+/// blueprint §8). Carries the optical measurement/merchandising attributes;
+/// deliberately has no price/cost/barcode — see ProductSku and ADR-005
+/// decision 1. A variant can exist without a SKU yet (draft authoring
+/// workflow); it cannot be sold until one exists.
 model ProductVariant {
-  id          String        @id @default(uuid()) @db.Uuid
-  productId   String        @map("product_id") @db.Uuid
-  sku         String        @unique
-  barcode     String?       @unique
-  color       String?
-  size        String?
-  weightGrams Int?          @map("weight_grams")
-  isDefault   Boolean       @default(false) @map("is_default")
-  status      ProductStatus @default(DRAFT)
-  createdAt   DateTime      @default(now()) @map("created_at")
-  updatedAt   DateTime      @updatedAt @map("updated_at")
-  deletedAt   DateTime?     @map("deleted_at")
+  id                String         @id @default(uuid()) @db.Uuid
+  productId         String         @map("product_id") @db.Uuid
+  label             String?
+  color             String?
+  colorHex          String?        @map("color_hex")
+  size              String?
+  frameShape        String?        @map("frame_shape")
+  frameMaterial     String?        @map("frame_material")
+  frameWidthMm      Int?           @map("frame_width_mm")
+  bridgeWidthMm     Int?           @map("bridge_width_mm")
+  templeLengthMm    Int?           @map("temple_length_mm")
+  lensWidthMm       Int?           @map("lens_width_mm")
+  fit               String?
+  gender            ProductGender?
+  style             String?
+  /// Tag references into LensType.name / LensCoating.name — not an FK
+  /// (a variant can list compatibility with lens options that are still
+  /// lookup-table rows, see LensType's own doc comment).
+  lensCompatibility String[]       @default([]) @map("lens_compatibility")
+  isDefault         Boolean        @default(false) @map("is_default")
+  status            CatalogStatus  @default(ACTIVE)
+  sortOrder         Int            @default(0) @map("sort_order")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+  deletedAt         DateTime?      @map("deleted_at")
 
   product         Product                        @relation(fields: [productId], references: [id], onDelete: Cascade)
-  images          ProductImage[]
+  sku             ProductSku?
+  media           ProductMedia[]
   attributeValues ProductVariantAttributeValue[]
 
   @@index([productId])
@@ -679,14 +873,55 @@ model ProductVariant {
   @@schema("catalog")
 }
 
+/// The sellable/priced/inventoried unit (ADR-005 decision 1). Exactly one
+/// SKU per variant this pass (`variantId` unique) — see that ADR's
+/// "Deferred" section for why multi-SKU-per-variant isn't built yet. Cost
+/// and base/compare-at price deliberately live on `finance.ProductPrice`,
+/// not here — "pricing is its own domain, not a bare column" (that model's
+/// own doc comment) applies to SKU exactly as it did to the old
+/// `ProductVariant`. `finance.ProductPrice`/`PriceHistory` and
+/// `inventory.InventoryItem` key off `id` here (as a plain, unenforced
+/// cross-schema column — see docs/database/README.md's "Cross-schema
+/// references are intentionally unenforced").
+model ProductSku {
+  id                 String    @id @default(uuid()) @db.Uuid
+  productId          String    @map("product_id") @db.Uuid
+  variantId          String    @unique @map("variant_id") @db.Uuid
+  skuCode            String    @unique @map("sku_code")
+  barcode            String?   @unique
+  status             SkuStatus @default(ACTIVE)
+  weightGrams        Int?      @map("weight_grams")
+  lengthMm           Int?      @map("length_mm")
+  widthMm            Int?      @map("width_mm")
+  heightMm           Int?      @map("height_mm")
+  /// Integer basis points (e.g. 900 = 9.00%) — same convention as
+  /// `packages/types`' `Money.applyBasisPoints`, never a float.
+  taxRateBasisPoints Int?      @map("tax_rate_basis_points")
+  supplierRef        String?   @map("supplier_ref")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  deletedAt          DateTime? @map("deleted_at")
+
+  product Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([status])
+  @@map("product_skus")
+  @@schema("catalog")
+}
+
 /// Attribute *definitions* (blueprint §9/§11: admin-defined, drives the
-/// Dynamic Filter Engine without a Frontend/Backend redeploy).
+/// Dynamic Filter Engine without a Frontend/Backend redeploy) — for
+/// open-ended tags the fixed ProductVariant columns don't cover.
 model ProductAttribute {
-  id        String   @id @default(uuid()) @db.Uuid
-  key       String   @unique // e.g. "frame_shape"
-  name      String // e.g. "شکل فریم"
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id            String   @id @default(uuid()) @db.Uuid
+  key           String   @unique // e.g. "frame_shape"
+  name          String // e.g. "شکل فریم"
+  localizedName Json?    @map("localized_name")
+  isFilterable  Boolean  @default(true) @map("is_filterable")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   values ProductAttributeValue[]
 
@@ -695,11 +930,12 @@ model ProductAttribute {
 }
 
 model ProductAttributeValue {
-  id          String   @id @default(uuid()) @db.Uuid
-  attributeId String   @map("attribute_id") @db.Uuid
-  value       String // e.g. "Round"
-  sortOrder   Int      @default(0) @map("sort_order")
-  createdAt   DateTime @default(now()) @map("created_at")
+  id             String   @id @default(uuid()) @db.Uuid
+  attributeId    String   @map("attribute_id") @db.Uuid
+  value          String // e.g. "Round"
+  localizedValue Json?    @map("localized_value")
+  sortOrder      Int      @default(0) @map("sort_order")
+  createdAt      DateTime @default(now()) @map("created_at")
 
   attribute ProductAttribute               @relation(fields: [attributeId], references: [id], onDelete: Cascade)
   variants  ProductVariantAttributeValue[]
@@ -722,41 +958,85 @@ model ProductVariantAttributeValue {
   @@schema("catalog")
 }
 
-model ProductImage {
-  id        String   @id @default(uuid()) @db.Uuid
-  productId String   @map("product_id") @db.Uuid
-  variantId String?  @map("variant_id") @db.Uuid
-  url       String
-  altText   String?  @map("alt_text")
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
+/// Storage-agnostic media asset (ADR-005 decision 3). `provider` +
+/// `storageKey` are the abstraction seam; nothing in this domain imports an
+/// S3/CDN SDK directly. `kind = MODEL_3D | AR_ASSET` is the AR-readiness
+/// hook (`Product.arModelMediaId`) — no AR engine reads it yet.
+model Media {
+  id         String        @id @default(uuid()) @db.Uuid
+  provider   MediaProvider @default(LOCAL)
+  storageKey String        @unique @map("storage_key")
+  url        String
+  kind       MediaKind
+  mimeType   String        @map("mime_type")
+  width      Int?
+  height     Int?
+  durationMs Int?          @map("duration_ms")
+  checksum   String?
+  altText    Json?         @map("alt_text")
+  status     MediaStatus   @default(ACTIVE)
+  createdAt  DateTime      @default(now()) @map("created_at")
+  updatedAt  DateTime      @updatedAt @map("updated_at")
+  deletedAt  DateTime?     @map("deleted_at")
+
+  brandLogos       Brand[]        @relation("BrandLogo")
+  categoryImages   Category[]     @relation("CategoryImage")
+  collectionImages Collection[]   @relation("CollectionImage")
+  arModelProducts  Product[]      @relation("ProductArModel")
+  productMedia     ProductMedia[]
+
+  @@index([kind])
+  @@index([status])
+  @@map("media")
+  @@schema("catalog")
+}
+
+/// Attaches a Media asset to a product (`variantId = null`) or to one
+/// specific variant (e.g. a colorway's own gallery). `onDelete: Restrict` on
+/// `media` — a Media row in active use can't be silently deleted out from
+/// under a product; it must be detached first (see Media's own doc comment).
+model ProductMedia {
+  id              String    @id @default(uuid()) @db.Uuid
+  productId       String    @map("product_id") @db.Uuid
+  variantId       String?   @map("variant_id") @db.Uuid
+  mediaId         String    @map("media_id") @db.Uuid
+  role            MediaRole @default(GALLERY)
+  sortOrder       Int       @default(0) @map("sort_order")
+  altTextOverride Json?     @map("alt_text_override")
+  createdAt       DateTime  @default(now()) @map("created_at")
 
   product Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
   variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  media   Media           @relation(fields: [mediaId], references: [id], onDelete: Restrict)
 
   @@index([productId])
-  @@map("product_images")
+  @@index([variantId])
+  @@index([mediaId])
+  @@map("product_media")
   @@schema("catalog")
 }
 
 /// blueprint §13 — minimal lookup tables only. The full lens configuration +
 /// compatibility engine (index, coating combinations, pricing rules) is
-/// deliberately out of scope for this foundation pass.
+/// deliberately out of scope for this foundation pass (still true as of
+/// Phase 005 — see ADR-005 "Deferred").
 model LensType {
-  id          String   @id @default(uuid()) @db.Uuid
-  name        String   @unique
-  description String?
-  createdAt   DateTime @default(now()) @map("created_at")
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String   @unique
+  localizedName Json?    @map("localized_name")
+  description   String?
+  createdAt     DateTime @default(now()) @map("created_at")
 
   @@map("lens_types")
   @@schema("catalog")
 }
 
 model LensCoating {
-  id          String   @id @default(uuid()) @db.Uuid
-  name        String   @unique
-  description String?
-  createdAt   DateTime @default(now()) @map("created_at")
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String   @unique
+  localizedName Json?    @map("localized_name")
+  description   String?
+  createdAt     DateTime @default(now()) @map("created_at")
 
   @@map("lens_coatings")
   @@schema("catalog")
@@ -792,10 +1072,14 @@ model Warehouse {
 
 /// blueprint §23 — stock/reserved/available are tracked explicitly;
 /// `available` is computed (stock - reserved), never stored redundantly.
+/// `productSkuId` (Phase 005 — was `productVariantId`; see ADR-005 decision
+/// 1) is a plain, unenforced cross-schema column into `catalog.product_skus`
+/// — see docs/database/README.md's "Cross-schema references are
+/// intentionally unenforced".
 model InventoryItem {
   id               String   @id @default(uuid()) @db.Uuid
   warehouseId      String   @map("warehouse_id") @db.Uuid
-  productVariantId String   @map("product_variant_id") @db.Uuid
+  productSkuId     String   @map("product_sku_id") @db.Uuid
   quantityOnHand   Int      @default(0) @map("quantity_on_hand")
   quantityReserved Int      @default(0) @map("quantity_reserved")
   reorderPoint     Int?     @map("reorder_point")
@@ -806,8 +1090,8 @@ model InventoryItem {
   transactions InventoryTransaction[]
   reservations StockReservation[]
 
-  @@unique([warehouseId, productVariantId])
-  @@index([productVariantId])
+  @@unique([warehouseId, productSkuId])
+  @@index([productSkuId])
   @@map("inventory_items")
   @@schema("inventory")
 }
@@ -895,10 +1179,11 @@ model Cart {
   @@schema("commerce")
 }
 
+/// `productSkuId` (Phase 005 — was `productVariantId`; see ADR-005 decision 1).
 model CartItem {
   id                String   @id @default(uuid()) @db.Uuid
   cartId            String   @map("cart_id") @db.Uuid
-  productVariantId  String   @map("product_variant_id") @db.Uuid
+  productSkuId      String   @map("product_sku_id") @db.Uuid
   quantity          Int
   unitPriceSnapshot BigInt   @map("unit_price_snapshot")
   createdAt         DateTime @default(now()) @map("created_at")
@@ -906,7 +1191,7 @@ model CartItem {
 
   cart Cart @relation(fields: [cartId], references: [id], onDelete: Cascade)
 
-  @@unique([cartId, productVariantId])
+  @@unique([cartId, productSkuId])
   @@map("cart_items")
   @@schema("commerce")
 }
@@ -943,10 +1228,11 @@ model Order {
   @@schema("commerce")
 }
 
+/// `productSkuId` (Phase 005 — was `productVariantId`; see ADR-005 decision 1).
 model OrderItem {
   id                String   @id @default(uuid()) @db.Uuid
   orderId           String   @map("order_id") @db.Uuid
-  productVariantId  String?  @map("product_variant_id") @db.Uuid // nullable: the variant may later be deleted; snapshot fields below carry the truth regardless
+  productSkuId      String?  @map("product_sku_id") @db.Uuid // nullable: the SKU may later be deleted; snapshot fields below carry the truth regardless
   skuSnapshot       String   @map("sku_snapshot")
   nameSnapshot      String   @map("name_snapshot")
   unitPriceSnapshot BigInt   @map("unit_price_snapshot")
@@ -1271,33 +1557,44 @@ model Faq {
 // =============================================================================
 
 /// blueprint §12 — Pricing is its own domain, not a bare column on Product.
-/// Exactly one active price row per variant; changes go through
-/// PriceHistory, never a silent overwrite.
+/// Exactly one active price row per SKU; changes go through PriceHistory,
+/// never a silent overwrite. `productSkuId` (Phase 005 — was
+/// `productVariantId`; see ADR-005 decision 1) stays a plain, unenforced
+/// cross-schema column into `catalog.product_skus`. `compareAtPrice` +
+/// `validFrom`/`validTo` are Phase 005's scheduled-pricing foundation —
+/// `validFrom`/`validTo` describe *this row's* effective window; a future
+/// scheduled price change is a new row that isn't active yet, resolved by
+/// the application layer picking the row whose window contains "now", not a
+/// cron job mutating `basePrice` in place.
 model ProductPrice {
-  id               String   @id @default(uuid()) @db.Uuid
-  productVariantId String   @unique @map("product_variant_id") @db.Uuid
-  basePrice        BigInt   @map("base_price")
-  costPrice        BigInt?  @map("cost_price")
-  currency         String   @default("IRR")
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  id             String    @id @default(uuid()) @db.Uuid
+  productSkuId   String    @unique @map("product_sku_id") @db.Uuid
+  basePrice      BigInt    @map("base_price")
+  compareAtPrice BigInt?   @map("compare_at_price")
+  costPrice      BigInt?   @map("cost_price")
+  currency       String    @default("IRR")
+  validFrom      DateTime? @map("valid_from")
+  validTo        DateTime? @map("valid_to")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
   @@map("product_prices")
   @@schema("finance")
 }
 
 /// blueprint §13 — append-only, mirrors the exact example in the blueprint
-/// (SKU, old price, new price, changed by, reason).
+/// (SKU, old price, new price, changed by, reason). `productSkuId` (Phase
+/// 005 — was `productVariantId`).
 model PriceHistory {
-  id               String   @id @default(uuid()) @db.Uuid
-  productVariantId String   @map("product_variant_id") @db.Uuid
-  oldPrice         BigInt?  @map("old_price")
-  newPrice         BigInt   @map("new_price")
-  changedBy        String?  @map("changed_by") @db.Uuid
-  reason           String?
-  changedAt        DateTime @default(now()) @map("changed_at")
+  id           String   @id @default(uuid()) @db.Uuid
+  productSkuId String   @map("product_sku_id") @db.Uuid
+  oldPrice     BigInt?  @map("old_price")
+  newPrice     BigInt   @map("new_price")
+  changedBy    String?  @map("changed_by") @db.Uuid
+  reason       String?
+  changedAt    DateTime @default(now()) @map("changed_at")
 
-  @@index([productVariantId])
+  @@index([productSkuId])
   @@map("price_history")
   @@schema("finance")
 }
