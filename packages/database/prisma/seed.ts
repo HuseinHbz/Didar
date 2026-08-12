@@ -11,7 +11,7 @@
  *
  * Run with: `pnpm --filter @iecp/database seed`
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { prisma } from '../src/client.js';
 
@@ -117,6 +117,66 @@ async function main(): Promise<void> {
       action: 'pricing.manage',
       description: "Set a SKU's price (writes finance.PriceHistory + an audit log row)",
     },
+    // inventory (Phase 006) — matching what services/api's inventory module
+    // actually checks via @RequirePermission/@RequireModule (see that
+    // module's README and docs/security/inventory-security.md).
+    {
+      module: 'inventory',
+      action: 'read',
+      description: 'Read stock, locations, and inventory items',
+    },
+    {
+      module: 'inventory',
+      action: 'create',
+      description: 'Create locations and other inventory records',
+    },
+    {
+      module: 'inventory',
+      action: 'update',
+      description: 'Update inventory records, incl. low-stock thresholds',
+    },
+    {
+      module: 'inventory',
+      action: 'adjust',
+      description: 'Create a manual stock adjustment (permission-controlled + audited)',
+    },
+    {
+      module: 'inventory',
+      action: 'transfer.create',
+      description: 'Create a warehouse stock transfer',
+    },
+    {
+      module: 'inventory',
+      action: 'transfer.approve',
+      description: 'Approve a requested stock transfer',
+    },
+    {
+      module: 'inventory',
+      action: 'transfer.dispatch',
+      description: 'Dispatch an approved stock transfer',
+    },
+    {
+      module: 'inventory',
+      action: 'transfer.receive',
+      description: 'Receive a dispatched stock transfer',
+    },
+    { module: 'inventory', action: 'count.create', description: 'Create and submit a stock count' },
+    {
+      module: 'inventory',
+      action: 'count.approve',
+      description: 'Approve a submitted stock count (reconciles variance into the ledger)',
+    },
+    {
+      module: 'inventory',
+      action: 'ledger.read',
+      description: 'Read the append-only inventory ledger',
+    },
+    {
+      module: 'inventory',
+      action: 'warehouse.manage',
+      description: 'Create/edit warehouses and locations',
+    },
+    { module: 'inventory', action: 'low_stock.read', description: 'Read the low-stock report' },
   ];
   const permissions = await Promise.all(
     permissionDefs.map((def) =>
@@ -164,7 +224,7 @@ async function main(): Promise<void> {
     },
   });
   const adminRoleDefaults = {
-    description: 'Full identity + catalog module access',
+    description: 'Full identity + catalog + inventory module access',
     isSystem: true,
     parentId: supportAgentRole.id,
   };
@@ -189,12 +249,12 @@ async function main(): Promise<void> {
   await grant(adminRole.id, 'identity.roles.manage');
   await grant(adminRole.id, 'identity.permissions.manage');
   await grant(adminRole.id, 'identity.audit_logs.view');
-  // admin gets every catalog.* permission — the module-access gate
-  // (@RequireModule('catalog')) and every @RequirePermission check both
-  // pass for admin, same as identity's own endpoints.
+  // admin gets every catalog.*/inventory.* permission — the module-access
+  // gate (@RequireModule) and every @RequirePermission check both pass for
+  // admin, same as identity's own endpoints.
   for (const def of permissionDefs) {
-    if (def.module === 'catalog') {
-      await grant(adminRole.id, `catalog.${def.action}`);
+    if (def.module === 'catalog' || def.module === 'inventory') {
+      await grant(adminRole.id, `${def.module}.${def.action}`);
     }
   }
 
@@ -224,6 +284,87 @@ async function main(): Promise<void> {
     'attributes.manage',
   ]) {
     await grant(catalogEditorRole.id, `catalog.${action}`);
+  }
+
+  // Four inventory roles (Phase 006 — docs/security/inventory-security.md
+  // has the full matrix). Each is a real least-privilege boundary, not a
+  // label: `inventory_manager` gets every inventory.* permission (a
+  // department head); `warehouse_operator`/`store_manager` get the
+  // day-to-day floor actions but neither gets `adjust`/`transfer.approve`/
+  // `count.approve` — the brief's own rule that "warehouse operators
+  // cannot approve their own sensitive adjustments" is enforced by simply
+  // never granting that permission to the floor-level role, not by an
+  // extra runtime check; `inventory_auditor` is read-only.
+  const inventoryManagerRole = await prisma.role.upsert({
+    where: { name: 'inventory_manager' },
+    update: { description: 'Full inventory module access — every inventory.* permission' },
+    create: {
+      name: 'inventory_manager',
+      description: 'Full inventory module access — every inventory.* permission',
+    },
+  });
+  for (const def of permissionDefs) {
+    if (def.module === 'inventory') {
+      await grant(inventoryManagerRole.id, `inventory.${def.action}`);
+    }
+  }
+
+  const warehouseOperatorRole = await prisma.role.upsert({
+    where: { name: 'warehouse_operator' },
+    update: {
+      description:
+        'Warehouse floor operations — dispatch/receive transfers, submit counts; cannot adjust stock or approve anything',
+    },
+    create: {
+      name: 'warehouse_operator',
+      description:
+        'Warehouse floor operations — dispatch/receive transfers, submit counts; cannot adjust stock or approve anything',
+    },
+  });
+  for (const action of [
+    'read',
+    'create',
+    'transfer.dispatch',
+    'transfer.receive',
+    'count.create',
+    'low_stock.read',
+  ]) {
+    await grant(warehouseOperatorRole.id, `inventory.${action}`);
+  }
+
+  const storeManagerRole = await prisma.role.upsert({
+    where: { name: 'store_manager' },
+    update: {
+      description:
+        'Store-level inventory — can adjust and reconcile counts for their own store; cannot approve transfers',
+    },
+    create: {
+      name: 'store_manager',
+      description:
+        'Store-level inventory — can adjust and reconcile counts for their own store; cannot approve transfers',
+    },
+  });
+  for (const action of [
+    'read',
+    'adjust',
+    'transfer.receive',
+    'count.create',
+    'count.approve',
+    'low_stock.read',
+  ]) {
+    await grant(storeManagerRole.id, `inventory.${action}`);
+  }
+
+  const inventoryAuditorRole = await prisma.role.upsert({
+    where: { name: 'inventory_auditor' },
+    update: { description: 'Read-only — stock, ledger, and low-stock visibility, no mutations' },
+    create: {
+      name: 'inventory_auditor',
+      description: 'Read-only — stock, ledger, and low-stock visibility, no mutations',
+    },
+  });
+  for (const action of ['read', 'ledger.read', 'low_stock.read']) {
+    await grant(inventoryAuditorRole.id, `inventory.${action}`);
   }
 
   const adminUser = await prisma.user.upsert({
@@ -315,6 +456,28 @@ async function main(): Promise<void> {
     update: {},
     create: { userId: catalogEditorUser.id, roleId: catalogEditorRole.id },
   });
+
+  // Fifth-eighth users: one per inventory role — real fixtures for the
+  // e2e suite's inventory permission-bypass cases (e.g. warehouse_operator
+  // calling POST .../adjustments or .../approve must 403).
+  const inventoryRoleUsers: [string, string, string][] = [
+    ['+989120000005', 'inventory-manager@iecp.dev', inventoryManagerRole.id],
+    ['+989120000006', 'warehouse-operator@iecp.dev', warehouseOperatorRole.id],
+    ['+989120000007', 'store-manager@iecp.dev', storeManagerRole.id],
+    ['+989120000008', 'inventory-auditor@iecp.dev', inventoryAuditorRole.id],
+  ];
+  for (const [phone, email, roleId] of inventoryRoleUsers) {
+    const user = await prisma.user.upsert({
+      where: { phone },
+      update: {},
+      create: { phone, email, isActive: true, phoneVerifiedAt: new Date() },
+    });
+    await prisma.userRole.upsert({
+      where: { userId_roleId: { userId: user.id, roleId } },
+      update: {},
+      create: { userId: user.id, roleId },
+    });
+  }
 
   // A trusted device + an active-looking session for the admin user (blueprint
   // §56 "Device Trust") — session data itself is normally created by a real
@@ -590,7 +753,7 @@ async function main(): Promise<void> {
     : await prisma.productVariant.create({
         data: { productId: draftProduct.id, ...draftVariantDefaults },
       });
-  await prisma.productSku.upsert({
+  const draftSku = await prisma.productSku.upsert({
     where: { skuCode: 'RB-WAYFARER-001-BLACK-50' },
     update: {},
     create: {
@@ -662,38 +825,223 @@ async function main(): Promise<void> {
   });
 
   // ---------------------------------------------------------------------
-  // inventory — a warehouse with stock for the seeded SKU
+  // inventory (Phase 006 — see docs/adr/ADR-006-inventory-architecture.md):
+  // two warehouses (one CENTRAL, one STORE), three locations, stock for
+  // both seeded SKUs, a reserved-stock example, a low-stock example (via
+  // InventoryThreshold), a REQUESTED stock transfer, and the
+  // InventoryLedger history that explains every one of those quantities —
+  // the brief's own "at least" list for this phase's seed data.
   // ---------------------------------------------------------------------
-  const warehouse = await prisma.warehouse.upsert({
+  const warehouseCentral = await prisma.warehouse.upsert({
     where: { code: 'WH-TEHRAN-01' },
-    update: {},
-    create: { code: 'WH-TEHRAN-01', name: 'Tehran Main Warehouse', address: 'Tehran, Iran' },
+    update: { type: 'CENTRAL', status: 'ACTIVE' },
+    create: {
+      code: 'WH-TEHRAN-01',
+      name: 'Tehran Main Warehouse',
+      type: 'CENTRAL',
+      status: 'ACTIVE',
+      address: 'Tehran, Iran',
+    },
+  });
+  const warehouseStore = await prisma.warehouse.upsert({
+    where: { code: 'WH-TEHRAN-STORE-01' },
+    update: { type: 'STORE', status: 'ACTIVE' },
+    create: {
+      code: 'WH-TEHRAN-STORE-01',
+      name: 'Tehran Flagship Store',
+      type: 'STORE',
+      status: 'ACTIVE',
+      address: 'Vali Asr St, Tehran, Iran',
+    },
   });
 
-  const inventoryItem = await prisma.inventoryItem.upsert({
-    where: {
-      warehouseId_productSkuId: { warehouseId: warehouse.id, productSkuId: sku.id },
-    },
+  const locMain = await prisma.warehouseLocation.upsert({
+    where: { warehouseId_code: { warehouseId: warehouseCentral.id, code: 'MAIN' } },
     update: {},
     create: {
-      warehouseId: warehouse.id,
-      productSkuId: sku.id,
-      quantityOnHand: 50,
-      quantityReserved: 0,
-      reorderPoint: 10,
+      warehouseId: warehouseCentral.id,
+      code: 'MAIN',
+      name: 'Main Storage',
+      type: 'STORAGE',
     },
   });
-  const existingStockTx = await prisma.inventoryTransaction.findFirst({
-    where: { inventoryItemId: inventoryItem.id, type: 'PURCHASE', reference: 'SEED-INITIAL-STOCK' },
+  // RECV exists to satisfy "at least three locations" and to give a
+  // receiving-dock example; nothing is stocked there in this fixture.
+  await prisma.warehouseLocation.upsert({
+    where: { warehouseId_code: { warehouseId: warehouseCentral.id, code: 'RECV' } },
+    update: {},
+    create: {
+      warehouseId: warehouseCentral.id,
+      code: 'RECV',
+      name: 'Receiving Dock',
+      type: 'RECEIVING',
+    },
   });
-  if (!existingStockTx) {
-    await prisma.inventoryTransaction.create({
+  const locFloor = await prisma.warehouseLocation.upsert({
+    where: { warehouseId_code: { warehouseId: warehouseStore.id, code: 'FLOOR' } },
+    update: {},
+    create: { warehouseId: warehouseStore.id, code: 'FLOOR', name: 'Sales Floor', type: 'STORAGE' },
+  });
+
+  /** Upserts one InventoryItem to an exact quantity state and, only on
+   * first creation, an InventoryLedger PURCHASE_RECEIPT row explaining it
+   * — same idempotency shape the old Phase 003 inventoryTransaction
+   * fixture used (a reference-keyed existence check), generalized to the
+   * new ledger table. `referenceId` is `@db.Uuid`, so the item's own id
+   * (deterministic given the upsert above) is the natural idempotency key
+   * — not a human-readable string. */
+  const seedStock = async (
+    productSkuId: string,
+    warehouseId: string,
+    locationId: string,
+    onHandQuantity: number,
+    reservedQuantity: number,
+  ) => {
+    const item = await prisma.inventoryItem.upsert({
+      where: { productSkuId_warehouseId_locationId: { productSkuId, warehouseId, locationId } },
+      update: {
+        onHandQuantity,
+        reservedQuantity,
+        availableQuantity: onHandQuantity - reservedQuantity,
+      },
+      create: {
+        id: randomUUID(),
+        productSkuId,
+        warehouseId,
+        locationId,
+        onHandQuantity,
+        reservedQuantity,
+        availableQuantity: onHandQuantity - reservedQuantity,
+      },
+    });
+    const existingReceipt = await prisma.inventoryLedger.findFirst({
+      where: { referenceType: 'SEED_INITIAL_STOCK', referenceId: item.id },
+    });
+    if (!existingReceipt) {
+      await prisma.inventoryLedger.create({
+        data: {
+          id: randomUUID(),
+          inventoryItemId: item.id,
+          productSkuId,
+          warehouseId,
+          locationId,
+          movementType: 'PURCHASE_RECEIPT',
+          quantity: onHandQuantity,
+          beforeOnHand: 0,
+          afterOnHand: onHandQuantity,
+          beforeReserved: 0,
+          afterReserved: 0,
+          referenceType: 'SEED_INITIAL_STOCK',
+          referenceId: item.id,
+          reason: 'Initial seed stock',
+          correlationId: randomUUID(),
+        },
+      });
+    }
+    return item;
+  };
+
+  // Aviator (PUBLISHED product's SKU): 50 on hand at the central warehouse,
+  // 5 already reserved (see the InventoryReservation fixture below) — well
+  // above its 15-unit reorder floor, so it does NOT show up as low stock.
+  const aviatorAtMain = await seedStock(sku.id, warehouseCentral.id, locMain.id, 50, 5);
+  // Wayfarer (DRAFT product's SKU): only 8 on hand — below its 15-unit
+  // reorder floor, so this IS the low-stock example.
+  await seedStock(draftSku.id, warehouseCentral.id, locMain.id, 8, 0);
+  // Aviator also has a small store-floor stock — multi-warehouse stock,
+  // and the source stock the transfer example below dispatches from is
+  // NOT this row (the transfer moves stock INTO the store from central).
+  await seedStock(sku.id, warehouseStore.id, locFloor.id, 5, 0);
+
+  await prisma.inventoryThreshold.upsert({
+    where: { productSkuId_warehouseId: { productSkuId: sku.id, warehouseId: warehouseCentral.id } },
+    update: { reorderPoint: 10, safetyStock: 5 },
+    create: {
+      productSkuId: sku.id,
+      warehouseId: warehouseCentral.id,
+      reorderPoint: 10,
+      safetyStock: 5,
+    },
+  });
+  await prisma.inventoryThreshold.upsert({
+    where: {
+      productSkuId_warehouseId: { productSkuId: draftSku.id, warehouseId: warehouseCentral.id },
+    },
+    update: { reorderPoint: 10, safetyStock: 5 },
+    create: {
+      productSkuId: draftSku.id,
+      warehouseId: warehouseCentral.id,
+      reorderPoint: 10,
+      safetyStock: 5,
+    },
+  });
+
+  // --- a reserved-stock example (the 5 units already subtracted from
+  // aviatorAtMain's availableQuantity above) ---
+  const seedReservation = await prisma.inventoryReservation.upsert({
+    where: { idempotencyKey: 'SEED-RESERVATION-1' },
+    update: {},
+    create: {
+      id: randomUUID(),
+      productSkuId: sku.id,
+      warehouseId: warehouseCentral.id,
+      locationId: locMain.id,
+      inventoryItemId: aviatorAtMain.id,
+      quantity: 5,
+      status: 'ACTIVE',
+      sourceType: 'MANUAL',
+      sourceId: randomUUID(),
+      idempotencyKey: 'SEED-RESERVATION-1',
+    },
+  });
+  const existingReservationLedger = await prisma.inventoryLedger.findFirst({
+    where: { referenceType: 'INVENTORY_RESERVATION', referenceId: seedReservation.id },
+  });
+  if (!existingReservationLedger) {
+    await prisma.inventoryLedger.create({
       data: {
-        inventoryItemId: inventoryItem.id,
-        type: 'PURCHASE',
-        quantityDelta: 50,
-        reference: 'SEED-INITIAL-STOCK',
-        note: 'Initial seed stock',
+        id: randomUUID(),
+        inventoryItemId: aviatorAtMain.id,
+        productSkuId: sku.id,
+        warehouseId: warehouseCentral.id,
+        locationId: locMain.id,
+        movementType: 'RESERVATION',
+        quantity: 5,
+        beforeOnHand: 50,
+        afterOnHand: 50,
+        beforeReserved: 0,
+        afterReserved: 5,
+        referenceType: 'INVENTORY_RESERVATION',
+        referenceId: seedReservation.id,
+        reason: 'Seed reservation example',
+        correlationId: randomUUID(),
+      },
+    });
+  }
+
+  // --- a REQUESTED stock transfer example (central -> store, aviator) ---
+  const seedTransfer = await prisma.stockTransfer.upsert({
+    where: { referenceNumber: 'SEED-TRANSFER-1' },
+    update: {},
+    create: {
+      id: randomUUID(),
+      referenceNumber: 'SEED-TRANSFER-1',
+      sourceWarehouseId: warehouseCentral.id,
+      destinationWarehouseId: warehouseStore.id,
+      status: 'REQUESTED',
+      requestedBy: adminUser.id,
+    },
+  });
+  const existingTransferItem = await prisma.stockTransferItem.findFirst({
+    where: { transferId: seedTransfer.id, productSkuId: sku.id },
+  });
+  if (!existingTransferItem) {
+    await prisma.stockTransferItem.create({
+      data: {
+        id: randomUUID(),
+        transferId: seedTransfer.id,
+        productSkuId: sku.id,
+        requestedQuantity: 10,
       },
     });
   }
@@ -816,10 +1164,12 @@ async function main(): Promise<void> {
   });
 
   console.log(
-    '[seed] done — identity RBAC (25 real permissions, role inheritance, a deny-override), ' +
-      'admin/customer/support/catalog-editor users, demo customer, catalog (2 products — one ' +
-      'PUBLISHED with variant+SKU+price+media+collection, one DRAFT) + stock, coupon, ' +
-      'CMS/notification/system basics.',
+    '[seed] done — RBAC (38 real permissions across identity/catalog/inventory, role ' +
+      'inheritance, a deny-override), admin/customer/support/catalog-editor/inventory-role ' +
+      'users, demo customer, catalog (2 products — one PUBLISHED with variant+SKU+price+' +
+      'media+collection, one DRAFT), inventory (2 warehouses, 3 locations, stock for both ' +
+      'SKUs, a reservation, a low-stock example, a transfer), coupon, CMS/notification/' +
+      'system basics.',
   );
 }
 
