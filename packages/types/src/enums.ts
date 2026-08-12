@@ -34,20 +34,29 @@ export const ORDER_STATUSES = [
 ] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
-/** Inventory ledger transaction types (blueprint §24/§27). Stock is derived, never set. */
-export const INVENTORY_TRANSACTION_TYPES = [
-  'PURCHASE',
+/**
+ * Inventory ledger movement types (blueprint §24/§27; Phase 006 — see
+ * docs/adr/ADR-006-inventory-architecture.md). Stock is derived, never set
+ * directly. Replaces the smaller Phase 003 `InventoryTransactionType`
+ * placeholder — see that migration's own header comment for the old->new
+ * value mapping used to carry existing rows forward.
+ */
+export const INVENTORY_MOVEMENT_TYPES = [
+  'PURCHASE_RECEIPT',
   'SALE',
   'RESERVATION',
-  'RELEASE',
+  'RESERVATION_RELEASE',
   'TRANSFER_OUT',
   'TRANSFER_IN',
+  'RETURN_RECEIPT',
   'DAMAGE',
   'ADJUSTMENT',
-  'RETURN',
   'COUNT_ADJUSTMENT',
+  'QUARANTINE',
+  'RELEASE_FROM_QUARANTINE',
+  'MANUAL_CORRECTION',
 ] as const;
-export type InventoryTransactionType = (typeof INVENTORY_TRANSACTION_TYPES)[number];
+export type InventoryMovementType = (typeof INVENTORY_MOVEMENT_TYPES)[number];
 
 /** Notification channels — always behind an adapter interface, never called directly. */
 export const NOTIFICATION_CHANNELS = [
@@ -139,8 +148,95 @@ export type MediaProvider = (typeof MEDIA_PROVIDERS)[number];
 export const MEDIA_KINDS = ['IMAGE', 'VIDEO', 'MODEL_3D', 'AR_ASSET'] as const;
 export type MediaKind = (typeof MEDIA_KINDS)[number];
 
-export const MEDIA_ROLES = ['PRIMARY', 'GALLERY', 'THUMBNAIL', 'SWATCH', 'VIDEO', 'MODEL_3D'] as const;
+export const MEDIA_ROLES = [
+  'PRIMARY',
+  'GALLERY',
+  'THUMBNAIL',
+  'SWATCH',
+  'VIDEO',
+  'MODEL_3D',
+] as const;
 export type MediaRole = (typeof MEDIA_ROLES)[number];
 
 export const MEDIA_STATUSES = ['ACTIVE', 'ARCHIVED'] as const;
 export type MediaStatus = (typeof MEDIA_STATUSES)[number];
+
+/**
+ * Inventory/warehouse enums — Phase 006. See
+ * docs/adr/ADR-006-inventory-architecture.md and packages/database's
+ * schema.prisma inventory section (the two must stay in sync; there's no
+ * codegen linking them, so a Prisma enum change needs a matching edit here).
+ */
+export const WAREHOUSE_TYPES = [
+  'CENTRAL',
+  'REGIONAL',
+  'STORE',
+  'DARK_STORE',
+  'QUARANTINE',
+] as const;
+export type WarehouseType = (typeof WAREHOUSE_TYPES)[number];
+
+export const WAREHOUSE_STATUSES = ['ACTIVE', 'INACTIVE', 'CLOSED'] as const;
+export type WarehouseStatus = (typeof WAREHOUSE_STATUSES)[number];
+
+export const LOCATION_TYPES = [
+  'RECEIVING',
+  'PICKING',
+  'STORAGE',
+  'QUARANTINE',
+  'DAMAGED',
+  'RETURNS',
+  'STAGING',
+] as const;
+export type LocationType = (typeof LOCATION_TYPES)[number];
+
+export const INVENTORY_RESERVATION_STATUSES = [
+  'ACTIVE',
+  'RELEASED',
+  'CONVERTED',
+  'EXPIRED',
+  'CANCELLED',
+] as const;
+export type InventoryReservationStatus = (typeof INVENTORY_RESERVATION_STATUSES)[number];
+
+/** The 9-state transfer machine — see `TransferStateMachine` (domain layer) for transitions. */
+export const STOCK_TRANSFER_STATUSES = [
+  'DRAFT',
+  'REQUESTED',
+  'APPROVED',
+  'PICKING',
+  'DISPATCHED',
+  'IN_TRANSIT',
+  'PARTIALLY_RECEIVED',
+  'RECEIVED',
+  'CANCELLED',
+] as const;
+export type StockTransferStatus = (typeof STOCK_TRANSFER_STATUSES)[number];
+
+export const INVENTORY_ADJUSTMENT_TYPES = ['POSITIVE', 'NEGATIVE'] as const;
+export type InventoryAdjustmentType = (typeof INVENTORY_ADJUSTMENT_TYPES)[number];
+
+export const STOCK_COUNT_STATUSES = [
+  'PLANNED',
+  'IN_PROGRESS',
+  'COUNTED',
+  'UNDER_REVIEW',
+  'APPROVED',
+  'REJECTED',
+  'CLOSED',
+] as const;
+export type StockCountStatus = (typeof STOCK_COUNT_STATUSES)[number];
+
+/** Reservation/adjustment source, kept as an open string union rather than a
+ * fixed enum since it deliberately covers modules that don't exist yet
+ * (cart/order/pos/home_try_on — ADR-006 decision 5). Values this phase
+ * actually writes: 'ORDER' (legacy-migrated rows only), 'MANUAL' (an admin
+ * test/internal reservation with no real upstream source yet). */
+export const INVENTORY_RESERVATION_SOURCE_TYPES = [
+  'CART',
+  'ORDER',
+  'POS',
+  'HOME_TRY_ON',
+  'MANUAL',
+] as const;
+export type InventoryReservationSourceType = (typeof INVENTORY_RESERVATION_SOURCE_TYPES)[number];

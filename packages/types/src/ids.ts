@@ -60,6 +60,17 @@ export type ProductSkuId = Brand<string, 'ProductSkuId'>;
 export type MediaId = Brand<string, 'MediaId'>;
 export type ProductAttributeId = Brand<string, 'ProductAttributeId'>;
 export type ProductAttributeValueId = Brand<string, 'ProductAttributeValueId'>;
+// Phase 006 — inventory/warehouse (see docs/adr/ADR-006-inventory-architecture.md).
+export type WarehouseLocationId = Brand<string, 'WarehouseLocationId'>;
+export type InventoryItemId = Brand<string, 'InventoryItemId'>;
+export type InventoryThresholdId = Brand<string, 'InventoryThresholdId'>;
+export type InventoryLedgerId = Brand<string, 'InventoryLedgerId'>;
+export type InventoryReservationId = Brand<string, 'InventoryReservationId'>;
+export type StockTransferId = Brand<string, 'StockTransferId'>;
+export type StockTransferItemId = Brand<string, 'StockTransferItemId'>;
+export type InventoryAdjustmentId = Brand<string, 'InventoryAdjustmentId'>;
+export type StockCountId = Brand<string, 'StockCountId'>;
+export type StockCountItemId = Brand<string, 'StockCountItemId'>;
 
 export const asUserId = brandedId<'UserId'>('UserId').as;
 export const asCustomerId = brandedId<'CustomerId'>('CustomerId').as;
@@ -83,3 +94,15 @@ export const asMediaId = brandedId<'MediaId'>('MediaId').as;
 export const asProductAttributeId = brandedId<'ProductAttributeId'>('ProductAttributeId').as;
 export const asProductAttributeValueId =
   brandedId<'ProductAttributeValueId'>('ProductAttributeValueId').as;
+export const asWarehouseLocationId = brandedId<'WarehouseLocationId'>('WarehouseLocationId').as;
+export const asInventoryItemId = brandedId<'InventoryItemId'>('InventoryItemId').as;
+export const asInventoryThresholdId = brandedId<'InventoryThresholdId'>('InventoryThresholdId').as;
+export const asInventoryLedgerId = brandedId<'InventoryLedgerId'>('InventoryLedgerId').as;
+export const asInventoryReservationId =
+  brandedId<'InventoryReservationId'>('InventoryReservationId').as;
+export const asStockTransferId = brandedId<'StockTransferId'>('StockTransferId').as;
+export const asStockTransferItemId = brandedId<'StockTransferItemId'>('StockTransferItemId').as;
+export const asInventoryAdjustmentId =
+  brandedId<'InventoryAdjustmentId'>('InventoryAdjustmentId').as;
+export const asStockCountId = brandedId<'StockCountId'>('StockCountId').as;
+export const asStockCountItemId = brandedId<'StockCountItemId'>('StockCountItemId').as;
