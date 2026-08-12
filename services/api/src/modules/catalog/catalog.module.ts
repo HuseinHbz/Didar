@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
 
 import { AUDIT_LOG_REPOSITORY } from '../identity/domain/ports/audit-log.repository.port';
 import { PrismaAuditLogRepository } from '../identity/infrastructure/repositories/prisma-audit-log.repository';
@@ -42,20 +43,24 @@ import { MediaController } from './presentation/controllers/media.controller';
 import { PricingController } from './presentation/controllers/pricing.controller';
 import { ProductController } from './presentation/controllers/product.controller';
 import { VariantSkuController } from './presentation/controllers/variant-sku.controller';
+import { CatalogDomainExceptionFilter } from './presentation/filters/catalog-domain-exception.filter';
 
 /**
  * Composition root for the catalog domain (Phase 005 — see this module's
  * README and docs/adr/ADR-005-catalog-architecture.md). Every port token
  * below is bound to its Prisma implementation here, same convention as
- * `identity.module.ts`; this module registers no new guards — the global
+ * `identity.module.ts`; this module registers no new *guards* — the global
  * `JwtAuthGuard`/`AuthorizationGuard` IdentityModule already installs
  * app-wide cover every route here too (`@Public()` opts the storefront
  * controller out, `@RequirePermission`/`@RequireModule` gate the admin
- * ones). `AUDIT_LOG_REPOSITORY` is re-bound here (not imported from
- * IdentityModule) since the underlying `PrismaAuditLogRepository` is a
- * stateless wrapper over the shared `prisma` singleton — cheap to
- * instantiate per module, and keeps this module's dependency graph
- * self-contained rather than reaching into IdentityModule's internals.
+ * ones). It does register one `APP_FILTER` (`CatalogDomainExceptionFilter`)
+ * mapping this module's own domain-layer error types to real HTTP status
+ * codes — see that file's doc comment. `AUDIT_LOG_REPOSITORY` is re-bound
+ * here (not imported from IdentityModule) since the underlying
+ * `PrismaAuditLogRepository` is a stateless wrapper over the shared
+ * `prisma` singleton — cheap to instantiate per module, and keeps this
+ * module's dependency graph self-contained rather than reaching into
+ * IdentityModule's internals.
  */
 @Module({
   controllers: [
@@ -91,6 +96,7 @@ import { VariantSkuController } from './presentation/controllers/variant-sku.con
     { provide: ATTRIBUTE_REPOSITORY, useClass: PrismaAttributeRepository },
     { provide: PRICING_REPOSITORY, useClass: PrismaPricingRepository },
     { provide: AUDIT_LOG_REPOSITORY, useClass: PrismaAuditLogRepository },
+    { provide: APP_FILTER, useClass: CatalogDomainExceptionFilter },
   ],
 })
 export class CatalogModule {}
