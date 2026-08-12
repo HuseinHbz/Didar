@@ -50,6 +50,73 @@ async function main(): Promise<void> {
       action: 'users.view_contact',
       description: "See a user's phone/email on GET /users/:id (field-level permission demo)",
     },
+    // catalog (Phase 005) — matching what services/api's catalog module
+    // actually checks via @RequirePermission (see that module's README).
+    { module: 'catalog', action: 'brands.create', description: 'Create a brand' },
+    { module: 'catalog', action: 'brands.update', description: 'Edit a brand' },
+    { module: 'catalog', action: 'brands.delete', description: 'Delete a brand (must be unused)' },
+    { module: 'catalog', action: 'categories.create', description: 'Create a category' },
+    {
+      module: 'catalog',
+      action: 'categories.update',
+      description: 'Edit a category, including publish/unpublish',
+    },
+    {
+      module: 'catalog',
+      action: 'categories.delete',
+      description: 'Delete a category (must be a leaf, unused)',
+    },
+    { module: 'catalog', action: 'collections.create', description: 'Create a collection' },
+    {
+      module: 'catalog',
+      action: 'collections.update',
+      description: 'Edit a collection or its MANUAL membership',
+    },
+    { module: 'catalog', action: 'collections.delete', description: 'Delete a collection' },
+    { module: 'catalog', action: 'products.create', description: 'Create a product' },
+    { module: 'catalog', action: 'products.update', description: 'Edit a product’s content' },
+    {
+      module: 'catalog',
+      action: 'products.delete',
+      description: 'Delete a DRAFT/ARCHIVED product',
+    },
+    {
+      module: 'catalog',
+      action: 'products.approve',
+      description: 'Submit for review / approve / reject a product (lifecycle)',
+    },
+    {
+      module: 'catalog',
+      action: 'products.publish',
+      description: 'Publish/unpublish a product',
+    },
+    { module: 'catalog', action: 'products.archive', description: 'Archive a product' },
+    {
+      module: 'catalog',
+      action: 'products.bulk',
+      description: 'Bulk publish/archive up to 200 products in one request',
+    },
+    {
+      module: 'catalog',
+      action: 'variants.manage',
+      description: 'Create/edit/delete product variants',
+    },
+    { module: 'catalog', action: 'skus.manage', description: 'Create/edit/delete product SKUs' },
+    {
+      module: 'catalog',
+      action: 'media.manage',
+      description: 'Register media assets and attach/detach/reorder them on products',
+    },
+    {
+      module: 'catalog',
+      action: 'attributes.manage',
+      description: 'Create attributes/values and assign them to variants',
+    },
+    {
+      module: 'catalog',
+      action: 'pricing.manage',
+      description: "Set a SKU's price (writes finance.PriceHistory + an audit log row)",
+    },
   ];
   const permissions = await Promise.all(
     permissionDefs.map((def) =>
@@ -97,7 +164,7 @@ async function main(): Promise<void> {
     },
   });
   const adminRoleDefaults = {
-    description: 'Full identity-module access',
+    description: 'Full identity + catalog module access',
     isSystem: true,
     parentId: supportAgentRole.id,
   };
@@ -122,6 +189,42 @@ async function main(): Promise<void> {
   await grant(adminRole.id, 'identity.roles.manage');
   await grant(adminRole.id, 'identity.permissions.manage');
   await grant(adminRole.id, 'identity.audit_logs.view');
+  // admin gets every catalog.* permission — the module-access gate
+  // (@RequireModule('catalog')) and every @RequirePermission check both
+  // pass for admin, same as identity's own endpoints.
+  for (const def of permissionDefs) {
+    if (def.module === 'catalog') {
+      await grant(adminRole.id, `catalog.${def.action}`);
+    }
+  }
+
+  // A second, non-inheriting role — a content editor who can create/edit
+  // catalog entities but can't delete, approve/publish, or touch pricing.
+  // This is what makes the e2e suite's "permission bypass" tests for
+  // catalog real: logging in as this user and calling POST .../publish
+  // must 403, not merely "not be tested."
+  const catalogEditorRole = await prisma.role.upsert({
+    where: { name: 'catalog_editor' },
+    update: { description: 'Can author catalog content; cannot publish, delete, or set prices' },
+    create: {
+      name: 'catalog_editor',
+      description: 'Can author catalog content; cannot publish, delete, or set prices',
+    },
+  });
+  for (const action of [
+    'brands.create',
+    'brands.update',
+    'categories.create',
+    'categories.update',
+    'products.create',
+    'products.update',
+    'variants.manage',
+    'skus.manage',
+    'media.manage',
+    'attributes.manage',
+  ]) {
+    await grant(catalogEditorRole.id, `catalog.${action}`);
+  }
 
   const adminUser = await prisma.user.upsert({
     where: { phone: '+989120000001' },
@@ -192,6 +295,25 @@ async function main(): Promise<void> {
         'Under investigation for a contact-data-handling incident — access suspended pending review.',
       createdBy: adminUser.id,
     },
+  });
+
+  // Fourth user: catalog_editor role only — real fixture for the e2e
+  // suite's catalog permission-bypass case (can create a product, cannot
+  // publish/delete/set a price).
+  const catalogEditorUser = await prisma.user.upsert({
+    where: { phone: '+989120000004' },
+    update: {},
+    create: {
+      phone: '+989120000004',
+      email: 'catalog-editor@iecp.dev',
+      isActive: true,
+      phoneVerifiedAt: new Date(),
+    },
+  });
+  await prisma.userRole.upsert({
+    where: { userId_roleId: { userId: catalogEditorUser.id, roleId: catalogEditorRole.id } },
+    update: {},
+    create: { userId: catalogEditorUser.id, roleId: catalogEditorRole.id },
   });
 
   // A trusted device + an active-looking session for the admin user (blueprint
@@ -309,39 +431,42 @@ async function main(): Promise<void> {
   });
 
   // ---------------------------------------------------------------------
-  // catalog — brand, category, product, variant, attribute, lens lookups
+  // catalog (Phase 005 — see docs/adr/ADR-005-catalog-architecture.md):
+  // brand, category, a PUBLISHED product (variant + SKU + price + media +
+  // a MANUAL collection) and a DRAFT product (proves the storefront never
+  // shows what isn't published), attribute, lens lookups.
   // ---------------------------------------------------------------------
   const brand = await prisma.brand.upsert({
     where: { slug: 'ray-ban' },
-    update: {},
-    create: { name: 'Ray-Ban', slug: 'ray-ban' },
+    update: { name: 'Ray-Ban', status: 'ACTIVE' },
+    create: {
+      name: 'Ray-Ban',
+      slug: 'ray-ban',
+      localizedName: { fa: 'ری‌بن', en: 'Ray-Ban' },
+      status: 'ACTIVE',
+    },
   });
 
   const category = await prisma.category.upsert({
     where: { slug: 'sunglasses' },
-    update: {},
-    create: { name: 'عینک آفتابی', slug: 'sunglasses' },
-  });
-
-  const product = await prisma.product.upsert({
-    where: { sku: 'RB-AVIATOR-001' },
-    update: {},
+    update: { name: 'عینک آفتابی', status: 'ACTIVE', publishedAt: new Date() },
     create: {
-      brandId: brand.id,
-      categoryId: category.id,
-      sku: 'RB-AVIATOR-001',
-      name: 'Ray-Ban Aviator Classic',
-      slug: 'ray-ban-aviator-classic',
-      description: 'The original pilot sunglasses, unchanged since 1937.',
-      gender: 'UNISEX',
+      name: 'عینک آفتابی',
+      slug: 'sunglasses',
+      localizedName: { fa: 'عینک آفتابی', en: 'Sunglasses' },
       status: 'ACTIVE',
+      publishedAt: new Date(),
     },
   });
 
   const colorAttribute = await prisma.productAttribute.upsert({
     where: { key: 'frame_color' },
     update: {},
-    create: { key: 'frame_color', name: 'رنگ فریم' },
+    create: {
+      key: 'frame_color',
+      name: 'رنگ فریم',
+      localizedName: { fa: 'رنگ فریم', en: 'Frame color' },
+    },
   });
   const goldValue = await prisma.productAttributeValue.upsert({
     where: { attributeId_value: { attributeId: colorAttribute.id, value: 'Gold' } },
@@ -349,24 +474,73 @@ async function main(): Promise<void> {
     create: { attributeId: colorAttribute.id, value: 'Gold' },
   });
 
-  const variant = await prisma.productVariant.upsert({
-    where: { sku: 'RB-AVIATOR-001-GOLD-58' },
-    update: {},
+  // --- Product 1: PUBLISHED, full variant/SKU/price/media/collection chain ---
+  const product = await prisma.product.upsert({
+    where: { slug: 'ray-ban-aviator-classic' },
+    update: {
+      status: 'PUBLISHED',
+      publishedAt: new Date(),
+      approvedBy: adminUser.id,
+      approvedAt: new Date(),
+    },
     create: {
-      productId: product.id,
-      sku: 'RB-AVIATOR-001-GOLD-58',
-      color: 'Gold',
-      size: '58mm',
-      isDefault: true,
-      status: 'ACTIVE',
+      brandId: brand.id,
+      categoryId: category.id,
+      productType: 'SUNGLASSES',
+      name: 'Ray-Ban Aviator Classic',
+      slug: 'ray-ban-aviator-classic',
+      longDescription: 'The original pilot sunglasses, unchanged since 1937.',
+      tags: ['classic', 'metal-frame'],
+      status: 'PUBLISHED',
+      publishedAt: new Date(),
+      approvedBy: adminUser.id,
+      approvedAt: new Date(),
     },
   });
+
+  // ProductVariant has no business-unique key of its own (color+size isn't
+  // declared unique — two colorways could share a size), so a fixed seed id
+  // isn't safe to upsert by: a database that already has a default variant
+  // for this product under a *different* id (e.g. one created by an older
+  // version of this script, or by hand through the admin API) would end up
+  // with two "default" variants instead of one converged row. Find the
+  // product's actual current default variant, if any, and update that.
+  const variantDefaults = {
+    color: 'Gold',
+    size: '58mm',
+    gender: 'UNISEX' as const,
+    frameShape: 'Aviator',
+    frameMaterial: 'Metal',
+    isDefault: true,
+    status: 'ACTIVE' as const,
+  };
+  const existingVariant = await prisma.productVariant.findFirst({
+    where: { productId: product.id, isDefault: true },
+  });
+  const variant = existingVariant
+    ? await prisma.productVariant.update({
+        where: { id: existingVariant.id },
+        data: variantDefaults,
+      })
+    : await prisma.productVariant.create({ data: { productId: product.id, ...variantDefaults } });
   await prisma.productVariantAttributeValue.upsert({
     where: {
       variantId_attributeValueId: { variantId: variant.id, attributeValueId: goldValue.id },
     },
     update: {},
     create: { variantId: variant.id, attributeValueId: goldValue.id },
+  });
+
+  const sku = await prisma.productSku.upsert({
+    where: { skuCode: 'RB-AVIATOR-001-GOLD-58' },
+    update: {},
+    create: {
+      productId: product.id,
+      variantId: variant.id,
+      skuCode: 'RB-AVIATOR-001-GOLD-58',
+      weightGrams: 31,
+      taxRateBasisPoints: 900,
+    },
   });
 
   await prisma.lensType.upsert({
@@ -380,14 +554,107 @@ async function main(): Promise<void> {
     create: { name: 'Anti-Reflective', description: 'Reduces glare and reflections' },
   });
 
-  // ---------------------------------------------------------------------
-  // finance — the variant's price (Rial, BigInt — never Float)
-  // ---------------------------------------------------------------------
-  await prisma.productPrice.upsert({
-    where: { productVariantId: variant.id },
+  // --- Product 2: DRAFT — never returned by the storefront (CatalogQueryService
+  // always filters status = PUBLISHED); proves that filter is real, not just
+  // documented. ---
+  const draftProduct = await prisma.product.upsert({
+    where: { slug: 'ray-ban-wayfarer-classic' },
     update: {},
     create: {
-      productVariantId: variant.id,
+      brandId: brand.id,
+      categoryId: category.id,
+      productType: 'SUNGLASSES',
+      name: 'Ray-Ban Wayfarer Classic',
+      slug: 'ray-ban-wayfarer-classic',
+      longDescription: 'Still being reviewed before going live.',
+      tags: ['classic', 'acetate-frame'],
+      status: 'DRAFT',
+    },
+  });
+  const draftVariantDefaults = {
+    color: 'Black',
+    size: '50mm',
+    gender: 'UNISEX' as const,
+    frameMaterial: 'Acetate',
+    isDefault: true,
+    status: 'ACTIVE' as const,
+  };
+  const existingDraftVariant = await prisma.productVariant.findFirst({
+    where: { productId: draftProduct.id, isDefault: true },
+  });
+  const draftVariant = existingDraftVariant
+    ? await prisma.productVariant.update({
+        where: { id: existingDraftVariant.id },
+        data: draftVariantDefaults,
+      })
+    : await prisma.productVariant.create({
+        data: { productId: draftProduct.id, ...draftVariantDefaults },
+      });
+  await prisma.productSku.upsert({
+    where: { skuCode: 'RB-WAYFARER-001-BLACK-50' },
+    update: {},
+    create: {
+      productId: draftProduct.id,
+      variantId: draftVariant.id,
+      skuCode: 'RB-WAYFARER-001-BLACK-50',
+      weightGrams: 45,
+    },
+  });
+
+  // --- media — a product image, PRIMARY on the published product ---
+  const productMedia = await prisma.media.upsert({
+    where: { storageKey: 'seed/ray-ban-aviator-classic/primary.jpg' },
+    update: {},
+    create: {
+      provider: 'LOCAL',
+      storageKey: 'seed/ray-ban-aviator-classic/primary.jpg',
+      url: 'https://cdn.example.com/seed/ray-ban-aviator-classic/primary.jpg',
+      kind: 'IMAGE',
+      mimeType: 'image/jpeg',
+      width: 1200,
+      height: 1200,
+      altText: { fa: 'عینک آفتابی ری‌بن آویاتور کلاسیک', en: 'Ray-Ban Aviator Classic sunglasses' },
+    },
+  });
+  const existingProductMedia = await prisma.productMedia.findFirst({
+    where: { productId: product.id, mediaId: productMedia.id },
+  });
+  if (!existingProductMedia) {
+    await prisma.productMedia.create({
+      data: { productId: product.id, mediaId: productMedia.id, role: 'PRIMARY', sortOrder: 0 },
+    });
+  }
+
+  // --- a MANUAL "featured" collection containing the published product ---
+  const featuredCollection = await prisma.collection.upsert({
+    where: { slug: 'featured' },
+    update: { status: 'ACTIVE', publishedAt: new Date() },
+    create: {
+      name: 'Featured',
+      slug: 'featured',
+      localizedName: { fa: 'ویژه', en: 'Featured' },
+      type: 'MANUAL',
+      status: 'ACTIVE',
+      publishedAt: new Date(),
+    },
+  });
+  await prisma.collectionProduct.upsert({
+    where: {
+      collectionId_productId: { collectionId: featuredCollection.id, productId: product.id },
+    },
+    update: {},
+    create: { collectionId: featuredCollection.id, productId: product.id, sortOrder: 0 },
+  });
+
+  // ---------------------------------------------------------------------
+  // finance — the SKU's price (Rial, BigInt — never Float; Phase 005
+  // keys ProductPrice off productSkuId, not productVariantId — ADR-005).
+  // ---------------------------------------------------------------------
+  await prisma.productPrice.upsert({
+    where: { productSkuId: sku.id },
+    update: {},
+    create: {
+      productSkuId: sku.id,
       basePrice: 12_500_000n,
       costPrice: 8_000_000n,
       currency: 'IRR',
@@ -395,7 +662,7 @@ async function main(): Promise<void> {
   });
 
   // ---------------------------------------------------------------------
-  // inventory — a warehouse with stock for the seeded variant
+  // inventory — a warehouse with stock for the seeded SKU
   // ---------------------------------------------------------------------
   const warehouse = await prisma.warehouse.upsert({
     where: { code: 'WH-TEHRAN-01' },
@@ -405,12 +672,12 @@ async function main(): Promise<void> {
 
   const inventoryItem = await prisma.inventoryItem.upsert({
     where: {
-      warehouseId_productVariantId: { warehouseId: warehouse.id, productVariantId: variant.id },
+      warehouseId_productSkuId: { warehouseId: warehouse.id, productSkuId: sku.id },
     },
     update: {},
     create: {
       warehouseId: warehouse.id,
-      productVariantId: variant.id,
+      productSkuId: sku.id,
       quantityOnHand: 50,
       quantityReserved: 0,
       reorderPoint: 10,
@@ -549,8 +816,9 @@ async function main(): Promise<void> {
   });
 
   console.log(
-    '[seed] done — RBAC (2 real permissions checked in code, role inheritance, a deny-override), ' +
-      'admin/customer/support users, demo customer, one product+variant+price+stock, coupon, ' +
+    '[seed] done — identity RBAC (25 real permissions, role inheritance, a deny-override), ' +
+      'admin/customer/support/catalog-editor users, demo customer, catalog (2 products — one ' +
+      'PUBLISHED with variant+SKU+price+media+collection, one DRAFT) + stock, coupon, ' +
       'CMS/notification/system basics.',
   );
 }
