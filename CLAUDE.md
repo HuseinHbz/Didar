@@ -174,13 +174,42 @@ Postgres-only search this phase, deliberately not Elasticsearch/OpenSearch
 still untouched (decision 7) — see `docs/product/catalog.md` for exactly
 what a future frontend phase would need from this API surface.
 
+Phase 006 built the real multi-warehouse inventory domain on top of
+catalog: `services/api/src/modules/inventory` (see its own `README.md`)
+covers warehouses/locations, an append-only stock ledger (13-value movement
+vocabulary — `InventoryLedger` is the source of truth for _why_ stock is
+what it is, `InventoryItem`'s 7 quantity buckets are a maintained cache), an
+idempotent, transactionally concurrency-safe reservation engine
+(`available = on_hand - reserved - damaged - quarantined - blocked`, never
+negative — proven under real concurrent load: 100 simultaneous reservations
+against 10 available units yields exactly 10 successes, 0 oversells), stock
+transfers (a real 9-state lifecycle), adjustments (with "warehouse operators
+cannot approve their own sensitive adjustments" enforced by simply never
+granting them `inventory.adjust`), stock counts with variance calculation, a
+configuration-driven allocation engine, barcode/SKU lookup (reusing
+catalog's `product_skus` without duplicating product identity), a public
+storefront availability surface, and this repo's first background job
+queues — 3 BullMQ queues registered in-process inside `services/api` (not
+`services/worker`, since their processors share the HTTP controllers' exact
+domain-service/Prisma-transaction context; see
+`docs/adr/ADR-006-inventory-architecture.md` decision 8). PostgreSQL remains
+the single source of truth throughout — Redis is used only for queue
+scheduling, never to answer an inventory-state read. It's the third full
+clean-architecture module in this repo and reuses Phase 004's auth/RBAC/
+audit-log infrastructure wholesale — 13 new `inventory.*` permissions, 4 new
+roles (`inventory_manager`/`warehouse_operator`/`store_manager`/
+`inventory_auditor`), and inventory is the second module to actually
+**write** `system.AuditLog` (after catalog). **Backend-only, same
+precedent**: `apps/admin`/`apps/storefront` are still untouched — see
+`docs/product/inventory.md`.
+
 **Next up is still the rest of Phase 1** (see end of blueprint doc "وضعیت
-فعلی"): the remaining real domain modules (`customer`, `order`, `inventory`,
-…) beyond `identity`/`catalog`, each landing once its slice of the ERD/API
+فعلی"): the remaining real domain modules (`customer`, `order`, …) beyond
+`identity`/`catalog`/`inventory`, each landing once its slice of the ERD/API
 contract/permission matrix/event map is designed — _before_ further
 UI/design-system work. The stated ordering principle: settle the
-database/domain skeleton first (done for identity and catalog; the rest
-still pending), then design system + admin panel structure + web/PWA
-sitemap + Android structure.
+database/domain skeleton first (done for identity, catalog, and inventory;
+the rest still pending), then design system + admin panel structure +
+web/PWA sitemap + Android structure.
 
 Treat any new architectural decision as needing to stay consistent with this document, or update it explicitly.

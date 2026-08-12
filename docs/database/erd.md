@@ -43,7 +43,7 @@ graph LR
     catalog -. "inventory_items.product_sku_id" .-> inventory
     catalog -. "cart_items/order_items.product_sku_id" .-> commerce
     commerce -. "invoices.order_id" .-> finance
-    commerce -. "stock_reservations.order_id" .-> inventory
+    commerce -. "inventory_reservations.source_id (polymorphic: cart/order/POS/manual)" .-> inventory
     commerce -. "coupon_redemptions.order_id/customer_id" .-> marketing
     customer -. "notification_preferences.customer_id" .-> notification
     customer -. "notification_logs.customer_id" .-> notification
@@ -375,50 +375,109 @@ foundation pass (see [`README.md`](./README.md#deliberately-out-of-scope)).
 
 ## inventory
 
+Phase 006 (see [`inventory-erd.md`](./inventory-erd.md) for the full diagram
+with every column and design rationale) completely rewrote this schema —
+`warehouses` gained `type`/`status`/`timezone`/`capacity`, a new
+`warehouse_locations` table was added (a warehouse must have ≥1 location
+before it can hold stock), `inventory_items` moved to a
+`(product_sku_id, warehouse_id, location_id)` key with a full 7-bucket
+quantity model, `inventory_transactions`/`stock_reservations` were replaced
+by `inventory_ledger` (append-only, 13-value movement-type vocabulary) and
+`inventory_reservations` (idempotency-key-protected), and four new tables
+(`inventory_thresholds`, `stock_transfers`/`stock_transfer_items`,
+`inventory_adjustments`, `stock_counts`/`stock_count_items`) were added. The
+summary below is intentionally abbreviated; `inventory-erd.md` is the source
+of truth for this schema going forward.
+
 ```mermaid
 erDiagram
+    warehouses ||--o{ warehouse_locations : has
     warehouses ||--o{ inventory_items : stocks
-    inventory_items ||--o{ inventory_transactions : has
-    inventory_items ||--o{ stock_reservations : has
+    warehouse_locations ||--o{ inventory_items : holds
+    inventory_items ||--o{ inventory_ledger : has
+    inventory_items ||--o{ inventory_reservations : has
+    warehouses ||--o{ stock_transfers : "source/destination of"
+    stock_transfers ||--o{ stock_transfer_items : contains
+    warehouses ||--o{ stock_counts : has
+    stock_counts ||--o{ stock_count_items : contains
 
     warehouses {
         uuid id PK
         string code UK
         string name
-        boolean is_active
+        enum type "CENTRAL|REGIONAL|STORE|DARK_STORE|QUARANTINE"
+        enum status "ACTIVE|INACTIVE|CLOSED"
+    }
+    warehouse_locations {
+        uuid id PK
+        uuid warehouse_id FK
+        string code "UK with warehouse_id"
+        enum type "RECEIVING|PICKING|STORAGE|QUARANTINE|DAMAGED|RETURNS|STAGING"
     }
     inventory_items {
         uuid id PK
+        uuid product_sku_id "UK with warehouse_id+location_id, -> catalog.product_skus.id, unenforced"
         uuid warehouse_id FK
-        uuid product_sku_id UK "-> catalog.product_skus.id, unenforced"
-        int quantity_on_hand "cache of inventory_transactions sum"
-        int quantity_reserved
-        int reorder_point "nullable"
+        uuid location_id FK
+        int on_hand_quantity "cache of inventory_ledger sum"
+        int reserved_quantity
+        int available_quantity "on_hand - reserved - damaged - quarantined - blocked"
+        int version "optimistic-lock marker"
     }
-    inventory_transactions {
+    inventory_ledger {
         uuid id PK
         uuid inventory_item_id FK
-        enum type "PURCHASE|SALE|RESERVATION|RELEASE|TRANSFER_OUT|TRANSFER_IN|DAMAGE|ADJUSTMENT|RETURN|COUNT_ADJUSTMENT"
-        int quantity_delta
-        string reference "nullable, polymorphic (e.g. an order id)"
-    }
-    stock_reservations {
-        uuid id PK
-        uuid inventory_item_id FK
-        uuid order_id "nullable, -> commerce.orders.id, unenforced"
+        enum movement_type "13-value vocabulary, see inventory-erd.md"
         int quantity
-        enum status "ACTIVE|RELEASED|CONSUMED"
-        timestamp expires_at "nullable"
+        int before_on_hand
+        int after_on_hand
+        string reference_type "nullable, polymorphic"
+        uuid reference_id "nullable, polymorphic"
+        uuid correlation_id
+    }
+    inventory_reservations {
+        uuid id PK
+        uuid inventory_item_id FK
+        int quantity
+        enum status "ACTIVE|RELEASED|CONVERTED|EXPIRED|CANCELLED"
+        string source_type "polymorphic"
+        uuid source_id "polymorphic, unenforced"
+        string idempotency_key UK
+    }
+    stock_transfers {
+        uuid id PK
+        string reference_number UK
+        uuid source_warehouse_id FK
+        uuid destination_warehouse_id FK
+        enum status "9-state, see inventory-erd.md"
+    }
+    stock_transfer_items {
+        uuid id PK
+        uuid transfer_id FK
+        uuid product_sku_id "UK with transfer_id"
+        int requested_quantity
+    }
+    stock_counts {
+        uuid id PK
+        uuid warehouse_id FK
+        enum status "PLANNED|IN_PROGRESS|COUNTED|UNDER_REVIEW|APPROVED|REJECTED|CLOSED"
+    }
+    stock_count_items {
+        uuid id PK
+        uuid stock_count_id FK
+        uuid product_sku_id "UK with stock_count_id"
+        int expected_quantity
+        int counted_quantity "nullable"
+        int variance "nullable"
     }
 ```
 
-Composite unique constraint `(warehouse_id, product_sku_id)` on
-`inventory_items` — one stock row per SKU per warehouse (Phase 005 —
-previously per variant; see `docs/adr/ADR-005-catalog-architecture.md`
-decision 1).
-`inventory_transactions` is the append-only ledger;
-`inventory_items.quantity_on_hand` is a maintained cache, never the source
-of truth.
+`inventory_ledger` is the append-only ledger (no `updated_at`, never
+updated/deleted); `inventory_items`' quantity buckets are a maintained
+cache, never the source of truth. `available_quantity >= 0` is enforced
+transactionally (`SELECT ... FOR UPDATE` + a domain-layer assertion), not by
+a database `CHECK` constraint — Prisma has no `@@check(...)` support (see
+`inventory-erd.md`).
 
 ## commerce
 

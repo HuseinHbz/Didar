@@ -10,7 +10,7 @@ cross-schema overview.
 
 ## Status
 
-`schema.prisma` defines 71 models across the 11 schemas below, across three
+`schema.prisma` defines 78 models across the 11 schemas below, across four
 applied migrations, each exercised end-to-end — migrate up, roll back,
 re-apply — against a real local PostgreSQL, not just validated for syntax:
 
@@ -40,6 +40,20 @@ re-apply — against a real local PostgreSQL, not just validated for syntax:
   [`docs/adr/ADR-005-catalog-architecture.md`](../adr/ADR-005-catalog-architecture.md).
   This migration carries data forward rather than dropping and recreating
   (nullable → backfill → NOT NULL throughout) — see its own header comment.
+- `20260812180528_inventory_warehouse_ledger_foundation` (Phase 006) —
+  completely rewrites `inventory` for real multi-warehouse stock management:
+  `Warehouse`/`WarehouseLocation` (a warehouse needs ≥1 location to hold
+  stock), `InventoryItem` re-keyed to `(productSkuId, warehouseId,
+locationId)` with a full 7-bucket quantity model, `InventoryLedger`
+  (append-only, replaces `InventoryTransaction`), `InventoryReservation`
+  (idempotency-key-protected, replaces `StockReservation`), and four new
+  tables (`InventoryThreshold`, `StockTransfer`/`StockTransferItem`,
+  `InventoryAdjustment`, `StockCount`/`StockCountItem`). Full detail:
+  [`inventory-erd.md`](./inventory-erd.md) and
+  [`docs/adr/ADR-006-inventory-architecture.md`](../adr/ADR-006-inventory-architecture.md).
+  Data-preserving (existing warehouse/inventory-item/transaction rows carried
+  forward, mapped to the new movement-type vocabulary) — see its own header
+  comment for the exact old→new mapping.
 
 This is **not** full coverage of blueprint §57's eventual table list. See
 ["Deliberately out of scope"](#deliberately-out-of-scope) below for exactly
@@ -72,7 +86,7 @@ below) once real entities had to be designed rather than named.
      human — e.g. `Product`, `Customer`, `Order`) get the full
      `createdAt` / `updatedAt` / `deletedAt` trio.
    - **Append-only records** (a fact captured once, never edited — e.g.
-     `InventoryTransaction`, `LoyaltyTransaction`, `AuditLog`) get
+     `InventoryLedger`, `LoyaltyTransaction`, `AuditLog`) get
      `createdAt` only. A fabricated `updatedAt`/`deletedAt` on an immutable
      log row would be actively misleading, not extra rigor — nothing ever
      updates or deletes one, so those columns would always read as "never".
@@ -95,9 +109,12 @@ below) once real entities had to be designed rather than named.
    silently change because the product it references was later repriced,
    renamed, or deleted.
 8. **Stock is a ledger, not a mutable counter** (blueprint §24/§27) —
-   `inventory.InventoryTransaction` is append-only and is the source of
-   truth for _why_ `InventoryItem.quantityOnHand` is what it is; that
-   column is a maintained cache, never edited directly.
+   `inventory.InventoryLedger` is append-only (Phase 006 — see
+   [`inventory-erd.md`](./inventory-erd.md)) and is the source of truth for
+   _why_ `InventoryItem`'s quantity buckets are what they are; those columns
+   are a maintained cache, never edited directly, and
+   `available_quantity >= 0` is enforced transactionally rather than by a
+   database constraint (Prisma has no `@@check(...)` support).
 
 ## Cross-schema references are intentionally unenforced
 
@@ -205,6 +222,17 @@ real local PostgreSQL:
   before the FK constraints referencing it were dropped, and initially
   didn't recreate `products_status_idx` after restoring the old-typed
   `status` column — see that migration's own `down.sql` header comment.
+- Phase 006: the `inventory` rewrite (11 tables, replacing Phase 003's
+  3-table placeholder shape), round-tripped once — up → down → up — with
+  `prisma migrate diff` confirming zero drift at each step, Phase 005's
+  catalog seed data (18 products, 1 brand, 6 SKUs) confirmed intact
+  throughout, and the seed re-run 3 times confirming idempotency after the
+  round trip. Two real bugs were caught this way: `stock_counts_location_id_fkey`
+  needed `ON DELETE SET NULL` (Prisma's default for that relation shape),
+  not the `RESTRICT` the migration initially wrote, and `down.sql`'s
+  collapse queries needed `MIN(id::text)::uuid` — Postgres has no `MIN(uuid)`
+  aggregate — with the cast placed outside the `OVER(...)` window clause, not
+  inside it. See that migration's own `down.sql` header comment.
 
 ## Seeding
 
@@ -213,16 +241,19 @@ pnpm --filter @iecp/database seed
 ```
 
 `prisma/seed.ts` walks one coherent slice through every schema — an admin
-user and a demo customer (identity/customer), a product with a priced,
-stocked variant (catalog/finance/inventory), a coupon (marketing), a home
-page/menu/FAQ (cms), notification templates + the demo customer's channel
-preferences (notification), and a feature flag + a setting (system).
-Idempotent throughout (`upsert`, keyed on each model's real unique
-constraint) — safe to run against a freshly-migrated database or one that
-already has this data. Verified idempotent (ran twice, row counts
-unchanged) and verified runnable under `iecp_app` alone — the seed only
-needs DML, confirming the least-privilege role is sufficient for real
-application-style writes, not just raw `psql`.
+user and a demo customer (identity/customer), 38 real RBAC permissions
+across identity/catalog/inventory with 8 roles including a deny-override
+(identity), two products including one priced, published, stocked SKU
+(catalog/finance), two warehouses/three locations with real stock, a
+reservation, a low-stock example, and a transfer (inventory), a coupon
+(marketing), a home page/menu/FAQ (cms), notification templates + the demo
+customer's channel preferences (notification), and a feature flag + a
+setting (system). Idempotent throughout (`upsert`, keyed on each model's
+real unique constraint) — safe to run against a freshly-migrated database or
+one that already has this data. Verified idempotent (ran three times across
+Phase 006, row counts unchanged) and verified runnable under `iecp_app`
+alone — the seed only needs DML, confirming the least-privilege role is
+sufficient for real application-style writes, not just raw `psql`.
 
 ## Backup/restore
 
@@ -259,9 +290,13 @@ without knowing that host.
 Left out of this foundation pass, on purpose, rather than rushed to hit
 every table in blueprint §57:
 
-- **Procurement / supplier management** — no `procurement` schema. Nothing
-  in the current model depends on it (inventory increases are recorded as
-  generic `PURCHASE` transactions with a free-text `reference`).
+- **Procurement / supplier management** — no `procurement` schema. Phase 006
+  gave `inventory` real receiving/quarantine vocabulary
+  (`PURCHASE_RECEIPT`/`RETURN_RECEIPT`/`QUARANTINE`/
+  `RELEASE_FROM_QUARANTINE` movement types with polymorphic
+  `referenceType`/`referenceId`) a future procurement/returns phase can
+  write against, but no supplier/purchase-order tables exist yet — see
+  `docs/adr/ADR-006-inventory-architecture.md` decision 9.
 - **Retail / POS / in-store appointments** — no `retail` schema. The
   blueprint's omnichannel ambitions (§29-§31) are real, but nothing in the
   online-commerce path needs them yet.
