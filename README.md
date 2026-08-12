@@ -112,9 +112,11 @@ Run any of these against one workspace with `pnpm --filter <name> <script>`, e.g
 
 ## Status
 
-Phase 0 (product/architecture definition) and the Phase 001 monorepo-foundation
-task are done — see `CLAUDE.md`'s "Current status" for exactly what that does and
-doesn't include. Next up: Phase 1, the real PostgreSQL ERD.
+Phase 0 (product/architecture definition), the Phase 001 monorepo-foundation
+task, Phase 003's real PostgreSQL ERD, Phase 004's identity/RBAC module, and
+Phase 005's product catalog/merchandising module are done — see `CLAUDE.md`'s
+"Current status" for exactly what each does and doesn't include. Next up: the
+remaining Phase 1 domain modules (`customer`, `order`, `inventory`, …).
 
 ## License
 

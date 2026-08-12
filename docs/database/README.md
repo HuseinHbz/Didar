@@ -10,7 +10,7 @@ cross-schema overview.
 
 ## Status
 
-`schema.prisma` defines 67 models across the 11 schemas below, across two
+`schema.prisma` defines 71 models across the 11 schemas below, across three
 applied migrations, each exercised end-to-end — migrate up, roll back,
 re-apply — against a real local PostgreSQL, not just validated for syntax:
 
@@ -28,6 +28,18 @@ re-apply — against a real local PostgreSQL, not just validated for syntax:
   Phase 003's seed already created) rather than just add empty structure —
   see that migration's own header comment for the nullable-then-backfill
   pattern used.
+- `20260812105606_catalog_merchandising_foundation` (Phase 005) — rewrites
+  `catalog` for real product management/merchandising (brands, hierarchical
+  categories, manual/dynamic collections, the full `Product` publication
+  lifecycle, the `ProductVariant`/`ProductSku` split, storage-agnostic
+  `Media`, localizable admin-defined attributes) and repoints
+  `inventory.InventoryItem`/`commerce.CartItem`/`commerce.OrderItem`/
+  `finance.ProductPrice`/`finance.PriceHistory` from `productVariantId` to
+  `productSkuId`. Full detail:
+  [`catalog-erd.md`](./catalog-erd.md) and
+  [`docs/adr/ADR-005-catalog-architecture.md`](../adr/ADR-005-catalog-architecture.md).
+  This migration carries data forward rather than dropping and recreating
+  (nullable → backfill → NOT NULL throughout) — see its own header comment.
 
 This is **not** full coverage of blueprint §57's eventual table list. See
 ["Deliberately out of scope"](#deliberately-out-of-scope) below for exactly
@@ -167,15 +179,32 @@ directly — `prisma migrate resolve --rolled-back` was tried first and
 rejected with `P3012`, because that command only accepts a migration Prisma
 itself marked "failed" (a partial `migrate deploy`), not one that finished
 successfully and is now being undone by hand. See the comments at the top
-of `db-rollback.sh` and the current migration's `down.sql` for the full
-detail, including the one caveat: the `--to-empty` diff recipe used to
-generate `down.sql` is only valid for the single-migration history that
-exists today (undo-the-last-migration and undo-everything are the same
-operation right now); once a second migration lands, that recipe has to
-diff against the _previous_ migration's state instead of empty.
+of `db-rollback.sh` and each migration's own `down.sql` for the full
+detail, including the one caveat the `--to-empty` diff recipe carried at
+Phase 003: it was only valid for a single-migration history
+(undo-the-last-migration and undo-everything were the same operation).
+That stopped being true once Phase 004 landed a second migration —
+`down.sql` for `20260811192730_identity_rbac_devices_2fa` and
+`20260812105606_catalog_merchandising_foundation` (Phase 005) were each
+hand-authored to diff against the _previous_ migration's state, not empty,
+and each was verified independently.
 
-Tested end-to-end, twice: migrate up → verify 63 tables across 11 schemas →
-roll back → verify 0 tables → re-apply → verify 63 tables again.
+Tested end-to-end at every phase: migrate up → verify the schema → roll
+back → verify the previous schema → re-apply → verify again, against a
+real local PostgreSQL:
+
+- Phase 003: 63 tables across 11 schemas, round-tripped twice.
+- Phase 004: identity's RBAC/device/2FA/security-event additions,
+  round-tripped once, `prisma migrate diff` confirming zero drift at each
+  step.
+- Phase 005: the 71-model `catalog` rewrite (8 new/changed tables, 5
+  cross-schema column repoints), round-tripped once — up → down → up —
+  with `prisma migrate diff` confirming zero drift at each step and seed
+  data intact after the round trip. Two real bugs were caught this way,
+  not by reading the SQL: `down.sql` initially tried to drop `catalog.media`
+  before the FK constraints referencing it were dropped, and initially
+  didn't recreate `products_status_idx` after restoring the old-typed
+  `status` column — see that migration's own `down.sql` header comment.
 
 ## Seeding
 

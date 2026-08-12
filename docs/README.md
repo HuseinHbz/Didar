@@ -1,14 +1,21 @@
 # Documentation
 
-| Doc                                                      | Covers                                                                                                                          |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| [`product/blueprint.md`](product/blueprint.md)           | The full product & architecture blueprint — start here for _why_, not just _what_.                                              |
-| [`architecture/README.md`](architecture/README.md)       | System shape, monorepo tooling choices, backend module layering, open questions.                                                |
-| [`database/README.md`](database/README.md)               | DB conventions, what's real vs. placeholder, what Phase 1 (the real ERD) still needs to answer.                                 |
-| [`api/README.md`](api/README.md)                         | REST conventions, error shape, idempotency, auth status, OpenAPI.                                                               |
-| [`security/README.md`](security/README.md)               | What security controls actually exist today vs. what's still open — read before adding a write endpoint.                        |
-| [`deployment/README.md`](deployment/README.md)           | Environments, containerization, CI, what's not set up yet.                                                                      |
-| [`deployment/ci-pipeline.md`](deployment/ci-pipeline.md) | The branch strategy (main/develop/feature/bugfix/hotfix) and the four-job CI quality gate (lint/test/security/build) in detail. |
+| Doc                                                                          | Covers                                                                                                                                                                     |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`product/blueprint.md`](product/blueprint.md)                               | The full product & architecture blueprint — start here for _why_, not just _what_.                                                                                         |
+| [`architecture/README.md`](architecture/README.md)                           | System shape, monorepo tooling choices, backend module layering, open questions.                                                                                           |
+| [`architecture/catalog.md`](architecture/catalog.md)                         | Phase 005 — where the catalog module fits, what changed outside it, frontend-integration sequence for a future phase.                                                      |
+| [`database/README.md`](database/README.md)                                   | DB conventions, what's real vs. placeholder, what Phase 1 (the real ERD) still needs to answer.                                                                            |
+| [`database/erd.md`](database/erd.md)                                         | One Mermaid diagram per schema plus a cross-schema overview.                                                                                                               |
+| [`database/catalog-erd.md`](database/catalog-erd.md)                         | Phase 005 — full `catalog` schema detail (every column, FK/UK, rationale); `erd.md`'s `catalog` section is the abbreviated pointer here.                                   |
+| [`api/README.md`](api/README.md)                                             | REST conventions, error shape, idempotency, auth status, OpenAPI.                                                                                                          |
+| [`api/catalog.md`](api/catalog.md)                                           | Phase 005 — the full admin + storefront catalog endpoint reference.                                                                                                        |
+| [`security/README.md`](security/README.md)                                   | What security controls actually exist today vs. what's still open — read before adding a write endpoint.                                                                   |
+| [`security/catalog-security.md`](security/catalog-security.md)               | Phase 005 — the 21-permission catalog matrix, role grants, and what's proven (not just declared) about RBAC/audit/lifecycle enforcement.                                   |
+| [`product/catalog.md`](product/catalog.md)                                   | Phase 005 — catalog domain scope: what's real vs. deliberately deferred.                                                                                                   |
+| [`adr/ADR-005-catalog-architecture.md`](adr/ADR-005-catalog-architecture.md) | Phase 005 — the catalog module's architecture decision record (Variant/SKU split, pricing, SEO/localization, dynamic collections, search, RBAC reuse, backend-only scope). |
+| [`deployment/README.md`](deployment/README.md)                               | Environments, containerization, CI, what's not set up yet.                                                                                                                 |
+| [`deployment/ci-pipeline.md`](deployment/ci-pipeline.md)                     | The branch strategy (main/develop/feature/bugfix/hotfix) and the four-job CI quality gate (lint/test/security/build) in detail.                                            |
 
 Root [`CLAUDE.md`](../CLAUDE.md) is the condensed version of all of this, meant to
 auto-load as context for anyone (human or agent) picking up this repo.

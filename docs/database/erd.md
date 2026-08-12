@@ -38,10 +38,10 @@ graph LR
     identity -. "customers.user_id" .-> customer
     customer -. "orders.customer_id" .-> commerce
     customer -. "carts.customer_id (nullable: guest checkout)" .-> commerce
-    catalog -. "product_prices.product_variant_id" .-> finance
-    catalog -. "price_history.product_variant_id" .-> finance
-    catalog -. "inventory_items.product_variant_id" .-> inventory
-    catalog -. "cart_items/order_items.product_variant_id" .-> commerce
+    catalog -. "product_prices.product_sku_id" .-> finance
+    catalog -. "price_history.product_sku_id" .-> finance
+    catalog -. "inventory_items.product_sku_id" .-> inventory
+    catalog -. "cart_items/order_items.product_sku_id" .-> commerce
     commerce -. "invoices.order_id" .-> finance
     commerce -. "stock_reservations.order_id" .-> inventory
     commerce -. "coupon_redemptions.order_id/customer_id" .-> marketing
@@ -241,14 +241,29 @@ erDiagram
 
 ## catalog
 
+Phase 005 (see [`catalog-erd.md`](./catalog-erd.md) for the full diagram with
+every column and design rationale) substantially extended this schema —
+`brands`/`categories`/`products` gained SEO/localization/media fields,
+`product_variants` split into a merchandising row (this table) and a new
+`product_skus` table (the sellable/priced/inventoried unit — see
+[`docs/adr/ADR-005-catalog-architecture.md`](../adr/ADR-005-catalog-architecture.md)
+decision 1), `product_images` was replaced by a storage-agnostic `media` +
+`product_media` pair, and two new tables (`collections`,
+`collection_products`) were added. The summary below is intentionally
+abbreviated; `catalog-erd.md` is the source of truth for this schema going
+forward.
+
 ```mermaid
 erDiagram
     brands ||--o{ products : has
     categories ||--o{ products : has
     categories ||--o{ categories : "parent/children"
     products ||--o{ product_variants : has
-    products ||--o{ product_images : has
-    product_variants ||--o{ product_images : has
+    product_variants ||--o| product_skus : has
+    products ||--o{ product_media : has
+    media ||--o{ product_media : "attached via"
+    products ||--o{ collection_products : "belongs to"
+    collections ||--o{ collection_products : contains
     product_attributes ||--o{ product_attribute_values : has
     product_variants ||--o{ product_variant_attribute_values : has
     product_attribute_values ||--o{ product_variant_attribute_values : has
@@ -257,38 +272,68 @@ erDiagram
         uuid id PK
         string name UK
         string slug UK
+        uuid logo_media_id FK "nullable, -> media.id"
+        enum status "ACTIVE|INACTIVE"
     }
     categories {
         uuid id PK
         uuid parent_id FK "nullable, self-reference"
         string name
         string slug UK
+        enum status "ACTIVE|INACTIVE"
+        timestamp published_at "nullable"
+    }
+    collections {
+        uuid id PK
+        string name
+        string slug UK
+        enum type "MANUAL|DYNAMIC"
+        json rules "nullable, DYNAMIC only"
+        int priority
+    }
+    collection_products {
+        uuid collection_id "PK, FK"
+        uuid product_id "PK, FK"
         int sort_order
     }
     products {
         uuid id PK
         uuid brand_id FK
         uuid category_id FK
-        string sku UK
+        enum product_type "EYEGLASSES|SUNGLASSES|...|ACCESSORY"
         string name
         string slug UK
-        enum gender "nullable: MALE|FEMALE|UNISEX|KIDS"
-        enum status "DRAFT|ACTIVE|ARCHIVED"
+        enum status "DRAFT|IN_REVIEW|APPROVED|PUBLISHED|UNPUBLISHED|ARCHIVED"
+        string[] tags
+        uuid ar_model_media_id FK "nullable, -> media.id"
     }
     product_variants {
         uuid id PK
         uuid product_id FK
-        string sku UK
-        string barcode UK "nullable"
         string color "nullable"
         string size "nullable"
+        int frame_width_mm "nullable"
+        int bridge_width_mm "nullable"
+        int temple_length_mm "nullable"
+        enum gender "nullable"
         boolean is_default
-        enum status
+        enum status "ACTIVE|INACTIVE"
+    }
+    product_skus {
+        uuid id PK
+        uuid product_id FK
+        uuid variant_id UK "1:1 with product_variants"
+        string sku_code UK
+        string barcode UK "nullable"
+        int weight_grams "nullable"
+        int tax_rate_basis_points "nullable"
+        enum status "ACTIVE|INACTIVE|DISCONTINUED"
     }
     product_attributes {
         uuid id PK
         string key UK "e.g. frame_shape"
         string name "e.g. شکل فریم"
+        boolean is_filterable
     }
     product_attribute_values {
         uuid id PK
@@ -299,11 +344,19 @@ erDiagram
         uuid variant_id "PK, FK"
         uuid attribute_value_id "PK, FK"
     }
-    product_images {
+    media {
+        uuid id PK
+        enum provider "LOCAL|S3|CDN"
+        string storage_key UK
+        string url
+        enum kind "IMAGE|VIDEO|MODEL_3D|AR_ASSET"
+    }
+    product_media {
         uuid id PK
         uuid product_id FK
         uuid variant_id FK "nullable"
-        string url
+        uuid media_id FK
+        enum role "PRIMARY|GALLERY|THUMBNAIL|SWATCH|VIDEO|MODEL_3D"
         int sort_order
     }
     lens_types {
@@ -337,7 +390,7 @@ erDiagram
     inventory_items {
         uuid id PK
         uuid warehouse_id FK
-        uuid product_variant_id UK "-> catalog.product_variants.id, unenforced"
+        uuid product_sku_id UK "-> catalog.product_skus.id, unenforced"
         int quantity_on_hand "cache of inventory_transactions sum"
         int quantity_reserved
         int reorder_point "nullable"
@@ -359,8 +412,10 @@ erDiagram
     }
 ```
 
-Composite unique constraint `(warehouse_id, product_variant_id)` on
-`inventory_items` — one stock row per variant per warehouse.
+Composite unique constraint `(warehouse_id, product_sku_id)` on
+`inventory_items` — one stock row per SKU per warehouse (Phase 005 —
+previously per variant; see `docs/adr/ADR-005-catalog-architecture.md`
+decision 1).
 `inventory_transactions` is the append-only ledger;
 `inventory_items.quantity_on_hand` is a maintained cache, never the source
 of truth.
@@ -384,7 +439,7 @@ erDiagram
     cart_items {
         uuid id PK
         uuid cart_id FK
-        uuid product_variant_id "-> catalog.product_variants.id, unenforced"
+        uuid product_sku_id "-> catalog.product_skus.id, unenforced"
         int quantity
         bigint unit_price_snapshot
     }
@@ -400,7 +455,7 @@ erDiagram
     order_items {
         uuid id PK
         uuid order_id FK
-        uuid product_variant_id "nullable, -> catalog.product_variants.id, unenforced"
+        uuid product_sku_id "nullable, -> catalog.product_skus.id, unenforced"
         string sku_snapshot
         string name_snapshot
         bigint unit_price_snapshot
@@ -547,13 +602,16 @@ erDiagram
 
     product_prices {
         uuid id PK
-        uuid product_variant_id UK "-> catalog.product_variants.id, unenforced"
+        uuid product_sku_id UK "-> catalog.product_skus.id, unenforced"
         bigint base_price
+        bigint compare_at_price "nullable, Phase 005 — the was price"
         bigint cost_price "nullable"
+        timestamp valid_from "nullable, Phase 005"
+        timestamp valid_to "nullable, Phase 005"
     }
     price_history {
         uuid id PK
-        uuid product_variant_id "-> catalog.product_variants.id, unenforced"
+        uuid product_sku_id "-> catalog.product_skus.id, unenforced"
         bigint old_price "nullable"
         bigint new_price
         uuid changed_by "nullable, -> identity.users.id, unenforced"
@@ -575,8 +633,10 @@ erDiagram
 ```
 
 Pricing is deliberately its own domain, not a column on `catalog.products` —
-exactly one active `product_prices` row per variant; every change is
-recorded in the append-only `price_history`, never a silent overwrite.
+exactly one active `product_prices` row per SKU (Phase 005 — previously per
+variant); every change is recorded in the append-only `price_history`,
+never a silent overwrite. See `docs/database/catalog-erd.md` for the full
+Phase 005 catalog schema this now keys off.
 
 ## notification
 

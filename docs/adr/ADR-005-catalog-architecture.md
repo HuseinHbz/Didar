@@ -7,7 +7,7 @@
 
 ## Context
 
-Phase 003 shipped a *foundation* catalog schema — `Brand`, `Category`,
+Phase 003 shipped a _foundation_ catalog schema — `Brand`, `Category`,
 `Product`, `ProductVariant` (which doubled as the sellable/priced unit),
 `ProductAttribute`/`ProductAttributeValue`, `ProductImage`, plus pricing
 (`finance.ProductPrice`/`PriceHistory`) and inventory
@@ -19,7 +19,7 @@ Phase 005's brief asks for a materially richer model: brands with SEO and
 localized names, unlimited-depth categories with a separate active/published
 distinction, manual **and** rule-based dynamic collections, a product
 publishing state machine (`DRAFT → IN_REVIEW → APPROVED → PUBLISHED →
-UNPUBLISHED/ARCHIVED`), a *SKU* concept distinct from a *variant*, a storage-
+UNPUBLISHED/ARCHIVED`), a _SKU_ concept distinct from a _variant_, a storage-
 agnostic media abstraction, AR/3D readiness, scheduled/compare-at pricing
 with an audit trail, and both admin and storefront APIs — all while reusing
 Phase 004's RBAC/audit machinery rather than inventing a parallel one.
@@ -31,8 +31,8 @@ Phase 004's RBAC/audit machinery rather than inventing a parallel one.
 The Phase 003 schema conflated "one purchasable configuration of a product"
 (a variant: a specific color/size/frame-measurement combination) with "the
 thing that has a barcode, a cost, a price, and inventory" (a SKU). Real
-eyewear catalogs need both: a *variant* is a merchandising concept (what an
-admin picks when authoring a product — "Matte Black, 52mm"), while a *SKU* is
+eyewear catalogs need both: a _variant_ is a merchandising concept (what an
+admin picks when authoring a product — "Matte Black, 52mm"), while a _SKU_ is
 a commerce/inventory concept (what has a price, a supplier, a weight, and a
 stock ledger row). Splitting them:
 
@@ -75,7 +75,7 @@ pricing" / "price validity period" requirements), and its FK moves from
 covered the audit-trail requirement and needs no shape change beyond the
 same FK rename.
 
-Coupon/discount *calculation* at checkout is explicitly out of scope per the
+Coupon/discount _calculation_ at checkout is explicitly out of scope per the
 brief's own `pricing.important` note — this phase only stores the price
 foundation a future commerce phase reads.
 
@@ -147,7 +147,7 @@ follows the same split deliberately, not as an oversight: the brief's
 operations", "Product listing API integration", etc.) are implemented as
 real, tested, RBAC-guarded REST endpoints under `/admin/catalog/*` and
 `/catalog/*` — the actual "must never hardcode business data in frontend
-code" rule this project leads with is a statement about where data *can*
+code" rule this project leads with is a statement about where data _can_
 come from, not a requirement that the UI ships in the same phase as the API
 it will call. Building `apps/admin`'s catalog screens now, without a design
 system pass or the rest of the admin shell, would be exactly the kind of

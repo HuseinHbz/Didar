@@ -153,13 +153,34 @@ exactly what this covers and what's still explicitly open (rate limiting,
 OAuth/social login, API-key request authentication, Security Center
 dashboards, KMS-backed key rotation).
 
+Phase 005 built the real product catalog/merchandising domain on top of
+that foundation: `services/api/src/modules/catalog` (see its own
+`README.md`) covers brands, unlimited-depth categories, manual/dynamic
+collections, the full product publication lifecycle (`DRAFT → IN_REVIEW →
+APPROVED → PUBLISHED → UNPUBLISHED`/`ARCHIVED`, enforced by a domain-layer
+state machine independent of RBAC), the `ProductVariant`/`ProductSku` split
+(merchandising configuration vs. the sellable/priced/inventoried unit —
+`docs/adr/ADR-005-catalog-architecture.md` decision 1), storage-agnostic
+media, localizable admin-defined attributes, and pricing
+(`finance.ProductPrice`/`PriceHistory`, extended not duplicated). It's the
+second full clean-architecture module in this repo and reuses Phase 004's
+auth/RBAC/audit-log infrastructure wholesale rather than reinventing it — 21
+new `catalog.*` permissions, a new `catalog_editor` role, and catalog is the
+first module to actually **write** `system.AuditLog` (Phase 004 only ever
+read it). The public storefront read surface (`GET /catalog/...`) is
+Postgres-only search this phase, deliberately not Elasticsearch/OpenSearch
+— see `docs/adr/ADR-005-catalog-architecture.md` decision 5.
+**Backend-only, same as Phase 004**: `apps/admin`/`apps/storefront` are
+still untouched (decision 7) — see `docs/product/catalog.md` for exactly
+what a future frontend phase would need from this API surface.
+
 **Next up is still the rest of Phase 1** (see end of blueprint doc "وضعیت
-فعلی"): the remaining real domain modules (`customer`, `catalog`, `order`,
-`inventory`, …) beyond `identity`, each landing once its slice of the ERD/API
+فعلی"): the remaining real domain modules (`customer`, `order`, `inventory`,
+…) beyond `identity`/`catalog`, each landing once its slice of the ERD/API
 contract/permission matrix/event map is designed — _before_ further
 UI/design-system work. The stated ordering principle: settle the
-database/domain skeleton first (done for identity; the rest still pending),
-then design system + admin panel structure + web/PWA sitemap + Android
-structure.
+database/domain skeleton first (done for identity and catalog; the rest
+still pending), then design system + admin panel structure + web/PWA
+sitemap + Android structure.
 
 Treat any new architectural decision as needing to stay consistent with this document, or update it explicitly.
