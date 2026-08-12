@@ -25,6 +25,12 @@ const envSchema = z.object({
     },
     { message: 'ENCRYPTION_KEY must be base64 and decode to exactly 32 bytes' },
   ),
+
+  // inventory module (Phase 006) — BullMQ connection for the
+  // reservation_expiration/low_stock_notification/inventory_event_processing
+  // queues, hosted in-process here rather than in services/worker (ADR-006
+  // decision 8). Same default `services/worker` already uses.
+  REDIS_URL: envPrimitives.url.default('redis://localhost:6379'),
 });
 
 export type Env = z.infer<typeof envSchema>;
