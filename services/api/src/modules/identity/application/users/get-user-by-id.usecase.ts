@@ -1,8 +1,8 @@
 import type { UserId } from '@iecp/types';
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 
-import type { User } from '../domain/user.entity';
-import { USER_REPOSITORY, type UserRepositoryPort } from '../domain/user.repository.port';
+import type { User } from '../../domain/entities/user.entity';
+import { USER_REPOSITORY, type UserRepositoryPort } from '../../domain/ports/user.repository.port';
 
 /**
  * Application layer: one use case per file. Orchestrates the domain/ports;

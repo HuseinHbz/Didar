@@ -50,7 +50,7 @@ graph LR
     customer -. "analytics_events.customer_id" .-> analytics
     catalog -. "analytics_events.product_id" .-> analytics
     commerce -. "analytics_events.order_id" .-> analytics
-    identity -. "audit_logs.actor_id, *.created_by/changed_by" .-> system
+    identity -. "audit_logs.actor_id/actor_device, *.created_by/changed_by" .-> system
 ```
 
 ## identity
@@ -59,9 +59,16 @@ graph LR
 erDiagram
     users ||--o{ user_sessions : has
     users ||--o{ user_roles : has
+    users ||--o{ user_devices : has
+    users ||--o| user_two_factor_credentials : has
+    users ||--o{ user_permission_overrides : has
+    users ||--o{ security_events : has
+    user_devices ||--o{ user_sessions : "issued from"
     roles ||--o{ user_roles : has
     roles ||--o{ role_permissions : has
+    roles ||--o{ roles : "parent/children"
     permissions ||--o{ role_permissions : has
+    permissions ||--o{ user_permission_overrides : has
 
     users {
         uuid id PK
@@ -72,14 +79,34 @@ erDiagram
         timestamp phone_verified_at "nullable"
         timestamp last_login_at "nullable"
     }
+    user_devices {
+        uuid id PK
+        uuid user_id FK
+        string fingerprint "hash of UA + platform + install id"
+        string label "nullable, e.g. Ali's iPhone"
+        string platform "nullable"
+        timestamp trusted_at "nullable — blueprint Device Trust"
+        timestamp last_seen_at
+        timestamp revoked_at "nullable"
+    }
     user_sessions {
         uuid id PK
         uuid user_id FK
+        uuid device_id FK "nullable"
         string refresh_token_hash UK
         string user_agent "nullable"
         string ip_address "nullable"
         timestamp expires_at
         timestamp revoked_at "nullable"
+    }
+    user_two_factor_credentials {
+        uuid id PK
+        uuid user_id "UK, FK"
+        enum method "TOTP"
+        string secret_encrypted "AES-256-GCM ciphertext, never raw"
+        string[] recovery_codes_hashed
+        boolean enabled
+        timestamp verified_at "nullable"
     }
     otp_requests {
         uuid id PK
@@ -92,12 +119,15 @@ erDiagram
     }
     roles {
         uuid id PK
+        uuid parent_id FK "nullable, self-reference — inheritance"
         string name UK
         boolean is_system
     }
     permissions {
         uuid id PK
-        string key UK "e.g. product.publish"
+        string module "e.g. identity"
+        string action "e.g. users.view_contact"
+        string key UK "module + '.' + action"
     }
     role_permissions {
         uuid role_id "PK, FK"
@@ -107,10 +137,32 @@ erDiagram
         uuid user_id "PK, FK"
         uuid role_id "PK, FK"
     }
+    user_permission_overrides {
+        uuid id PK
+        uuid user_id FK
+        uuid permission_id FK
+        enum effect "ALLOW | DENY — DENY always wins"
+        string reason "nullable"
+        uuid created_by "nullable, -> identity.users.id, unenforced"
+    }
+    security_events {
+        uuid id PK
+        uuid user_id "nullable, FK"
+        enum type "LOGIN_SUCCESS | LOGIN_FAILURE | OTP_* | TWO_FACTOR_* | SESSION_* | API_KEY_*"
+        string ip_address "nullable"
+        string user_agent "nullable"
+        json metadata "nullable"
+    }
 ```
 
 `otp_requests` has no FK — it's keyed by `phone` directly (a request can
-precede account creation, e.g. registration OTP).
+precede account creation, e.g. registration OTP). `roles.parent_id` is a
+self-reference: a role's effective permissions are its own `role_permissions`
+rows unioned with every ancestor's, resolved in application code (Phase 004's
+`PermissionResolver`), not a recursive query baked into the schema.
+`user_permission_overrides` is the per-user exception on top of that
+resolved set — `DENY` always wins over any role-derived grant, `ALLOW`
+grants something no assigned role does.
 
 ## customer
 
@@ -592,6 +644,7 @@ erDiagram
         uuid id PK
         uuid actor_id "nullable, -> identity.users.id, unenforced"
         string actor_ip "nullable"
+        string actor_device "nullable, -> identity.user_devices.id, unenforced"
         string action "PRODUCT_PRICE_CHANGED | ROLE_ASSIGNED | ..."
         string entity_type
         string entity_id

@@ -110,13 +110,15 @@ Phase 0 (product/architecture definition, `docs/product/blueprint.md`) is done a
 a "design scope" level. The Phase 001 foundation task built the monorepo
 **structure and toolchain** — pnpm+Turborepo workspace, all seven `apps`/`services`
 scaffolded and buildable, five shared `packages`, local-dev infrastructure
-(`docker-compose.yml`), and status docs. This is scaffolding, not features:
-`services/api` has exactly two modules (`health`, real; `identity`, structurally
-real but backed by one placeholder DB model), no auth/RBAC exists anywhere, and
-every notification-channel adapter is a stub. See `docs/architecture/README.md`,
-`docs/security/README.md`, and `docs/deployment/README.md` for precise
-"what's real vs. planned" breakdowns — don't assume a piece works just because a
-file for it exists.
+(`docker-compose.yml`), and status docs. At that point this was scaffolding, not
+features: `services/api` had exactly two modules (`health`, real; `identity`,
+structurally real but backed by one placeholder DB model), no auth/RBAC existed
+anywhere, and every notification-channel adapter was a stub. Phases 003/004
+below made the database and identity/RBAC pieces of that statement no longer
+true — see `docs/architecture/README.md`, `docs/security/README.md`, and
+`docs/deployment/README.md` for precise, currently-maintained "what's real vs.
+planned" breakdowns — don't assume a piece works just because a file for it
+exists.
 
 Phase 002 added the enterprise git workflow + CI quality gate: `main`
 (production) / `develop` (integration) / `feature`+`bugfix`+`hotfix` branches
@@ -128,12 +130,36 @@ manual GitHub-admin step (not configurable from inside the repo) — see that
 doc. `develop` currently equals `feature/foundation-monorepo`'s content since
 that branch was never merged to `main` (no PR was requested).
 
-**Next up is still Phase 1** (see end of blueprint doc "وضعیت فعلی"): the actual
-PostgreSQL ERD (every table, column, type, PK/FK, index, enum, relation),
-migration/seed strategy, audit/soft-delete/versioning model, API contract,
-permission matrix, event map, and the precise order state machine — _before_ any
-further UI/design-system work or real domain modules. The stated ordering
-principle: settle the database/domain skeleton first, then design system + admin
-panel structure + web/PWA sitemap + Android structure.
+Phase 003 built the real PostgreSQL foundation (blueprint's "settle the
+database/domain skeleton first" ordering principle): the full ERD across all
+11 domain schemas, hand-authored migrations with rollback (`down.sql`) scripts,
+a convergent seed script, backup/restore scripts, and `docs/database/README.md`
+
+- `docs/database/erd.md` (Mermaid) as the maintained source of truth. CI now
+  applies migrations and runs the seed as a regression check before the e2e
+  suite.
+
+Phase 004 built the real identity/RBAC system on top of that foundation:
+`services/api/src/modules/identity` is a full clean-architecture module (see
+its own `README.md`) covering mobile OTP + email/password login, refresh-token
+rotation, TOTP 2FA, role inheritance, a permission matrix with per-user
+allow/deny overrides (deny always wins), module- and field-level access
+control, and sessions/devices/API-key/audit-log self-service endpoints. A
+global `JwtAuthGuard` + `AuthorizationGuard` now protect every route in
+`services/api` by default (opt out per-route with `@Public()`) — the
+foundation task's "no auth/RBAC exists anywhere" is no longer accurate.
+`docs/security/README.md`'s "In place today" table is the maintained record of
+exactly what this covers and what's still explicitly open (rate limiting,
+OAuth/social login, API-key request authentication, Security Center
+dashboards, KMS-backed key rotation).
+
+**Next up is still the rest of Phase 1** (see end of blueprint doc "وضعیت
+فعلی"): the remaining real domain modules (`customer`, `catalog`, `order`,
+`inventory`, …) beyond `identity`, each landing once its slice of the ERD/API
+contract/permission matrix/event map is designed — _before_ further
+UI/design-system work. The stated ordering principle: settle the
+database/domain skeleton first (done for identity; the rest still pending),
+then design system + admin panel structure + web/PWA sitemap + Android
+structure.
 
 Treat any new architectural decision as needing to stay consistent with this document, or update it explicitly.

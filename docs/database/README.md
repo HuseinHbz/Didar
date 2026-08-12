@@ -10,11 +10,24 @@ cross-schema overview.
 
 ## Status
 
-The Phase 003 **foundation** is real and migrated: `schema.prisma` defines
-63 models across the 11 schemas below, one migration
-(`20260811181736_init_enterprise_foundation`) is applied, and it's been
-exercised end-to-end — migrate up, roll back, re-apply, seed, backup,
-restore — against a real local PostgreSQL, not just validated for syntax.
+`schema.prisma` defines 67 models across the 11 schemas below, across two
+applied migrations, each exercised end-to-end — migrate up, roll back,
+re-apply — against a real local PostgreSQL, not just validated for syntax:
+
+- `20260811181736_init_enterprise_foundation` (Phase 003) — the 63-model
+  foundation: catalog/commerce/inventory/etc., plus a first pass at
+  `identity` (users, sessions, OTP, roles/permissions, the join tables).
+- `20260811192730_identity_rbac_devices_2fa` (Phase 004) — extends
+  `identity` for real authn/authz: role inheritance (`roles.parent_id`),
+  structured permissions (`permissions.module`/`action`), per-user
+  allow/deny exceptions (`user_permission_overrides`), device tracking
+  (`user_devices`), TOTP 2FA (`user_two_factor_credentials`), and identity
+  security events (`security_events`) — plus `actor_device` on
+  `system.audit_logs`. This migration is also the first one that had to
+  backfill existing data (`permissions.module`/`action` on the four rows
+  Phase 003's seed already created) rather than just add empty structure —
+  see that migration's own header comment for the nullable-then-backfill
+  pattern used.
 
 This is **not** full coverage of blueprint §57's eventual table list. See
 ["Deliberately out of scope"](#deliberately-out-of-scope) below for exactly
@@ -231,6 +244,16 @@ every table in blueprint §57:
   `catalog.LensType`/`LensCoating` are minimal lookup tables, not linked to
   anything yet. Blueprint §13's full index/coating combination and pricing
   rules are future work.
+- **OAuth/social login (`oauth_accounts`)** — blueprint §5 lists it, §56
+  says "Google/Apple where applicable"; Phase 004's `authentication.methods`
+  spec didn't ask for it, so it's not modeled. Adding it later is additive
+  (a new table + provider adapters), not a redesign of anything Phase 004
+  built.
+- **`user_credentials` as its own table** — Phase 003 already put
+  `password_hash` directly on `users`, and Phase 004 kept that rather than
+  splitting credentials into blueprint §5's separate table. One user, one
+  password, no per-credential metadata (multiple password history entries,
+  per-credential expiry, ...) that would justify the extra join yet.
 
 Each of these gets its own schema design pass once the feature that needs
 it is actually being built — not invented speculatively now.

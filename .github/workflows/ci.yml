@@ -25,6 +25,17 @@ env:
   # connection strings, for the steps that need a reachable Postgres.
   DATABASE_URL: 'postgresql://iecp_app:change-me-app@localhost:5432/iecp?schema=public'
   JWT_SECRET: 'ci-placeholder-secret'
+  # identity module (Phase 004) config — see services/api/src/config/env.ts.
+  # Only the `test` job's e2e step actually boots the app and needs these
+  # (lint/build never do), but they're set at the workflow level to match
+  # how DATABASE_URL/JWT_SECRET above are already handled, rather than
+  # introducing a different pattern for this one job. ENCRYPTION_KEY is a
+  # CI-only placeholder (AES-256-GCM key, base64-decodes to 32 bytes) — not
+  # a real secret, never reused anywhere that matters.
+  JWT_ACCESS_TTL_SECONDS: '900'
+  JWT_REFRESH_TTL_SECONDS: '2592000'
+  OTP_TTL_SECONDS: '300'
+  ENCRYPTION_KEY: 'tHHpI4F9SlwcT/iC5YXigwpcjLGD8okpxIEKhNRZAWM='
 
 jobs:
   lint:

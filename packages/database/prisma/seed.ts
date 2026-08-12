@@ -11,43 +11,117 @@
  *
  * Run with: `pnpm --filter @iecp/database seed`
  */
+import { createHash } from 'node:crypto';
+
 import { prisma } from '../src/client.js';
+
+/** SHA-256 — mirrors services/api's identity module hash convention for
+ * high-entropy random secrets (see that module's infrastructure/crypto/hash.util.ts
+ * for the full rationale). Reimplemented here, not imported: seed.ts is a
+ * standalone script against `packages/database`, and importing from
+ * `services/api` would invert the monorepo's dependency direction
+ * (services depend on packages, never the other way around). */
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
 
 async function main(): Promise<void> {
   // ---------------------------------------------------------------------
-  // identity — permissions, roles, an admin user, a customer-facing user
+  // identity — the real permission registry (matching what
+  // services/api's identity module actually checks via @RequirePermission/
+  // @RequireModule/@FieldPermissions — see that module's README), a role
+  // hierarchy demonstrating inheritance, and a per-user override
+  // demonstrating blueprint §53's "Product.Publish = NO" pattern.
   // ---------------------------------------------------------------------
-  const permissionKeys = ['product.publish', 'order.manage', 'refund.approve', 'user.manage'];
+  const permissionDefs = [
+    {
+      module: 'identity',
+      action: 'roles.manage',
+      description: 'Create/edit roles, assign/unassign them to users',
+    },
+    {
+      module: 'identity',
+      action: 'permissions.manage',
+      description: 'Set/clear per-user permission overrides',
+    },
+    { module: 'identity', action: 'audit_logs.view', description: 'Read the system audit log' },
+    {
+      module: 'identity',
+      action: 'users.view_contact',
+      description: "See a user's phone/email on GET /users/:id (field-level permission demo)",
+    },
+  ];
   const permissions = await Promise.all(
-    permissionKeys.map((key) =>
+    permissionDefs.map((def) =>
       prisma.permission.upsert({
-        where: { key },
-        update: {},
-        create: { key, description: `Permission: ${key}` },
+        where: { key: `${def.module}.${def.action}` },
+        update: { description: def.description },
+        create: { ...def, key: `${def.module}.${def.action}` },
       }),
     ),
   );
+  const permissionByKey = new Map(permissions.map((permission) => [permission.key, permission]));
 
+  // Convergent, not just additive: any permission NOT in `permissionDefs`
+  // above gets deleted — including Phase 001/003's placeholder
+  // `product.publish`/`order.manage`/`refund.approve`/`user.manage`, which
+  // predate this module and were never checked by any real guard. Deleting
+  // them cascades (schema.prisma: onDelete: Cascade) to remove any
+  // RolePermission/UserPermissionOverride rows referencing them too — a
+  // stale grant to a permission nothing enforces is worse than no grant.
+  await prisma.permission.deleteMany({
+    where: { key: { notIn: permissions.map((permission) => permission.key) } },
+  });
+  const grant = (roleId: string, permissionKey: string) => {
+    const permission = permissionByKey.get(permissionKey);
+    if (!permission) {
+      throw new Error(`[seed] unknown permission key: ${permissionKey}`);
+    }
+    return prisma.rolePermission.upsert({
+      where: { roleId_permissionId: { roleId, permissionId: permission.id } },
+      update: {},
+      create: { roleId, permissionId: permission.id },
+    });
+  };
+
+  // Role tree: admin -> support_agent (admin inherits support_agent's
+  // grant, plus its own three — PermissionResolver.resolve walks this via
+  // RoleRepositoryPort.getEffectiveRoleIds). customer stays a separate,
+  // unrelated root — storefront customers have no identity-module access.
+  const supportAgentRole = await prisma.role.upsert({
+    where: { name: 'support_agent' },
+    update: { description: 'Front-line support — can see customer contact info' },
+    create: {
+      name: 'support_agent',
+      description: 'Front-line support — can see customer contact info',
+    },
+  });
+  const adminRoleDefaults = {
+    description: 'Full identity-module access',
+    isSystem: true,
+    parentId: supportAgentRole.id,
+  };
   const adminRole = await prisma.role.upsert({
     where: { name: 'admin' },
-    update: {},
-    create: { name: 'admin', description: 'Full platform access', isSystem: true },
+    // A role created by an OLDER version of this seed script (e.g. Phase
+    // 001/003, before `parentId` existed) would otherwise keep its
+    // pre-hierarchy state forever — `upsert` only applies `create` on
+    // first insert. Every field this script cares about goes in `update`
+    // too, so re-running always converges an existing row to the current
+    // desired shape, not just the shape it happened to have when created.
+    update: adminRoleDefaults,
+    create: { name: 'admin', ...adminRoleDefaults },
   });
   const customerRole = await prisma.role.upsert({
     where: { name: 'customer' },
-    update: {},
+    update: { description: 'Storefront customer' },
     create: { name: 'customer', description: 'Storefront customer', isSystem: true },
   });
 
-  await Promise.all(
-    permissions.map((permission) =>
-      prisma.rolePermission.upsert({
-        where: { roleId_permissionId: { roleId: adminRole.id, permissionId: permission.id } },
-        update: {},
-        create: { roleId: adminRole.id, permissionId: permission.id },
-      }),
-    ),
-  );
+  await grant(supportAgentRole.id, 'identity.users.view_contact');
+  await grant(adminRole.id, 'identity.roles.manage');
+  await grant(adminRole.id, 'identity.permissions.manage');
+  await grant(adminRole.id, 'identity.audit_logs.view');
 
   const adminUser = await prisma.user.upsert({
     where: { phone: '+989120000001' },
@@ -80,6 +154,118 @@ async function main(): Promise<void> {
     update: {},
     create: { userId: customerUser.id, roleId: customerRole.id },
   });
+
+  // Third user: support_agent role (grants identity.users.view_contact via
+  // the role) but with an explicit per-user DENY override on that exact
+  // permission — the blueprint §53 exception pattern. Effective permissions
+  // for this user should resolve to the EMPTY set, proving deny-wins over
+  // a role-derived grant (see PermissionResolver.resolve and its unit test).
+  const supportUser = await prisma.user.upsert({
+    where: { phone: '+989120000003' },
+    update: {},
+    create: {
+      phone: '+989120000003',
+      email: 'support@iecp.dev',
+      isActive: true,
+      phoneVerifiedAt: new Date(),
+    },
+  });
+  await prisma.userRole.upsert({
+    where: { userId_roleId: { userId: supportUser.id, roleId: supportAgentRole.id } },
+    update: {},
+    create: { userId: supportUser.id, roleId: supportAgentRole.id },
+  });
+  const viewContactPermission = permissionByKey.get('identity.users.view_contact');
+  if (!viewContactPermission) {
+    throw new Error('[seed] identity.users.view_contact permission missing after upsert');
+  }
+  await prisma.userPermissionOverride.upsert({
+    where: {
+      userId_permissionId: { userId: supportUser.id, permissionId: viewContactPermission.id },
+    },
+    update: {},
+    create: {
+      userId: supportUser.id,
+      permissionId: viewContactPermission.id,
+      effect: 'DENY',
+      reason:
+        'Under investigation for a contact-data-handling incident — access suspended pending review.',
+      createdBy: adminUser.id,
+    },
+  });
+
+  // A trusted device + an active-looking session for the admin user (blueprint
+  // §56 "Device Trust") — session data itself is normally created by a real
+  // login (services/api's CompleteLoginService), not seeded, but one example
+  // row here lets `GET /me/devices`/`GET /me/sessions` show something on a
+  // freshly-seeded database before anyone has actually logged in.
+  const adminDevice = await prisma.userDevice.upsert({
+    where: { userId_fingerprint: { userId: adminUser.id, fingerprint: 'seed-admin-macbook' } },
+    update: {},
+    create: {
+      userId: adminUser.id,
+      fingerprint: 'seed-admin-macbook',
+      label: "Admin's MacBook",
+      platform: 'web',
+      trustedAt: new Date(),
+    },
+  });
+
+  // A revoked demo API key — `keyHash` is the sha256 of a fixed, published
+  // dev-only value ("iecp_dev_seed_demo_key"); it's pre-revoked specifically
+  // so this seed can never accidentally hand out a working credential.
+  await prisma.apiKey.upsert({
+    where: { keyHash: sha256Hex('iecp_dev_seed_demo_key') },
+    update: {},
+    create: {
+      name: 'Seed demo key (revoked)',
+      keyHash: sha256Hex('iecp_dev_seed_demo_key'),
+      ownerId: adminUser.id,
+      scopes: ['read:catalog'],
+      revokedAt: new Date(),
+    },
+  });
+
+  // A couple of append-only identity.security_events and one system.audit_logs
+  // row — both are normally written by real use cases (SecurityEventRepositoryPort,
+  // AuditLogRepositoryPort), seeded here only so the two read endpoints
+  // (GET /audit-log, and any future security-events endpoint) have example
+  // rows on a fresh database.
+  const existingLoginEvent = await prisma.securityEvent.findFirst({
+    where: { userId: adminUser.id, type: 'LOGIN_SUCCESS' },
+  });
+  if (!existingLoginEvent) {
+    await prisma.securityEvent.create({
+      data: {
+        userId: adminUser.id,
+        type: 'LOGIN_SUCCESS',
+        ipAddress: '127.0.0.1',
+        userAgent: 'seed-script',
+      },
+    });
+  }
+  const existingAuditEntry = await prisma.auditLog.findFirst({
+    where: { entityType: 'Role', entityId: adminRole.id, action: 'ROLE_PERMISSION_GRANTED' },
+  });
+  if (!existingAuditEntry) {
+    await prisma.auditLog.create({
+      data: {
+        actorId: adminUser.id,
+        actorDevice: adminDevice.id,
+        action: 'ROLE_PERMISSION_GRANTED',
+        entityType: 'Role',
+        entityId: adminRole.id,
+        oldValue: { permissions: [] },
+        newValue: {
+          permissions: [
+            'identity.roles.manage',
+            'identity.permissions.manage',
+            'identity.audit_logs.view',
+          ],
+        },
+      },
+    });
+  }
 
   // ---------------------------------------------------------------------
   // customer — profile, address, loyalty + wallet accounts
@@ -363,7 +549,9 @@ async function main(): Promise<void> {
   });
 
   console.log(
-    '[seed] done — admin user, demo customer, one product+variant+price+stock, coupon, CMS/notification/system basics.',
+    '[seed] done — RBAC (2 real permissions checked in code, role inheritance, a deny-override), ' +
+      'admin/customer/support users, demo customer, one product+variant+price+stock, coupon, ' +
+      'CMS/notification/system basics.',
   );
 }
 

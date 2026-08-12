@@ -7,45 +7,63 @@ below marked "not yet" is covered just because the blueprint calls for it.
 
 ## In place today
 
-| Control                                                          | Where                                                                                                             |
-| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `helmet()` security headers                                      | `services/api/src/main.ts`                                                                                        |
-| CORS restricted to a configured origin                           | `services/api/src/main.ts` (`CORS_ORIGIN` env var)                                                                |
-| Request body whitelisting (unknown fields rejected, not dropped) | `ValidationPipe` in `services/api/src/main.ts`                                                                    |
-| Env vars validated at startup, fail-fast                         | `@iecp/validation`'s `parseEnv()`, used by every service's `src/config/env.ts`                                    |
-| Secrets never committed                                          | `.env` gitignored everywhere; every service ships an `.env.example` instead                                       |
-| `no-explicit-any` / `no-unsafe-*` hard-errored                   | `@iecp/eslint-config/base` — reduces a whole class of type-confusion bugs that turn into security bugs            |
-| Admin panel not indexed                                          | `robots: { index: false, follow: false }` in `apps/admin`'s root layout                                           |
-| Dependency versions pinned exactly (no `^`/`~` ranges)           | every `package.json` in the monorepo                                                                              |
-| Dependency scan in CI (fails on high/critical)                   | `security` job, `.github/workflows/ci.yml` — `pnpm audit --audit-level high`                                      |
-| Secret scan in CI                                                | `security` job, `.github/workflows/ci.yml` — [gitleaks](https://github.com/gitleaks/gitleaks)                     |
-| Known high-severity transitive vuln pinned to patched version    | `pnpm-workspace.yaml` `overrides` — `@nestjs/swagger`'s `js-yaml@5.2.1` (GHSA-pm4m-ph32-ghv5) forced to `>=5.2.2` |
+| Control                                                                                                                   | Where                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `helmet()` security headers                                                                                               | `services/api/src/main.ts`                                                                                                                                             |
+| CORS restricted to a configured origin                                                                                    | `services/api/src/main.ts` (`CORS_ORIGIN` env var)                                                                                                                     |
+| Request body whitelisting (unknown fields rejected, not dropped)                                                          | `ValidationPipe` in `services/api/src/main.ts`                                                                                                                         |
+| Env vars validated at startup, fail-fast                                                                                  | `@iecp/validation`'s `parseEnv()`, used by every service's `src/config/env.ts`                                                                                         |
+| Secrets never committed                                                                                                   | `.env` gitignored everywhere; every service ships an `.env.example` instead                                                                                            |
+| `no-explicit-any` / `no-unsafe-*` hard-errored                                                                            | `@iecp/eslint-config/base` — reduces a whole class of type-confusion bugs that turn into security bugs                                                                 |
+| Admin panel not indexed                                                                                                   | `robots: { index: false, follow: false }` in `apps/admin`'s root layout                                                                                                |
+| Dependency versions pinned exactly (no `^`/`~` ranges)                                                                    | every `package.json` in the monorepo                                                                                                                                   |
+| Dependency scan in CI (fails on high/critical)                                                                            | `security` job, `.github/workflows/ci.yml` — `pnpm audit --audit-level high`                                                                                           |
+| Secret scan in CI                                                                                                         | `security` job, `.github/workflows/ci.yml` — [gitleaks](https://github.com/gitleaks/gitleaks)                                                                          |
+| Known high-severity transitive vuln pinned to patched version                                                             | `pnpm-workspace.yaml` `overrides` — `@nestjs/swagger`'s `js-yaml@5.2.1` (GHSA-pm4m-ph32-ghv5) forced to `>=5.2.2`                                                      |
+| Authentication (mobile OTP, email+password, refresh rotation, TOTP 2FA)                                                   | `services/api/src/modules/identity` — global `JwtAuthGuard`, opt-out via `@Public()`. See that module's `README.md`.                                                   |
+| RBAC (role inheritance, permission matrix, per-user allow/deny overrides, module access control, field-level permissions) | Same module, `AuthorizationGuard` + `PermissionResolver`. Deny-wins proven by a unit test and an e2e test.                                                             |
+| Audit log + identity security events (blueprint §54/§55)                                                                  | `system.AuditLog` (general) / `identity.SecurityEvent` (login/2FA/session-specific) — written by identity's use cases, read via `GET /audit-log`                       |
+| Password hashing (argon2id) / OTP+refresh-token/API-key hashing (SHA-256) / 2FA secret encryption (AES-256-GCM)           | `services/api/src/modules/identity/infrastructure/crypto/` — see `hash.util.ts`'s header for why passwords and high-entropy tokens are deliberately hashed differently |
+| Security-focused test coverage (JWT validation, permission bypass, session expiration)                                    | `services/api/test/identity.e2e-spec.ts` + `domain/services/permission-resolver.spec.ts`                                                                               |
 
 ## Not yet — explicitly open
 
-- **Authentication** — no auth exists anywhere in `services/api` yet. Every
-  current endpoint is unauthenticated (see `docs/api/README.md`).
-- **RBAC / permissions** — blueprint §53's fine-grained permission model
-  (`Product.Publish`, per-action, per-role) isn't built.
 - **Rate limiting** — `infrastructure/nginx/nginx.conf` has one blanket
   `limit_req_zone`; nothing per-route, nothing at the application layer.
-- **2FA, device sessions, login-attempt tracking** — blueprint §55/§56, not
-  started.
-- **Audit log** — blueprint §54 (who changed what, old value → new value) — not
-  started. This matters a lot once real price/inventory-changing endpoints exist.
+  `identity.OtpRequest.MAX_ATTEMPTS` (5) is the one exception — a local guard
+  on OTP verification, not a general mechanism.
+- **OAuth/social login** (blueprint §56) — not built; see
+  `modules/identity/README.md`'s "Deliberately out of scope" for why and what
+  adding it later would take.
+- **Using an API key to authenticate a request** — issuance/management is
+  real (`services/api/src/modules/identity`); nothing verifies an API key on
+  an inbound request yet, since nothing needs service-to-service auth today.
+- **Security Center dashboards / IP rules / suspicious-activity detection**
+  (blueprint §55) — `SecurityEvent` rows are the _data_ those would read;
+  the dashboards, anomaly detection, and IP allow/deny rules themselves don't
+  exist.
 - **Four-eyes / approval workflows** for sensitive actions (blueprint §57-§58,
   §105) — not started.
 - **Container scanning** — dependency + secret scanning are now real CI checks
   (see the table above), but nothing scans the `infrastructure/docker/`
   Dockerfiles/images yet (Trivy or similar — blueprint §112-§113). Those images
   aren't build-tested at all yet either, see `infrastructure/docker/README.md`.
+- **2FA secret key rotation/KMS** — `ENCRYPTION_KEY` is a single static env
+  var today; a real environment needs a managed key + rotation story before
+  handling real user 2FA secrets, see `modules/identity/README.md`'s Config
+  section.
 - **OWASP ASVS / Top 10 review** — not performed. Do this before any endpoint
   handles real customer data or payment.
 
 ## Rule for every future PR touching `services/api`
 
 If you're adding a write endpoint (`POST`/`PATCH`/`PUT`/`DELETE`) and it isn't
-behind an auth guard, that's a bug, not a TODO — either add the guard or don't
-merge the endpoint. The "not yet" list above is fine for what exists today
-(read-only, no real data); it stops being fine the moment there's something
-worth stealing or corrupting behind these routes.
+behind an auth guard, that's a bug, not a TODO. As of Phase 004 this is
+actually enforced by default — `JwtAuthGuard` is global, so a new route is
+authenticated _unless_ someone explicitly adds `@Public()` — but a route with
+no `@RequirePermission`/`@RequireModule` is still only "logged in," not
+authorized for anything specific. If a new write endpoint changes real data,
+give it a real permission gate (register the permission, seed it onto the
+role(s) that should have it) rather than leaving it open to any authenticated
+user. It stops being fine to skip this the moment there's something worth
+stealing or corrupting behind the route.

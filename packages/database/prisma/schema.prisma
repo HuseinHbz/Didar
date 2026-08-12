@@ -104,17 +104,50 @@ model User {
   updatedAt       DateTime  @updatedAt @map("updated_at")
   deletedAt       DateTime? @map("deleted_at")
 
-  sessions UserSession[]
-  roles    UserRole[]
+  sessions            UserSession[]
+  roles               UserRole[]
+  devices             UserDevice[]
+  twoFactorCredential TwoFactorCredential?
+  permissionOverrides UserPermissionOverride[]
+  securityEvents      SecurityEvent[]
 
   @@map("users")
   @@schema("identity")
 }
 
-/// Device/session tracking (blueprint §55/§56) — one row per active login.
+/// One row per browser/app install a user has logged in from (blueprint
+/// §5/§56 `user_devices`, "Device Trust" for admin). Distinct from
+/// UserSession: a device can accumulate many sessions over time (re-login
+/// after a refresh token expires reuses the same device row via
+/// `fingerprint`), and `trustedAt` persists across those logins.
+model UserDevice {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  fingerprint String // hash of a client-supplied device signature (UA + platform + app-generated install id) — never the raw signature
+  label       String? // e.g. "Ali's iPhone" — user-editable, not derived
+  platform    String? // "ios" | "android" | "web" | ...
+  trustedAt   DateTime? @map("trusted_at")
+  lastSeenAt  DateTime  @default(now()) @map("last_seen_at")
+  revokedAt   DateTime? @map("revoked_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions UserSession[]
+
+  @@unique([userId, fingerprint])
+  @@index([userId])
+  @@map("user_devices")
+  @@schema("identity")
+}
+
+/// Session/refresh-token tracking (blueprint §55/§56) — one row per issued
+/// refresh token. `deviceId` links a session to the device it was issued
+/// from; nullable because not every historical/edge-case login path is
+/// guaranteed to resolve a device (e.g. a future server-to-server flow).
 model UserSession {
   id               String    @id @default(uuid()) @db.Uuid
   userId           String    @map("user_id") @db.Uuid
+  deviceId         String?   @map("device_id") @db.Uuid
   refreshTokenHash String    @unique @map("refresh_token_hash")
   userAgent        String?   @map("user_agent")
   ipAddress        String?   @map("ip_address")
@@ -122,10 +155,41 @@ model UserSession {
   revokedAt        DateTime? @map("revoked_at")
   createdAt        DateTime  @default(now()) @map("created_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device UserDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
 
   @@index([userId])
+  @@index([deviceId])
   @@map("user_sessions")
+  @@schema("identity")
+}
+
+enum TwoFactorMethod {
+  TOTP
+
+  @@schema("identity")
+}
+
+/// blueprint §55/§56 `user_two_factor` — one credential per user (only TOTP
+/// implemented; modeled as an enum, not a bare boolean, so a second method
+/// is an additive migration later, not a schema redesign). `secretEncrypted`
+/// is AES-256-GCM ciphertext (see EncryptionService) — the raw TOTP secret
+/// is never stored at rest. `recoveryCodesHashed` mirrors `password_hash`'s
+/// convention: hashed, one-time-use, never stored or logged in the clear.
+model TwoFactorCredential {
+  id                  String          @id @default(uuid()) @db.Uuid
+  userId              String          @unique @map("user_id") @db.Uuid
+  method              TwoFactorMethod @default(TOTP)
+  secretEncrypted     String          @map("secret_encrypted")
+  recoveryCodesHashed String[]        @map("recovery_codes_hashed")
+  enabled             Boolean         @default(false)
+  verifiedAt          DateTime?       @map("verified_at")
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_two_factor_credentials")
   @@schema("identity")
 }
 
@@ -146,30 +210,51 @@ model OtpRequest {
   @@schema("identity")
 }
 
+/// blueprint §53 — roles form a tree via `parentId` (e.g. the blueprint's own
+/// Admin → Commerce → Products example). A role's *effective* permissions are
+/// its own `RolePermission` rows unioned with every ancestor's, resolved
+/// recursively by PermissionResolver (services/api identity module) — the
+/// database only stores the edges, not the resolved closure.
 model Role {
   id          String   @id @default(uuid()) @db.Uuid
+  parentId    String?  @map("parent_id") @db.Uuid
   name        String   @unique
   description String?
   isSystem    Boolean  @default(false) @map("is_system")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
+  parent      Role?            @relation("RoleToParent", fields: [parentId], references: [id])
+  children    Role[]           @relation("RoleToParent")
   permissions RolePermission[]
   users       UserRole[]
 
+  @@index([parentId])
   @@map("roles")
   @@schema("identity")
 }
 
-/// e.g. key = "product.publish" (blueprint §53's fine-grained permission model).
+/// blueprint §53's fine-grained permission model. `key` (e.g.
+/// "identity.users.view_contact") is the canonical identifier used
+/// everywhere in code; `module`/`action` are the same string split into
+/// queryable columns so an admin UI can render a module × action matrix
+/// without parsing `key`. `module` is a free-form string, not an enum tied
+/// to the 11 Postgres domain schemas — permissions are registered per
+/// NestJS module as that module is built (see services/api's identity
+/// module for what's registered so far), not pre-declared for domains that
+/// don't have endpoints yet.
 model Permission {
   id          String   @id @default(uuid()) @db.Uuid
+  module      String
+  action      String
   key         String   @unique
   description String?
   createdAt   DateTime @default(now()) @map("created_at")
 
-  roles RolePermission[]
+  roles     RolePermission[]
+  overrides UserPermissionOverride[]
 
+  @@unique([module, action])
   @@map("permissions")
   @@schema("identity")
 }
@@ -197,6 +282,79 @@ model UserRole {
 
   @@id([userId, roleId])
   @@map("user_roles")
+  @@schema("identity")
+}
+
+enum PermissionEffect {
+  ALLOW
+  DENY
+
+  @@schema("identity")
+}
+
+/// blueprint §53's per-user exception example ("Product.Publish = NO" even
+/// though the user's role would otherwise grant it). Resolved on top of the
+/// role-derived permission set; DENY always wins over any role grant, ALLOW
+/// grants something no assigned role does. Not a join table (no composite
+/// PK) because `effect`/`reason`/`createdBy` are real per-row data, not just
+/// an association.
+model UserPermissionOverride {
+  id           String           @id @default(uuid()) @db.Uuid
+  userId       String           @map("user_id") @db.Uuid
+  permissionId String           @map("permission_id") @db.Uuid
+  effect       PermissionEffect
+  reason       String?
+  createdBy    String?          @map("created_by") @db.Uuid
+  createdAt    DateTime         @default(now()) @map("created_at")
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, permissionId])
+  @@map("user_permission_overrides")
+  @@schema("identity")
+}
+
+enum SecurityEventType {
+  LOGIN_SUCCESS
+  LOGIN_FAILURE
+  OTP_REQUESTED
+  OTP_VERIFIED
+  OTP_FAILED
+  PASSWORD_CHANGED
+  TWO_FACTOR_ENABLED
+  TWO_FACTOR_DISABLED
+  TWO_FACTOR_FAILED
+  SESSION_REVOKED
+  SESSION_REFRESHED
+  API_KEY_CREATED
+  API_KEY_REVOKED
+
+  @@schema("identity")
+}
+
+/// blueprint §5/§55 `user_security_events` — the "Login Attempts / Failed
+/// Login / Security Events" leg of the Security Center list. Append-only,
+/// written alongside (not instead of) `system.AuditLog`: AuditLog is the
+/// general-purpose "who changed what" record for any mutation across any
+/// domain, this is identity-specific and always has a `type` from a fixed,
+/// known set, which makes it cheap to query/alert on without parsing
+/// `AuditLog.action` strings. `userId` is nullable — a failed login attempt
+/// against a phone/email with no matching account still needs a row.
+model SecurityEvent {
+  id        String            @id @default(uuid()) @db.Uuid
+  userId    String?           @map("user_id") @db.Uuid
+  type      SecurityEventType
+  ipAddress String?           @map("ip_address")
+  userAgent String?           @map("user_agent")
+  metadata  Json?
+  createdAt DateTime          @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([type, createdAt])
+  @@map("security_events")
   @@schema("identity")
 }
 
@@ -1286,15 +1444,16 @@ enum WebhookDeliveryStatus {
 /// sensitive mutation (price change, role change, refund approval, ...)
 /// should write one of these; nothing here is ever updated after insert.
 model AuditLog {
-  id         String   @id @default(uuid()) @db.Uuid
-  actorId    String?  @map("actor_id") @db.Uuid
-  actorIp    String?  @map("actor_ip")
-  action     String // "PRODUCT_PRICE_CHANGED", "ROLE_ASSIGNED", ...
-  entityType String   @map("entity_type")
-  entityId   String   @map("entity_id")
-  oldValue   Json?    @map("old_value")
-  newValue   Json?    @map("new_value")
-  createdAt  DateTime @default(now()) @map("created_at")
+  id          String   @id @default(uuid()) @db.Uuid
+  actorId     String?  @map("actor_id") @db.Uuid
+  actorIp     String?  @map("actor_ip")
+  actorDevice String?  @map("actor_device") // -> identity.user_devices.id, unenforced (see docs/database/README.md#cross-schema-references-are-intentionally-unenforced) — blueprint §54 lists "Device" alongside "IP" on every audit entry
+  action      String // "PRODUCT_PRICE_CHANGED", "ROLE_ASSIGNED", ...
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id")
+  oldValue    Json?    @map("old_value")
+  newValue    Json?    @map("new_value")
+  createdAt   DateTime @default(now()) @map("created_at")
 
   @@index([entityType, entityId])
   @@index([actorId])

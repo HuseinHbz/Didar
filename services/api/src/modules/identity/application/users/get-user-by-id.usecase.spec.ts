@@ -1,8 +1,8 @@
 import { asUserId } from '@iecp/types';
 import { NotFoundException } from '@nestjs/common';
 
-import { User } from '../domain/user.entity';
-import type { UserRepositoryPort } from '../domain/user.repository.port';
+import { User } from '../../domain/entities/user.entity';
+import type { UserRepositoryPort } from '../../domain/ports/user.repository.port';
 
 import { GetUserByIdUseCase } from './get-user-by-id.usecase';
 
@@ -22,6 +22,11 @@ describe('GetUserByIdUseCase', () => {
 
   const fakeRepository: UserRepositoryPort = {
     findById: (id) => Promise.resolve(id === existingId ? existingUser : null),
+    findByPhone: () => Promise.resolve(null),
+    findByEmail: () => Promise.resolve(null),
+    createFromVerifiedPhone: () => Promise.resolve(existingUser),
+    setPasswordHash: () => Promise.resolve(),
+    markLoggedIn: () => Promise.resolve(),
   };
 
   it('returns the user when found', async () => {
