@@ -52,6 +52,14 @@ export type PermissionId = Brand<string, 'PermissionId'>;
 export type SessionId = Brand<string, 'SessionId'>;
 export type DeviceId = Brand<string, 'DeviceId'>;
 export type ApiKeyId = Brand<string, 'ApiKeyId'>;
+// Phase 005 — catalog (see docs/adr/ADR-005-catalog-architecture.md).
+export type BrandId = Brand<string, 'BrandId'>;
+export type CategoryId = Brand<string, 'CategoryId'>;
+export type CollectionId = Brand<string, 'CollectionId'>;
+export type ProductSkuId = Brand<string, 'ProductSkuId'>;
+export type MediaId = Brand<string, 'MediaId'>;
+export type ProductAttributeId = Brand<string, 'ProductAttributeId'>;
+export type ProductAttributeValueId = Brand<string, 'ProductAttributeValueId'>;
 
 export const asUserId = brandedId<'UserId'>('UserId').as;
 export const asCustomerId = brandedId<'CustomerId'>('CustomerId').as;
@@ -67,3 +75,11 @@ export const asPermissionId = brandedId<'PermissionId'>('PermissionId').as;
 export const asSessionId = brandedId<'SessionId'>('SessionId').as;
 export const asDeviceId = brandedId<'DeviceId'>('DeviceId').as;
 export const asApiKeyId = brandedId<'ApiKeyId'>('ApiKeyId').as;
+export const asBrandId = brandedId<'BrandId'>('BrandId').as;
+export const asCategoryId = brandedId<'CategoryId'>('CategoryId').as;
+export const asCollectionId = brandedId<'CollectionId'>('CollectionId').as;
+export const asProductSkuId = brandedId<'ProductSkuId'>('ProductSkuId').as;
+export const asMediaId = brandedId<'MediaId'>('MediaId').as;
+export const asProductAttributeId = brandedId<'ProductAttributeId'>('ProductAttributeId').as;
+export const asProductAttributeValueId =
+  brandedId<'ProductAttributeValueId'>('ProductAttributeValueId').as;

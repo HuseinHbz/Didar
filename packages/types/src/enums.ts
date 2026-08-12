@@ -85,3 +85,62 @@ export const SECURITY_EVENT_TYPES = [
   'API_KEY_REVOKED',
 ] as const;
 export type SecurityEventType = (typeof SECURITY_EVENT_TYPES)[number];
+
+/**
+ * Catalog enums — Phase 005. See docs/adr/ADR-005-catalog-architecture.md
+ * and packages/database's schema.prisma catalog section (the two must stay
+ * in sync; there's no codegen linking them, so a Prisma enum change needs a
+ * matching edit here).
+ */
+export const PRODUCT_GENDERS = ['MALE', 'FEMALE', 'UNISEX', 'KIDS'] as const;
+export type ProductGender = (typeof PRODUCT_GENDERS)[number];
+
+export const PRODUCT_TYPES = [
+  'EYEGLASSES',
+  'SUNGLASSES',
+  'COMPUTER_GLASSES',
+  'READING_GLASSES',
+  'CONTACT_LENSES',
+  'OPTICAL_FRAME',
+  'LENS',
+  'ACCESSORY',
+] as const;
+export type ProductType = (typeof PRODUCT_TYPES)[number];
+
+/**
+ * Product publication state machine — see
+ * ProductLifecycleStateMachine (services/api's catalog domain layer) for
+ * the actual transition rules; this is only the value set.
+ */
+export const PRODUCT_LIFECYCLE_STATUSES = [
+  'DRAFT',
+  'IN_REVIEW',
+  'APPROVED',
+  'PUBLISHED',
+  'UNPUBLISHED',
+  'ARCHIVED',
+] as const;
+export type ProductLifecycleStatus = (typeof PRODUCT_LIFECYCLE_STATUSES)[number];
+
+/** Simple on/off switch for brand/category/collection/variant. */
+export const CATALOG_STATUSES = ['ACTIVE', 'INACTIVE'] as const;
+export type CatalogStatus = (typeof CATALOG_STATUSES)[number];
+
+export const SKU_STATUSES = ['ACTIVE', 'INACTIVE', 'DISCONTINUED'] as const;
+export type SkuStatus = (typeof SKU_STATUSES)[number];
+
+export const COLLECTION_TYPES = ['MANUAL', 'DYNAMIC'] as const;
+export type CollectionType = (typeof COLLECTION_TYPES)[number];
+
+/** Storage abstraction — ADR-005 decision 3. */
+export const MEDIA_PROVIDERS = ['LOCAL', 'S3', 'CDN'] as const;
+export type MediaProvider = (typeof MEDIA_PROVIDERS)[number];
+
+export const MEDIA_KINDS = ['IMAGE', 'VIDEO', 'MODEL_3D', 'AR_ASSET'] as const;
+export type MediaKind = (typeof MEDIA_KINDS)[number];
+
+export const MEDIA_ROLES = ['PRIMARY', 'GALLERY', 'THUMBNAIL', 'SWATCH', 'VIDEO', 'MODEL_3D'] as const;
+export type MediaRole = (typeof MEDIA_ROLES)[number];
+
+export const MEDIA_STATUSES = ['ACTIVE', 'ARCHIVED'] as const;
+export type MediaStatus = (typeof MEDIA_STATUSES)[number];
