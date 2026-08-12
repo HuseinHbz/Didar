@@ -61,21 +61,6 @@ enum OrderStatus {
   @@schema("commerce")
 }
 
-enum InventoryTransactionType {
-  PURCHASE
-  SALE
-  RESERVATION
-  RELEASE
-  TRANSFER_OUT
-  TRANSFER_IN
-  DAMAGE
-  ADJUSTMENT
-  RETURN
-  COUNT_ADJUSTMENT
-
-  @@schema("inventory")
-}
-
 enum NotificationChannel {
   SMS
   TELEGRAM
@@ -1043,93 +1028,393 @@ model LensCoating {
 }
 
 // =============================================================================
-// inventory — warehouses, stock ledger, reservations (blueprint §23-§28)
+// inventory — warehouses, stock ledger, reservations, transfers, counts
+// (blueprint §23-§28; Phase 006 — see docs/adr/ADR-006-inventory-architecture.md)
 // =============================================================================
 
-enum ReservationStatus {
+enum WarehouseType {
+  CENTRAL
+  REGIONAL
+  STORE
+  DARK_STORE
+  QUARANTINE
+
+  @@schema("inventory")
+}
+
+enum WarehouseStatus {
+  ACTIVE
+  INACTIVE
+  CLOSED
+
+  @@schema("inventory")
+}
+
+enum LocationType {
+  RECEIVING
+  PICKING
+  STORAGE
+  QUARANTINE
+  DAMAGED
+  RETURNS
+  STAGING
+
+  @@schema("inventory")
+}
+
+/// The stock-movement vocabulary — every `InventoryLedger` row has exactly
+/// one of these. Phase 006 replaces Phase 003's smaller
+/// `InventoryTransactionType` placeholder (PURCHASE/RELEASE/RETURN/... ) with
+/// the brief's exact required set — see the migration's header comment for
+/// the old→new value mapping used to carry existing rows forward.
+enum InventoryMovementType {
+  PURCHASE_RECEIPT
+  SALE
+  RESERVATION
+  RESERVATION_RELEASE
+  TRANSFER_OUT
+  TRANSFER_IN
+  RETURN_RECEIPT
+  DAMAGE
+  ADJUSTMENT
+  COUNT_ADJUSTMENT
+  QUARANTINE
+  RELEASE_FROM_QUARANTINE
+  MANUAL_CORRECTION
+
+  @@schema("inventory")
+}
+
+enum InventoryReservationStatus {
   ACTIVE
   RELEASED
-  CONSUMED
+  CONVERTED
+  EXPIRED
+  CANCELLED
+
+  @@schema("inventory")
+}
+
+enum StockTransferStatus {
+  DRAFT
+  REQUESTED
+  APPROVED
+  PICKING
+  DISPATCHED
+  IN_TRANSIT
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+
+  @@schema("inventory")
+}
+
+enum InventoryAdjustmentType {
+  POSITIVE
+  NEGATIVE
+
+  @@schema("inventory")
+}
+
+enum StockCountStatus {
+  PLANNED
+  IN_PROGRESS
+  COUNTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  CLOSED
 
   @@schema("inventory")
 }
 
 model Warehouse {
-  id        String    @id @default(uuid()) @db.Uuid
-  code      String    @unique
+  id        String          @id @default(uuid()) @db.Uuid
+  code      String          @unique
   name      String
+  type      WarehouseType   @default(CENTRAL)
+  status    WarehouseStatus @default(ACTIVE)
   address   String?
-  isActive  Boolean   @default(true) @map("is_active")
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
-  deletedAt DateTime? @map("deleted_at")
+  timezone  String          @default("Asia/Tehran")
+  capacity  Int?
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+  deletedAt DateTime?       @map("deleted_at")
 
-  items InventoryItem[]
+  locations    WarehouseLocation[]
+  items        InventoryItem[]
+  thresholds   InventoryThreshold[]
+  transfersOut StockTransfer[]       @relation("TransferSource")
+  transfersIn  StockTransfer[]       @relation("TransferDestination")
+  adjustments  InventoryAdjustment[]
+  stockCounts  StockCount[]
 
+  @@index([type])
+  @@index([status])
   @@map("warehouses")
   @@schema("inventory")
 }
 
-/// blueprint §23 — stock/reserved/available are tracked explicitly;
-/// `available` is computed (stock - reserved), never stored redundantly.
-/// `productSkuId` (Phase 005 — was `productVariantId`; see ADR-005 decision
-/// 1) is a plain, unenforced cross-schema column into `catalog.product_skus`
-/// — see docs/database/README.md's "Cross-schema references are
-/// intentionally unenforced".
+/// A warehouse must have at least one location before it can hold stock —
+/// see ADR-006 decision 1 for why `InventoryItem` is keyed at this
+/// granularity rather than warehouse-level only.
+model WarehouseLocation {
+  id          String       @id @default(uuid()) @db.Uuid
+  warehouseId String       @map("warehouse_id") @db.Uuid
+  code        String
+  name        String
+  type        LocationType @default(STORAGE)
+  active      Boolean      @default(true)
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  warehouse     Warehouse             @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  items         InventoryItem[]
+  ledgerEntries InventoryLedger[]
+  adjustments   InventoryAdjustment[]
+  stockCounts   StockCount[]
+
+  @@unique([warehouseId, code])
+  @@index([warehouseId])
+  @@map("warehouse_locations")
+  @@schema("inventory")
+}
+
+/// blueprint §23 — quantity buckets are a maintained cache (see ADR-006
+/// decision 2); `InventoryLedger` is the source of truth for *why* each one
+/// is what it is. `availableQuantity = onHand - reserved - damaged -
+/// quarantined - blocked`, recomputed and asserted by the domain layer
+/// (`AvailableQuantityCalculator`) on every write, never trusted as
+/// already-correct input. `version` supports optimistic-locking callers on
+/// top of the row-level lock every mutation already takes (ADR-006 decision
+/// 4). `productSkuId` (Phase 005 — see ADR-005 decision 1) is a plain,
+/// unenforced cross-schema column into `catalog.product_skus` — see
+/// docs/database/README.md's "Cross-schema references are intentionally
+/// unenforced".
 model InventoryItem {
-  id               String   @id @default(uuid()) @db.Uuid
-  warehouseId      String   @map("warehouse_id") @db.Uuid
-  productSkuId     String   @map("product_sku_id") @db.Uuid
-  quantityOnHand   Int      @default(0) @map("quantity_on_hand")
-  quantityReserved Int      @default(0) @map("quantity_reserved")
-  reorderPoint     Int?     @map("reorder_point")
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  id                  String   @id @default(uuid()) @db.Uuid
+  productSkuId        String   @map("product_sku_id") @db.Uuid
+  warehouseId         String   @map("warehouse_id") @db.Uuid
+  locationId          String   @map("location_id") @db.Uuid
+  onHandQuantity      Int      @default(0) @map("on_hand_quantity")
+  reservedQuantity    Int      @default(0) @map("reserved_quantity")
+  availableQuantity   Int      @default(0) @map("available_quantity")
+  inTransitQuantity   Int      @default(0) @map("in_transit_quantity")
+  damagedQuantity     Int      @default(0) @map("damaged_quantity")
+  quarantinedQuantity Int      @default(0) @map("quarantined_quantity")
+  blockedQuantity     Int      @default(0) @map("blocked_quantity")
+  version             Int      @default(0)
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
 
-  warehouse    Warehouse              @relation(fields: [warehouseId], references: [id])
-  transactions InventoryTransaction[]
-  reservations StockReservation[]
+  warehouse     Warehouse              @relation(fields: [warehouseId], references: [id])
+  location      WarehouseLocation      @relation(fields: [locationId], references: [id])
+  ledgerEntries InventoryLedger[]
+  reservations  InventoryReservation[]
 
-  @@unique([warehouseId, productSkuId])
+  @@unique([productSkuId, warehouseId, locationId])
   @@index([productSkuId])
+  @@index([warehouseId])
+  @@index([productSkuId, warehouseId])
   @@map("inventory_items")
   @@schema("inventory")
 }
 
-/// blueprint §24/§27 — the ledger. `quantityOnHand` above is a maintained
-/// cache of the sum of these; this table is the source of truth for *why*.
-model InventoryTransaction {
-  id              String                   @id @default(uuid()) @db.Uuid
-  inventoryItemId String                   @map("inventory_item_id") @db.Uuid
-  type            InventoryTransactionType
-  quantityDelta   Int                      @map("quantity_delta")
-  reference       String? // e.g. an order id, a transfer id — not an FK, deliberately polymorphic
-  note            String?
-  createdBy       String?                  @map("created_by") @db.Uuid
-  createdAt       DateTime                 @default(now()) @map("created_at")
+/// Low-stock thresholds — per SKU + warehouse, deliberately decoupled from
+/// location (ADR-006 decision 6). Admin-configurable, never hardcoded.
+model InventoryThreshold {
+  id           String   @id @default(uuid()) @db.Uuid
+  productSkuId String   @map("product_sku_id") @db.Uuid
+  warehouseId  String   @map("warehouse_id") @db.Uuid
+  reorderPoint Int      @default(0) @map("reorder_point")
+  safetyStock  Int      @default(0) @map("safety_stock")
+  minStock     Int?     @map("min_stock")
+  maxStock     Int?     @map("max_stock")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
-  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id])
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
 
-  @@index([inventoryItemId])
-  @@map("inventory_transactions")
+  @@unique([productSkuId, warehouseId])
+  @@index([warehouseId])
+  @@map("inventory_thresholds")
   @@schema("inventory")
 }
 
-model StockReservation {
-  id              String            @id @default(uuid()) @db.Uuid
-  inventoryItemId String            @map("inventory_item_id") @db.Uuid
-  orderId         String?           @map("order_id") @db.Uuid
+/// blueprint §24/§27 — the append-only ledger, and the authoritative
+/// movement history (ADR-006 decision 2). Never updated, never deleted.
+/// `referenceType`/`referenceId` are deliberately polymorphic, not an FK —
+/// the procurement/returns readiness seam (ADR-006 decision 9).
+model InventoryLedger {
+  id              String                @id @default(uuid()) @db.Uuid
+  inventoryItemId String                @map("inventory_item_id") @db.Uuid
+  productSkuId    String                @map("product_sku_id") @db.Uuid
+  warehouseId     String                @map("warehouse_id") @db.Uuid
+  locationId      String                @map("location_id") @db.Uuid
+  movementType    InventoryMovementType @map("movement_type")
   quantity        Int
-  status          ReservationStatus @default(ACTIVE)
-  expiresAt       DateTime?         @map("expires_at")
-  createdAt       DateTime          @default(now()) @map("created_at")
-  updatedAt       DateTime          @updatedAt @map("updated_at")
+  beforeOnHand    Int                   @map("before_on_hand")
+  afterOnHand     Int                   @map("after_on_hand")
+  beforeReserved  Int                   @map("before_reserved")
+  afterReserved   Int                   @map("after_reserved")
+  referenceType   String?               @map("reference_type")
+  referenceId     String?               @map("reference_id") @db.Uuid
+  reason          String?
+  actorUserId     String?               @map("actor_user_id") @db.Uuid
+  correlationId   String                @map("correlation_id") @db.Uuid
+  createdAt       DateTime              @default(now()) @map("created_at")
+
+  inventoryItem InventoryItem     @relation(fields: [inventoryItemId], references: [id])
+  location      WarehouseLocation @relation(fields: [locationId], references: [id])
+
+  @@index([inventoryItemId])
+  @@index([productSkuId])
+  @@index([warehouseId])
+  @@index([referenceType, referenceId])
+  @@index([correlationId])
+  @@index([createdAt])
+  @@map("inventory_ledger")
+  @@schema("inventory")
+}
+
+/// Transactional, row-lock-serialized, idempotency-key-protected — see
+/// ADR-006 decisions 4-5. `sourceType`/`sourceId` are deliberately
+/// polymorphic (cart, order, POS sale, home-try-on — none of which this
+/// phase implements), matching the ledger's own reference pattern.
+model InventoryReservation {
+  id              String                     @id @default(uuid()) @db.Uuid
+  productSkuId    String                     @map("product_sku_id") @db.Uuid
+  warehouseId     String                     @map("warehouse_id") @db.Uuid
+  locationId      String                     @map("location_id") @db.Uuid
+  inventoryItemId String                     @map("inventory_item_id") @db.Uuid
+  quantity        Int
+  status          InventoryReservationStatus @default(ACTIVE)
+  sourceType      String                     @map("source_type")
+  sourceId        String                     @map("source_id") @db.Uuid
+  idempotencyKey  String                     @unique @map("idempotency_key")
+  expiresAt       DateTime?                  @map("expires_at")
+  releasedAt      DateTime?                  @map("released_at")
+  createdAt       DateTime                   @default(now()) @map("created_at")
+  updatedAt       DateTime                   @updatedAt @map("updated_at")
 
   inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id])
 
   @@index([inventoryItemId])
-  @@index([orderId])
-  @@map("stock_reservations")
+  @@index([productSkuId, warehouseId])
+  @@index([sourceType, sourceId])
+  @@index([status])
+  @@index([expiresAt])
+  @@map("inventory_reservations")
+  @@schema("inventory")
+}
+
+/// Warehouse-to-warehouse (or store) stock movement — a real 9-state
+/// machine (`TransferStateMachine`, domain layer), matching the brief's
+/// exact status list.
+model StockTransfer {
+  id                     String              @id @default(uuid()) @db.Uuid
+  referenceNumber        String              @unique @map("reference_number")
+  sourceWarehouseId      String              @map("source_warehouse_id") @db.Uuid
+  destinationWarehouseId String              @map("destination_warehouse_id") @db.Uuid
+  status                 StockTransferStatus @default(DRAFT)
+  requestedBy            String?             @map("requested_by") @db.Uuid
+  approvedBy             String?             @map("approved_by") @db.Uuid
+  dispatchedAt           DateTime?           @map("dispatched_at")
+  receivedAt             DateTime?           @map("received_at")
+  createdAt              DateTime            @default(now()) @map("created_at")
+  updatedAt              DateTime            @updatedAt @map("updated_at")
+
+  sourceWarehouse      Warehouse           @relation("TransferSource", fields: [sourceWarehouseId], references: [id])
+  destinationWarehouse Warehouse           @relation("TransferDestination", fields: [destinationWarehouseId], references: [id])
+  items                StockTransferItem[]
+
+  @@index([status])
+  @@index([sourceWarehouseId])
+  @@index([destinationWarehouseId])
+  @@map("stock_transfers")
+  @@schema("inventory")
+}
+
+model StockTransferItem {
+  id                 String   @id @default(uuid()) @db.Uuid
+  transferId         String   @map("transfer_id") @db.Uuid
+  productSkuId       String   @map("product_sku_id") @db.Uuid
+  requestedQuantity  Int      @map("requested_quantity")
+  approvedQuantity   Int?     @map("approved_quantity")
+  dispatchedQuantity Int?     @map("dispatched_quantity")
+  receivedQuantity   Int?     @map("received_quantity")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  transfer StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+
+  @@unique([transferId, productSkuId])
+  @@index([productSkuId])
+  @@map("stock_transfer_items")
+  @@schema("inventory")
+}
+
+/// A one-off manual correction outside the reservation/transfer/count
+/// flows — permission-controlled and audited (`createdBy` always set;
+/// `approvedBy` set when the acting role requires a second approver, see
+/// docs/security/inventory-security.md).
+model InventoryAdjustment {
+  id             String                  @id @default(uuid()) @db.Uuid
+  warehouseId    String                  @map("warehouse_id") @db.Uuid
+  locationId     String                  @map("location_id") @db.Uuid
+  productSkuId   String                  @map("product_sku_id") @db.Uuid
+  adjustmentType InventoryAdjustmentType @map("adjustment_type")
+  quantity       Int
+  reason         String
+  approvedBy     String?                 @map("approved_by") @db.Uuid
+  createdBy      String                  @map("created_by") @db.Uuid
+  createdAt      DateTime                @default(now()) @map("created_at")
+
+  warehouse Warehouse         @relation(fields: [warehouseId], references: [id])
+  location  WarehouseLocation @relation(fields: [locationId], references: [id])
+
+  @@index([warehouseId])
+  @@index([productSkuId])
+  @@map("inventory_adjustments")
+  @@schema("inventory")
+}
+
+model StockCount {
+  id          String           @id @default(uuid()) @db.Uuid
+  warehouseId String           @map("warehouse_id") @db.Uuid
+  locationId  String?          @map("location_id") @db.Uuid
+  status      StockCountStatus @default(PLANNED)
+  countedBy   String?          @map("counted_by") @db.Uuid
+  approvedBy  String?          @map("approved_by") @db.Uuid
+  startedAt   DateTime?        @map("started_at")
+  completedAt DateTime?        @map("completed_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  warehouse Warehouse          @relation(fields: [warehouseId], references: [id])
+  location  WarehouseLocation? @relation(fields: [locationId], references: [id])
+  items     StockCountItem[]
+
+  @@index([warehouseId])
+  @@index([status])
+  @@map("stock_counts")
+  @@schema("inventory")
+}
+
+model StockCountItem {
+  id               String   @id @default(uuid()) @db.Uuid
+  stockCountId     String   @map("stock_count_id") @db.Uuid
+  productSkuId     String   @map("product_sku_id") @db.Uuid
+  expectedQuantity Int      @map("expected_quantity")
+  countedQuantity  Int?     @map("counted_quantity")
+  variance         Int?
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  stockCount StockCount @relation(fields: [stockCountId], references: [id], onDelete: Cascade)
+
+  @@unique([stockCountId, productSkuId])
+  @@map("stock_count_items")
   @@schema("inventory")
 }
 
