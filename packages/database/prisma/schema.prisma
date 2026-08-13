@@ -1424,8 +1424,10 @@ model StockCountItem {
 
 enum CartStatus {
   ACTIVE
-  CONVERTED
+  CHECKOUT_STARTED
   ABANDONED
+  CONVERTED
+  EXPIRED
 
   @@schema("commerce")
 }
@@ -1448,36 +1450,327 @@ enum RefundStatus {
   @@schema("commerce")
 }
 
+/// blueprint §16-§19; Phase 007 — see docs/adr/ADR-007-cart-checkout.md.
+/// `guestToken` (was `sessionToken`) is the opaque, 256-bit, unguessable
+/// identifier a non-authenticated caller presents via `X-Cart-Token`
+/// (ADR-007 decision 10) — never a sequential id, never enumerable.
 model Cart {
-  id           String     @id @default(uuid()) @db.Uuid
-  customerId   String?    @map("customer_id") @db.Uuid // nullable — guest checkout (blueprint §115)
-  sessionToken String?    @unique @map("session_token")
-  status       CartStatus @default(ACTIVE)
-  currency     String     @default("IRR")
-  createdAt    DateTime   @default(now()) @map("created_at")
-  updatedAt    DateTime   @updatedAt @map("updated_at")
+  id         String     @id @default(uuid()) @db.Uuid
+  customerId String?    @map("customer_id") @db.Uuid // nullable — guest checkout; -> customer.customers.id, unenforced
+  guestToken String?    @unique @map("guest_token")
+  status     CartStatus @default(ACTIVE)
+  currency   String     @default("IRR")
+  expiresAt  DateTime?  @map("expires_at")
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
 
-  items CartItem[]
+  items             CartItem[]
+  priceSnapshots    CartPriceSnapshot[]
+  coupons           CartCoupon[]
+  shippingSelection CartShippingSelection?
+  checkoutSessions  CheckoutSession[]
 
   @@index([customerId])
+  @@index([guestToken])
+  @@index([status])
+  @@index([expiresAt])
   @@map("carts")
   @@schema("commerce")
 }
 
-/// `productSkuId` (Phase 005 — was `productVariantId`; see ADR-005 decision 1).
+/// `configurationSnapshot` carries line-specific choices (lens selection,
+/// a prescription *reference* — never raw SPH/CYL/AXIS, customization
+/// reference) as a display-oriented JSON summary; `CartItemOption` below is
+/// the structured, queryable child of the same data. `configurationHash` is
+/// a deterministic hash of `configurationSnapshot` so two adds of the same
+/// SKU with the same configuration consolidate into one line (quantity
+/// summed) while two adds with *different* configuration stay distinct
+/// lines — the brief's "prevent duplicate cart lines where business rules
+/// require consolidation" / "preserve line-specific configuration", both at
+/// once.
 model CartItem {
-  id                String   @id @default(uuid()) @db.Uuid
-  cartId            String   @map("cart_id") @db.Uuid
-  productSkuId      String   @map("product_sku_id") @db.Uuid
-  quantity          Int
-  unitPriceSnapshot BigInt   @map("unit_price_snapshot")
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  id                    String   @id @default(uuid()) @db.Uuid
+  cartId                String   @map("cart_id") @db.Uuid
+  productSkuId          String   @map("product_sku_id") @db.Uuid
+  quantity              Int
+  unitPriceSnapshot     BigInt   @map("unit_price_snapshot")
+  currency              String   @default("IRR")
+  configurationSnapshot Json?    @map("configuration_snapshot")
+  configurationHash     String   @default("") @map("configuration_hash")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  cart    Cart             @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  options CartItemOption[]
+
+  @@unique([cartId, productSkuId, configurationHash])
+  @@index([cartId])
+  @@index([productSkuId])
+  @@map("cart_items")
+  @@schema("commerce")
+}
+
+/// Structured child of `CartItem.configurationSnapshot` — one row per
+/// selected option (lens type, lens coating, a prescription/customization
+/// *reference*). `optionKey` stores an id/reference, never sensitive
+/// prescription values themselves (ADR-007 decision 9 / the brief's own
+/// rule).
+model CartItemOption {
+  id              String   @id @default(uuid()) @db.Uuid
+  cartItemId      String   @map("cart_item_id") @db.Uuid
+  optionType      String   @map("option_type")
+  optionKey       String   @map("option_key")
+  optionLabel     String?  @map("option_label")
+  priceAdjustment BigInt?  @map("price_adjustment")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  cartItem CartItem @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
+
+  @@index([cartItemId])
+  @@map("cart_item_options")
+  @@schema("commerce")
+}
+
+/// Append-only — one row per `price()` recalculation of a cart, each with
+/// its own full per-line `breakdown` (ADR-007 decision 2: "historical
+/// checkout calculations must be reproducible" applies just as much to a
+/// cart the customer hasn't checked out yet).
+model CartPriceSnapshot {
+  id            String   @id @default(uuid()) @db.Uuid
+  cartId        String   @map("cart_id") @db.Uuid
+  currency      String
+  subtotal      BigInt
+  discountTotal BigInt   @map("discount_total")
+  taxTotal      BigInt   @map("tax_total")
+  shippingTotal BigInt   @map("shipping_total")
+  grandTotal    BigInt   @map("grand_total")
+  breakdown     Json
+  calculatedAt  DateTime @default(now()) @map("calculated_at")
 
   cart Cart @relation(fields: [cartId], references: [id], onDelete: Cascade)
 
-  @@unique([cartId, productSkuId])
-  @@map("cart_items")
+  @@index([cartId])
+  @@index([calculatedAt])
+  @@map("cart_price_snapshots")
+  @@schema("commerce")
+}
+
+/// One coupon per cart. `couponId` is an unenforced pointer to
+/// `marketing.coupons.id` (ADR-007 decision 8) — the resolved discount is
+/// snapshotted here at apply-time, re-validated (never blindly re-trusted)
+/// on every subsequent `price()`/checkout call.
+model CartCoupon {
+  id               String   @id @default(uuid()) @db.Uuid
+  cartId           String   @unique @map("cart_id") @db.Uuid
+  couponId         String   @map("coupon_id") @db.Uuid
+  code             String
+  resolvedDiscount BigInt   @map("resolved_discount")
+  appliedAt        DateTime @default(now()) @map("applied_at")
+
+  cart Cart @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  @@index([cartId])
+  @@map("cart_coupons")
+  @@schema("commerce")
+}
+
+/// A cart's current shipping pick, for a running total before checkout
+/// freezes it into `CheckoutSession.shippingSnapshot`.
+model CartShippingSelection {
+  id               String   @id @default(uuid()) @db.Uuid
+  cartId           String   @unique @map("cart_id") @db.Uuid
+  shippingMethodId String   @map("shipping_method_id") @db.Uuid
+  estimatedCost    BigInt   @map("estimated_cost")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  cart           Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  shippingMethod ShippingMethod @relation(fields: [shippingMethodId], references: [id])
+
+  @@map("cart_shipping_selections")
+  @@schema("commerce")
+}
+
+enum ShippingMethodType {
+  HOME_DELIVERY
+  STORE_PICKUP
+
+  @@schema("commerce")
+}
+
+/// Database-driven shipping methods (ADR-007 decision 7) — never hardcoded
+/// in application code or a frontend. `zoneMatch` is `null` (available
+/// nationwide) or a simple `{provinces?: string[], cities?: string[]}`
+/// match list — a deliberately flat "zone resolution foundation", not a
+/// full zone graph; `warehouseId` (unenforced, -> inventory.warehouses.id)
+/// is set for `STORE_PICKUP` methods.
+model ShippingMethod {
+  id              String             @id @default(uuid()) @db.Uuid
+  code            String             @unique
+  name            String
+  type            ShippingMethodType
+  baseCost        BigInt             @map("base_cost")
+  freeAboveAmount BigInt?            @map("free_above_amount")
+  warehouseId     String?            @map("warehouse_id") @db.Uuid
+  zoneMatch       Json?              @map("zone_match")
+  isActive        Boolean            @default(true) @map("is_active")
+  sortOrder       Int                @default(0) @map("sort_order")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  cartSelections CartShippingSelection[]
+
+  @@index([isActive])
+  @@map("shipping_methods")
+  @@schema("commerce")
+}
+
+enum CheckoutStatus {
+  OPEN
+  VALIDATING
+  READY_FOR_PAYMENT
+  EXPIRED
+  CANCELLED
+  CONVERTED
+
+  @@schema("commerce")
+}
+
+/// The payment-ready artifact this phase builds toward (ADR-007 decision
+/// 1). `idempotencyKey` makes `POST /checkout` safe to retry — same call
+/// with the same key always resolves to this same row, never a second
+/// session. `pricingSnapshot`/`shippingSnapshot`/`addressSnapshot` freeze
+/// what the customer agreed to pay at the moment checkout reached
+/// `READY_FOR_PAYMENT`; `CheckoutTotals` (below) is the append-only history
+/// of every recalculation leading up to that point.
+model CheckoutSession {
+  id               String         @id @default(uuid()) @db.Uuid
+  cartId           String         @map("cart_id") @db.Uuid
+  customerId       String?        @map("customer_id") @db.Uuid // nullable — guest checkout supported through READY_FOR_PAYMENT
+  guestToken       String?        @map("guest_token")
+  status           CheckoutStatus @default(OPEN)
+  currency         String         @default("IRR")
+  subtotal         BigInt         @default(0)
+  discountTotal    BigInt         @default(0) @map("discount_total")
+  taxTotal         BigInt         @default(0) @map("tax_total")
+  shippingTotal    BigInt         @default(0) @map("shipping_total")
+  grandTotal       BigInt         @default(0) @map("grand_total")
+  pricingSnapshot  Json?          @map("pricing_snapshot")
+  shippingSnapshot Json?          @map("shipping_snapshot")
+  addressSnapshot  Json?          @map("address_snapshot")
+  idempotencyKey   String         @unique @map("idempotency_key")
+  expiresAt        DateTime?      @map("expires_at")
+  cancelledAt      DateTime?      @map("cancelled_at")
+  convertedAt      DateTime?      @map("converted_at")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  cart          Cart                       @relation(fields: [cartId], references: [id])
+  address       CheckoutAddress?
+  totalsHistory CheckoutTotals[]
+  validations   CheckoutValidationResult[]
+  reservations  CheckoutReservation[]
+
+  @@index([cartId])
+  @@index([customerId])
+  @@index([status])
+  @@index([expiresAt])
+  @@map("checkout_sessions")
+  @@schema("commerce")
+}
+
+/// Snapshotted at checkout time — from a real `customer.customer_addresses`
+/// row (`customerAddressId` set) or freeform guest input
+/// (`customerAddressId` null). Never re-read live from the source address
+/// afterward (blueprint's own "order ≠ live product" principle, extended
+/// to shipping addresses).
+model CheckoutAddress {
+  id                String   @id @default(uuid()) @db.Uuid
+  checkoutSessionId String   @unique @map("checkout_session_id") @db.Uuid
+  customerAddressId String?  @map("customer_address_id") @db.Uuid // -> customer.customer_addresses.id, unenforced
+  recipientName     String   @map("recipient_name")
+  phone             String
+  province          String
+  city              String
+  addressLine1      String   @map("address_line_1")
+  addressLine2      String?  @map("address_line_2")
+  postalCode        String?  @map("postal_code")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  checkoutSession CheckoutSession @relation(fields: [checkoutSessionId], references: [id], onDelete: Cascade)
+
+  @@map("checkout_addresses")
+  @@schema("commerce")
+}
+
+/// Append-only — one row per `POST /checkout/:id/price` recalculation
+/// (ADR-007 decision 2), each with its own full per-line `breakdown`.
+model CheckoutTotals {
+  id                String   @id @default(uuid()) @db.Uuid
+  checkoutSessionId String   @map("checkout_session_id") @db.Uuid
+  currency          String
+  subtotal          BigInt
+  discountTotal     BigInt   @map("discount_total")
+  taxTotal          BigInt   @map("tax_total")
+  shippingTotal     BigInt   @map("shipping_total")
+  grandTotal        BigInt   @map("grand_total")
+  breakdown         Json
+  calculatedAt      DateTime @default(now()) @map("calculated_at")
+
+  checkoutSession CheckoutSession @relation(fields: [checkoutSessionId], references: [id], onDelete: Cascade)
+
+  @@index([checkoutSessionId])
+  @@map("checkout_totals")
+  @@schema("commerce")
+}
+
+enum CheckoutValidationOutcome {
+  PASSED
+  FAILED
+
+  @@schema("commerce")
+}
+
+/// Append-only — one row per `POST /checkout/:id/validate` call. `issues`
+/// is a JSON array of `{code, message, productSkuId?}` — every check listed
+/// in the brief's `checkout_validation` list produces a real issue code on
+/// failure, not a generic "invalid" string.
+model CheckoutValidationResult {
+  id                String                    @id @default(uuid()) @db.Uuid
+  checkoutSessionId String                    @map("checkout_session_id") @db.Uuid
+  outcome           CheckoutValidationOutcome
+  issues            Json
+  validatedAt       DateTime                  @default(now()) @map("validated_at")
+
+  checkoutSession CheckoutSession @relation(fields: [checkoutSessionId], references: [id], onDelete: Cascade)
+
+  @@index([checkoutSessionId])
+  @@map("checkout_validations")
+  @@schema("commerce")
+}
+
+/// Preserves the reservation reference in the checkout session (the
+/// brief's own explicit rule) — one row per cart line reserved.
+/// `inventoryReservationId` is an unenforced pointer to
+/// `inventory.inventory_reservations.id` (ADR-007 decision 4); the
+/// reservation itself, and every quantity it holds, lives entirely in
+/// Phase 006's ledger — this table only remembers *which* reservation
+/// backs *which* checkout line.
+model CheckoutReservation {
+  id                     String   @id @default(uuid()) @db.Uuid
+  checkoutSessionId      String   @map("checkout_session_id") @db.Uuid
+  productSkuId           String   @map("product_sku_id") @db.Uuid
+  warehouseId            String   @map("warehouse_id") @db.Uuid
+  inventoryReservationId String   @map("inventory_reservation_id") @db.Uuid
+  quantity               Int
+  createdAt              DateTime @default(now()) @map("created_at")
+
+  checkoutSession CheckoutSession @relation(fields: [checkoutSessionId], references: [id], onDelete: Cascade)
+
+  @@unique([checkoutSessionId, productSkuId])
+  @@index([checkoutSessionId])
+  @@index([inventoryReservationId])
+  @@map("checkout_reservations")
   @@schema("commerce")
 }
 
