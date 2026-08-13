@@ -67,6 +67,23 @@ export class PrismaPaymentIntentRepository implements PaymentIntentRepositoryPor
     return rows.map(paymentIntentToDomain);
   }
 
+  async listAwaitingVerification(olderThan: Date): Promise<PaymentIntent[]> {
+    const rows = await prisma.paymentIntent.findMany({
+      where: {
+        status: { in: ['AWAITING_PAYMENT', 'PROCESSING'] },
+        attempts: { some: { status: 'REDIRECTED', startedAt: { lt: olderThan } } },
+      },
+    });
+    return rows.map(paymentIntentToDomain);
+  }
+
+  async listVerifiedTransactionsSince(since: Date): Promise<PaymentTransaction[]> {
+    const rows = await prisma.paymentTransaction.findMany({
+      where: { status: 'VERIFIED', createdAt: { gte: since } },
+    });
+    return rows.map(paymentTransactionToDomain);
+  }
+
   /**
    * Idempotent on `checkoutSessionId` under real concurrency, not just
    * sequential retries — same `P2002`-catch-and-reread race-safety

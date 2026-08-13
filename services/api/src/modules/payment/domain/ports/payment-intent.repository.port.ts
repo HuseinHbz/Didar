@@ -32,6 +32,17 @@ export interface PaymentIntentRepositoryPort {
    * what this module's own expiration sweep processes. */
   listExpirable(now: Date): Promise<PaymentIntent[]>;
 
+  /** Every intent still `AWAITING_PAYMENT`/`PROCESSING` whose latest
+   * attempt was redirected before `olderThan` and never returned — what
+   * the `payment_verification_retry` sweep re-checks with a real
+   * `verifyPayment()` call, catching a callback the provider never
+   * delivered or this service missed. */
+  listAwaitingVerification(olderThan: Date): Promise<PaymentIntent[]>;
+
+  /** Every `VERIFIED` transaction created since `since` — what the
+   * `reconciliation` sweep compares against the provider's own record. */
+  listVerifiedTransactionsSince(since: Date): Promise<PaymentTransaction[]>;
+
   /** Idempotent on `checkoutSessionId` (`@unique`, ADR-008 decisions 1/9)
    * — a retried "start payment for this checkout" resolves to the same
    * intent instead of creating a second one. Implementations must handle

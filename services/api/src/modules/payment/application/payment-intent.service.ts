@@ -259,10 +259,19 @@ export class PaymentIntentService {
     return intent;
   }
 
-  /** Consumer side of the `payment_expiration` BullMQ sweep (task #103)
-   * — never invoked by an HTTP controller. Same "expire whatever is
-   * eligible, skip whatever the state machine says is no longer legal to
-   * expire" shape as `CheckoutService.expire()`'s sweep counterpart. */
+  /** Consumer side of the `payment_verification_retry` sweep's
+   * verification-retry half — every intent whose latest attempt was
+   * redirected before `olderThan` and never returned. Never invoked by
+   * an HTTP controller. */
+  async listAwaitingVerification(olderThan: Date): Promise<PaymentIntent[]> {
+    return this.intents.listAwaitingVerification(olderThan);
+  }
+
+  /** Consumer side of the `payment_verification_retry` sweep's
+   * expiration half — never invoked by an HTTP controller. Same "expire
+   * whatever is eligible, skip whatever the state machine says is no
+   * longer legal to expire" shape as `CheckoutService.expire()`'s sweep
+   * counterpart. */
   async expireIntents(now: Date): Promise<number> {
     const expirable = await this.intents.listExpirable(now);
     let expiredCount = 0;

@@ -25,6 +25,13 @@ export class PrismaRefundRepository implements RefundRepositoryPort {
     return rows.map(refundToDomain);
   }
 
+  async listStalePending(olderThan: Date): Promise<Refund[]> {
+    const rows = await prisma.refund.findMany({
+      where: { status: 'PENDING', createdAt: { lt: olderThan } },
+    });
+    return rows.map(refundToDomain);
+  }
+
   /**
    * Idempotent on `idempotencyKey` under real concurrency (ADR-008
    * decision 9) — same `P2002`-catch-and-reread race-safety pattern as

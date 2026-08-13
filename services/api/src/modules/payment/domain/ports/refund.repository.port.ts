@@ -9,6 +9,11 @@ export interface RefundRepositoryPort {
   findByIdempotencyKey(key: string): Promise<Refund | null>;
   listByTransactionId(paymentTransactionId: string): Promise<Refund[]>;
 
+  /** Every `PENDING` refund created before `olderThan` — stuck, not
+   * "about to be processed." What the `refund_status_sync` sweep drives
+   * forward through `RefundService.processRefund()`. */
+  listStalePending(olderThan: Date): Promise<Refund[]>;
+
   /** Idempotent on `idempotencyKey` (ADR-008 decision 9) — same
    * P2002-catch-and-reread race-safety pattern as
    * `PaymentIntentRepositoryPort.create()`. Callers must run
