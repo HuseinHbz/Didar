@@ -56,11 +56,23 @@ import { ActorResolverGuard } from './presentation/guards/actor-resolver.guard';
  * it re-declares `CartService`/`CheckoutService` as separate instances
  * rather than importing this module back (would create a cycle).
  *
- * Exports `CheckoutService` (Phase 008 addition — ADR-008 decision 10):
- * `PaymentModule` imports this module to call
- * `CheckoutService.markConverted()` the moment a payment verifies, the
+ * Exports `CheckoutService` and `ActorResolverGuard` (Phase 008 addition
+ * — ADR-008 decision 10): `PaymentModule` imports this module to call
+ * `CheckoutService.markConverted()` the moment a payment verifies (the
  * one place that module reaches back into cart-checkout, and only
- * through this real service.
+ * through this real service), and reuses `ActorResolverGuard` directly
+ * on its own customer/guest-facing routes — a payment intent's owner is
+ * exactly its checkout session's owner, so re-verifying the same
+ * optional-Bearer-token-or-guest-header logic a second time would be
+ * duplicating this guard, not writing a new one. `ActorResolverGuard`'s
+ * own dependencies (`JwtTokenService`, `CUSTOMER_LOOKUP_PORT`) must also
+ * be resolvable wherever Nest re-instantiates the guard for a new
+ * consuming module — `@UseGuards(SomeClass)` builds a fresh instance
+ * scoped to the *controller's own* module, not a shared singleton reused
+ * across module boundaries, so exporting the guard class alone is not
+ * enough. `IdentityModule` (re-exported here) carries `JwtTokenService`
+ * along; `CUSTOMER_LOOKUP_PORT` is exported directly since it's this
+ * module's own binding.
  */
 @Module({
   imports: [CatalogModule, InventoryModule, IdentityModule, CartCheckoutQueueModule],
@@ -77,6 +89,6 @@ import { ActorResolverGuard } from './presentation/guards/actor-resolver.guard';
     { provide: COUPON_LOOKUP_PORT, useClass: PrismaCouponLookupRepository },
     { provide: APP_FILTER, useClass: CartCheckoutDomainExceptionFilter },
   ],
-  exports: [CheckoutService],
+  exports: [CheckoutService, ActorResolverGuard, CUSTOMER_LOOKUP_PORT, IdentityModule],
 })
 export class CartCheckoutModule {}
