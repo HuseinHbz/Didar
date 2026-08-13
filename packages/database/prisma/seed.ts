@@ -177,6 +177,33 @@ async function main(): Promise<void> {
       description: 'Create/edit warehouses and locations',
     },
     { module: 'inventory', action: 'low_stock.read', description: 'Read the low-stock report' },
+    // payment (Phase 008) — matching what services/api's payment module
+    // actually checks via @RequirePermission (see that module's README
+    // and docs/adr/ADR-008-payment-orchestration.md). Intent
+    // creation/start/callback/verify are customer/guest-facing
+    // (ActorResolverGuard, same as cart-checkout) — no admin permission
+    // gates those, only refunds and reconciliation.
+    { module: 'payment', action: 'refund.read', description: 'Read a refund and its status' },
+    {
+      module: 'payment',
+      action: 'refund.create',
+      description: 'Request a refund against a VERIFIED payment transaction',
+    },
+    {
+      module: 'payment',
+      action: 'refund.process',
+      description: 'Submit a PENDING refund to the real provider adapter',
+    },
+    {
+      module: 'payment',
+      action: 'reconciliation.read',
+      description: 'Read reconciliation findings (never auto-corrected — ADR-008 decision 7)',
+    },
+    {
+      module: 'payment',
+      action: 'reconciliation.resolve',
+      description: 'Record a resolution note on a reconciliation finding',
+    },
   ];
   const permissions = await Promise.all(
     permissionDefs.map((def) =>
@@ -249,11 +276,11 @@ async function main(): Promise<void> {
   await grant(adminRole.id, 'identity.roles.manage');
   await grant(adminRole.id, 'identity.permissions.manage');
   await grant(adminRole.id, 'identity.audit_logs.view');
-  // admin gets every catalog.*/inventory.* permission — the module-access
-  // gate (@RequireModule) and every @RequirePermission check both pass for
-  // admin, same as identity's own endpoints.
+  // admin gets every catalog.*/inventory.*/payment.* permission — the
+  // module-access gate (@RequireModule) and every @RequirePermission check
+  // both pass for admin, same as identity's own endpoints.
   for (const def of permissionDefs) {
-    if (def.module === 'catalog' || def.module === 'inventory') {
+    if (def.module === 'catalog' || def.module === 'inventory' || def.module === 'payment') {
       await grant(adminRole.id, `${def.module}.${def.action}`);
     }
   }
@@ -367,6 +394,38 @@ async function main(): Promise<void> {
     await grant(inventoryAuditorRole.id, `inventory.${action}`);
   }
 
+  // Two payment roles (Phase 008 — docs/security/payment-security.md has
+  // the full matrix): `payment_manager` gets every payment.* permission
+  // (a finance department head — can request/process refunds and resolve
+  // reconciliation findings); `finance_auditor` is read-only, the same
+  // "floor role can't approve its own sensitive action" shape
+  // `inventory_auditor` established — real fixture for the e2e suite's
+  // permission-bypass case (auditor calling POST .../process must 403).
+  const paymentManagerRole = await prisma.role.upsert({
+    where: { name: 'payment_manager' },
+    update: { description: 'Full payment module access — every payment.* permission' },
+    create: {
+      name: 'payment_manager',
+      description: 'Full payment module access — every payment.* permission',
+    },
+  });
+  for (const def of permissionDefs) {
+    if (def.module === 'payment') {
+      await grant(paymentManagerRole.id, `payment.${def.action}`);
+    }
+  }
+  const financeAuditorRole = await prisma.role.upsert({
+    where: { name: 'finance_auditor' },
+    update: { description: 'Read-only — refund and reconciliation visibility, no mutations' },
+    create: {
+      name: 'finance_auditor',
+      description: 'Read-only — refund and reconciliation visibility, no mutations',
+    },
+  });
+  for (const action of ['refund.read', 'reconciliation.read']) {
+    await grant(financeAuditorRole.id, `payment.${action}`);
+  }
+
   const adminUser = await prisma.user.upsert({
     where: { phone: '+989120000001' },
     update: {},
@@ -467,6 +526,26 @@ async function main(): Promise<void> {
     ['+989120000008', 'inventory-auditor@iecp.dev', inventoryAuditorRole.id],
   ];
   for (const [phone, email, roleId] of inventoryRoleUsers) {
+    const user = await prisma.user.upsert({
+      where: { phone },
+      update: {},
+      create: { phone, email, isActive: true, phoneVerifiedAt: new Date() },
+    });
+    await prisma.userRole.upsert({
+      where: { userId_roleId: { userId: user.id, roleId } },
+      update: {},
+      create: { userId: user.id, roleId },
+    });
+  }
+
+  // Ninth-tenth users: one per payment role — real fixtures for the e2e
+  // suite's payment permission-bypass cases (finance_auditor calling
+  // POST .../process or .../resolve must 403).
+  const paymentRoleUsers: [string, string, string][] = [
+    ['+989120000009', 'payment-manager@iecp.dev', paymentManagerRole.id],
+    ['+989120000010', 'finance-auditor@iecp.dev', financeAuditorRole.id],
+  ];
+  for (const [phone, email, roleId] of paymentRoleUsers) {
     const user = await prisma.user.upsert({
       where: { phone },
       update: {},
@@ -1558,6 +1637,235 @@ async function main(): Promise<void> {
   }
 
   // ---------------------------------------------------------------------
+  // payment (Phase 008 — see docs/adr/ADR-008-payment-orchestration.md):
+  // one real provider row (ZarinPal, sandbox), and three PaymentIntent
+  // chains covering the brief's own "provider/intent/success/failure/
+  // refund/reconciliation-mismatch" fixture list — never real
+  // credentials, the real merchant id/API key always come from
+  // PAYMENT_ZARINPAL_MERCHANT_ID (ADR-008 decision 8).
+  // ---------------------------------------------------------------------
+  const zarinpalProvider = await prisma.paymentProvider.upsert({
+    where: { code: 'zarinpal' },
+    update: {},
+    create: {
+      code: 'zarinpal',
+      name: 'ZarinPal',
+      isActive: true,
+      isSandbox: true,
+      config: { callbackPath: '/payments/callback/zarinpal', requestTimeoutMs: 15_000 },
+    },
+  });
+
+  // Chain 1 — success: tied to the real checkoutReadySession fixture above
+  // (READY_FOR_PAYMENT, grandTotal 13,625,000), SUCCEEDED intent, a
+  // RETURNED attempt, a VERIFIED transaction, one recorded callback, and
+  // a partial COMPLETED refund — real data for RefundValidator's
+  // remaining-balance check on a fresh database (13,625,000 - 1,000,000
+  // = 12,625,000 still refundable).
+  const successIntent = await prisma.paymentIntent.upsert({
+    where: { checkoutSessionId: checkoutReadySession.id },
+    update: {},
+    create: {
+      checkoutSessionId: checkoutReadySession.id,
+      customerId: customer.id,
+      providerId: zarinpalProvider.id,
+      status: 'SUCCEEDED',
+      amount: 13_625_000n,
+      currency: 'IRR',
+      idempotencyKey: 'SEED-PAYMENT-SUCCESS-1',
+      expiresAt: new Date(Date.now() + 30 * 60_000),
+    },
+  });
+  const successAttempt = await prisma.paymentAttempt.upsert({
+    where: {
+      paymentIntentId_attemptNumber: { paymentIntentId: successIntent.id, attemptNumber: 1 },
+    },
+    update: {},
+    create: {
+      paymentIntentId: successIntent.id,
+      attemptNumber: 1,
+      providerAuthority: 'SEED-AUTHORITY-SUCCESS-000000000000000000000000',
+      redirectUrl:
+        'https://sandbox.zarinpal.com/pg/StartPay/SEED-AUTHORITY-SUCCESS-000000000000000000000000',
+      status: 'RETURNED',
+      returnedAt: new Date(),
+    },
+  });
+  const successTransaction = await prisma.paymentTransaction.upsert({
+    where: {
+      providerId_providerReference: {
+        providerId: zarinpalProvider.id,
+        providerReference: 'SEED-REFID-001',
+      },
+    },
+    update: {},
+    create: {
+      paymentIntentId: successIntent.id,
+      paymentAttemptId: successAttempt.id,
+      providerId: zarinpalProvider.id,
+      providerReference: 'SEED-REFID-001',
+      amount: 13_625_000n,
+      currency: 'IRR',
+      status: 'VERIFIED',
+      verifiedAt: new Date(),
+      rawVerificationResponse: { code: 100, message: 'Verified', ref_id: 'SEED-REFID-001' },
+    },
+  });
+  await prisma.paymentCallback.upsert({
+    where: { dedupeKey: 'zarinpal:SEED-AUTHORITY-SUCCESS-000000000000000000000000:OK' },
+    update: {},
+    create: {
+      paymentIntentId: successIntent.id,
+      providerId: zarinpalProvider.id,
+      dedupeKey: 'zarinpal:SEED-AUTHORITY-SUCCESS-000000000000000000000000:OK',
+      rawPayload: { Authority: successAttempt.providerAuthority, Status: 'OK' },
+      signatureValid: true,
+      processedAt: new Date(),
+    },
+  });
+  await prisma.refund.upsert({
+    where: { idempotencyKey: 'SEED-REFUND-1' },
+    update: {},
+    create: {
+      paymentTransactionId: successTransaction.id,
+      amount: 1_000_000n,
+      reason: 'Customer requested a partial refund on one lens coating add-on',
+      status: 'COMPLETED',
+      requestedBy: adminUser.id,
+      providerRefundReference: 'SEED-AUTHORITY-SUCCESS-000000000000000000000000',
+      idempotencyKey: 'SEED-REFUND-1',
+    },
+  });
+
+  // Chain 2 — failure: a synthetic checkoutSessionId (PaymentIntent's
+  // pointer is deliberately unenforced — ADR-008 decision 1 — so this
+  // needs no real Cart/CheckoutSession row). The provider verified
+  // *something* but the amount didn't match the intent's own frozen
+  // amount — a FAILED PaymentTransaction is still recorded with the
+  // provider's real reference (ADR-008 decision 3: a mismatch is FAILED,
+  // never silently accepted), intent status FAILED.
+  const failedGuestToken = 'seed-guest-payment-failed-000000000000000000';
+  const failedIntent = await prisma.paymentIntent.upsert({
+    where: { checkoutSessionId: '00000000-0000-4000-9000-000000000007' },
+    update: {},
+    create: {
+      checkoutSessionId: '00000000-0000-4000-9000-000000000007',
+      guestToken: failedGuestToken,
+      providerId: zarinpalProvider.id,
+      status: 'FAILED',
+      amount: 5_000_000n,
+      currency: 'IRR',
+      idempotencyKey: 'SEED-PAYMENT-FAILED-1',
+      expiresAt: new Date(Date.now() + 30 * 60_000),
+    },
+  });
+  const failedAttempt = await prisma.paymentAttempt.upsert({
+    where: {
+      paymentIntentId_attemptNumber: { paymentIntentId: failedIntent.id, attemptNumber: 1 },
+    },
+    update: {},
+    create: {
+      paymentIntentId: failedIntent.id,
+      attemptNumber: 1,
+      providerAuthority: 'SEED-AUTHORITY-FAILED-0000000000000000000000000000',
+      redirectUrl:
+        'https://sandbox.zarinpal.com/pg/StartPay/SEED-AUTHORITY-FAILED-0000000000000000000000000000',
+      status: 'RETURNED',
+      returnedAt: new Date(),
+    },
+  });
+  await prisma.paymentTransaction.upsert({
+    where: {
+      providerId_providerReference: {
+        providerId: zarinpalProvider.id,
+        providerReference: 'SEED-REFID-002',
+      },
+    },
+    update: {},
+    create: {
+      paymentIntentId: failedIntent.id,
+      paymentAttemptId: failedAttempt.id,
+      providerId: zarinpalProvider.id,
+      providerReference: 'SEED-REFID-002',
+      amount: 4_500_000n,
+      currency: 'IRR',
+      status: 'FAILED',
+      rawVerificationResponse: { code: 100, message: 'Verified', ref_id: 'SEED-REFID-002' },
+    },
+  });
+
+  // Chain 3 — reconciliation mismatch: a second SUCCEEDED intent with its
+  // own VERIFIED transaction, plus a real, unresolved ReconciliationRecord
+  // (ADR-008 decision 7 — recorded, never auto-corrected) showing the
+  // provider's own report disagreeing on amount. ReconciliationRecord has
+  // no natural unique key (schema.prisma: index-only), so this uses the
+  // same findFirst-then-create idempotency shape the checkout-validation
+  // fixtures above already use.
+  const reconIntent = await prisma.paymentIntent.upsert({
+    where: { checkoutSessionId: '00000000-0000-4000-9000-000000000008' },
+    update: {},
+    create: {
+      checkoutSessionId: '00000000-0000-4000-9000-000000000008',
+      customerId: customer.id,
+      providerId: zarinpalProvider.id,
+      status: 'SUCCEEDED',
+      amount: 7_200_000n,
+      currency: 'IRR',
+      idempotencyKey: 'SEED-PAYMENT-RECON-1',
+      expiresAt: new Date(Date.now() + 30 * 60_000),
+    },
+  });
+  const reconAttempt = await prisma.paymentAttempt.upsert({
+    where: { paymentIntentId_attemptNumber: { paymentIntentId: reconIntent.id, attemptNumber: 1 } },
+    update: {},
+    create: {
+      paymentIntentId: reconIntent.id,
+      attemptNumber: 1,
+      providerAuthority: 'SEED-AUTHORITY-RECON-00000000000000000000000000000',
+      redirectUrl:
+        'https://sandbox.zarinpal.com/pg/StartPay/SEED-AUTHORITY-RECON-00000000000000000000000000000',
+      status: 'RETURNED',
+      returnedAt: new Date(),
+    },
+  });
+  const reconTransaction = await prisma.paymentTransaction.upsert({
+    where: {
+      providerId_providerReference: {
+        providerId: zarinpalProvider.id,
+        providerReference: 'SEED-REFID-003',
+      },
+    },
+    update: {},
+    create: {
+      paymentIntentId: reconIntent.id,
+      paymentAttemptId: reconAttempt.id,
+      providerId: zarinpalProvider.id,
+      providerReference: 'SEED-REFID-003',
+      amount: 7_200_000n,
+      currency: 'IRR',
+      status: 'VERIFIED',
+      verifiedAt: new Date(),
+      rawVerificationResponse: { code: 100, message: 'Verified', ref_id: 'SEED-REFID-003' },
+    },
+  });
+  const existingReconciliation = await prisma.reconciliationRecord.findFirst({
+    where: { paymentTransactionId: reconTransaction.id },
+  });
+  if (!existingReconciliation) {
+    await prisma.reconciliationRecord.create({
+      data: {
+        providerId: zarinpalProvider.id,
+        transactionDate: new Date(new Date().toISOString().slice(0, 10)),
+        paymentTransactionId: reconTransaction.id,
+        providerReference: 'SEED-REFID-003',
+        localAmount: 7_200_000n,
+        remoteAmount: 7_000_000n,
+        status: 'AMOUNT_MISMATCH',
+      },
+    });
+  }
+
+  // ---------------------------------------------------------------------
   // cms — a home page, a menu, an FAQ entry
   // ---------------------------------------------------------------------
   const homePage = await prisma.page.upsert({
@@ -1658,14 +1966,16 @@ async function main(): Promise<void> {
   });
 
   console.log(
-    '[seed] done — RBAC (38 real permissions across identity/catalog/inventory, role ' +
-      'inheritance, a deny-override), admin/customer/support/catalog-editor/inventory-role ' +
-      'users, demo customer, catalog (3 products — two PUBLISHED with variant+SKU+price+' +
-      'media/collection, one DRAFT), inventory (2 warehouses, 3 locations, stock for all ' +
-      'SKUs, 2 reservations, a low-stock example, a transfer), coupon, cart-checkout (2 ' +
-      'shipping methods, pricing settings, an active customer cart, a guest cart, a ' +
-      'checkout-ready fixture with a real reservation, an expired checkout), CMS/' +
-      'notification/system basics.',
+    '[seed] done — RBAC (43 real permissions across identity/catalog/inventory/payment, role ' +
+      'inheritance, a deny-override), admin/customer/support/catalog-editor/inventory-role/' +
+      'payment-role users, demo customer, catalog (3 products — two PUBLISHED with variant+' +
+      'SKU+price+media/collection, one DRAFT), inventory (2 warehouses, 3 locations, stock ' +
+      'for all SKUs, 2 reservations, a low-stock example, a transfer), coupon, cart-checkout ' +
+      '(2 shipping methods, pricing settings, an active customer cart, a guest cart, a ' +
+      'checkout-ready fixture with a real reservation, an expired checkout), payment (ZarinPal ' +
+      'provider, a SUCCEEDED intent with a VERIFIED transaction + partial refund, a FAILED ' +
+      'intent with a mismatched transaction, an unresolved AMOUNT_MISMATCH reconciliation ' +
+      'finding), CMS/notification/system basics.',
   );
 }
 
