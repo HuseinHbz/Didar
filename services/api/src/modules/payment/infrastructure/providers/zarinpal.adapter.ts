@@ -217,7 +217,13 @@ export class ZarinpalAdapter implements PaymentProviderAdapter {
     // ZarinPal has no dedicated health-check endpoint; a request with a
     // deliberately invalid (zero) amount is rejected fast with a real,
     // well-formed error envelope, which is enough to prove the API is
-    // reachable and answering — never a real payment intent.
+    // reachable and answering — never a real payment intent. Deliberately
+    // NOT a bare `response.status < 500` check: a network intermediary
+    // between this service and ZarinPal (a misconfigured proxy, a
+    // captive portal) can answer with its own non-5xx status without
+    // ZarinPal ever seeing the request — only a body that actually
+    // parses as ZarinPal's own `{ data, errors }` envelope counts as
+    // "reachable and answering."
     try {
       const response = await fetch(`${this.apiBase}/request.json`, {
         method: 'POST',
@@ -230,7 +236,14 @@ export class ZarinpalAdapter implements PaymentProviderAdapter {
         }),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
-      return { ok: response.status < 500, checkedAt: new Date().toISOString(), detail: null };
+      const body: unknown = await response.json();
+      const isZarinpalEnvelope =
+        typeof body === 'object' && body !== null && 'data' in body && 'errors' in body;
+      return {
+        ok: isZarinpalEnvelope,
+        checkedAt: new Date().toISOString(),
+        detail: isZarinpalEnvelope ? null : `Unexpected response shape (HTTP ${response.status})`,
+      };
     } catch (error) {
       return { ok: false, checkedAt: new Date().toISOString(), detail: String(error) };
     }
