@@ -951,7 +951,9 @@ async function main(): Promise<void> {
   // Aviator also has a small store-floor stock — multi-warehouse stock,
   // and the source stock the transfer example below dispatches from is
   // NOT this row (the transfer moves stock INTO the store from central).
-  await seedStock(sku.id, warehouseStore.id, locFloor.id, 5, 0);
+  // Captured (not discarded): the cart-checkout section below reserves 1
+  // unit from it for the checkout-ready fixture.
+  const aviatorAtStore = await seedStock(sku.id, warehouseStore.id, locFloor.id, 5, 0);
 
   await prisma.inventoryThreshold.upsert({
     where: { productSkuId_warehouseId: { productSkuId: sku.id, warehouseId: warehouseCentral.id } },
@@ -1049,7 +1051,7 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------
   // marketing — a welcome coupon
   // ---------------------------------------------------------------------
-  await prisma.coupon.upsert({
+  const welcomeCoupon = await prisma.coupon.upsert({
     where: { code: 'WELCOME10' },
     update: {},
     create: {
@@ -1062,6 +1064,498 @@ async function main(): Promise<void> {
       isActive: true,
     },
   });
+
+  // ---------------------------------------------------------------------
+  // cart-checkout (Phase 007 — see docs/adr/ADR-007-cart-checkout.md): a
+  // second PUBLISHED, discounted SKU (multiple sellable SKUs + a
+  // catalog-level discount example), two ShippingMethod fixtures, the
+  // pricing/quantity `system.Setting` overrides `CartPricingService`
+  // reads, an active customer cart (with a coupon + shipping selected), a
+  // guest cart, a checkout-ready fixture (VALIDATING -> READY_FOR_PAYMENT
+  // with a real reservation), and an expired checkout fixture — the
+  // brief's exact "at least" list for this phase's seed data.
+  // ---------------------------------------------------------------------
+  const clubmasterProduct = await prisma.product.upsert({
+    where: { slug: 'ray-ban-clubmaster-classic' },
+    update: {
+      status: 'PUBLISHED',
+      publishedAt: new Date(),
+      approvedBy: adminUser.id,
+      approvedAt: new Date(),
+    },
+    create: {
+      brandId: brand.id,
+      categoryId: category.id,
+      productType: 'SUNGLASSES',
+      name: 'Ray-Ban Clubmaster Classic',
+      slug: 'ray-ban-clubmaster-classic',
+      longDescription: 'Half-frame browline style, on sale this season.',
+      tags: ['classic', 'acetate-metal-frame'],
+      status: 'PUBLISHED',
+      publishedAt: new Date(),
+      approvedBy: adminUser.id,
+      approvedAt: new Date(),
+    },
+  });
+  const clubmasterVariantDefaults = {
+    color: 'Black',
+    size: '51mm',
+    gender: 'UNISEX' as const,
+    frameShape: 'Clubmaster',
+    frameMaterial: 'Acetate/Metal',
+    isDefault: true,
+    status: 'ACTIVE' as const,
+  };
+  const existingClubmasterVariant = await prisma.productVariant.findFirst({
+    where: { productId: clubmasterProduct.id, isDefault: true },
+  });
+  const clubmasterVariant = existingClubmasterVariant
+    ? await prisma.productVariant.update({
+        where: { id: existingClubmasterVariant.id },
+        data: clubmasterVariantDefaults,
+      })
+    : await prisma.productVariant.create({
+        data: { productId: clubmasterProduct.id, ...clubmasterVariantDefaults },
+      });
+  const clubmasterSku = await prisma.productSku.upsert({
+    where: { skuCode: 'RB-CLUBMASTER-001-BLACK-51' },
+    update: {},
+    create: {
+      productId: clubmasterProduct.id,
+      variantId: clubmasterVariant.id,
+      skuCode: 'RB-CLUBMASTER-001-BLACK-51',
+      weightGrams: 28,
+      taxRateBasisPoints: 900,
+    },
+  });
+  // compareAtPrice > basePrice — "a discounted SKU" (catalog-level list
+  // price vs. current selling price; cart-checkout's own discount engine
+  // this phase only applies coupons, see ADR-007 decision 8, but the
+  // catalog-level discount is a real, honest fixture in its own right).
+  await prisma.productPrice.upsert({
+    where: { productSkuId: clubmasterSku.id },
+    update: {},
+    create: {
+      productSkuId: clubmasterSku.id,
+      basePrice: 9_800_000n,
+      compareAtPrice: 11_500_000n,
+      costPrice: 6_500_000n,
+      currency: 'IRR',
+    },
+  });
+  await seedStock(clubmasterSku.id, warehouseCentral.id, locMain.id, 30, 0);
+
+  const homeDeliveryMethod = await prisma.shippingMethod.upsert({
+    where: { code: 'STANDARD-HOME' },
+    update: {},
+    create: {
+      code: 'STANDARD-HOME',
+      name: 'ارسال استاندارد',
+      type: 'HOME_DELIVERY',
+      baseCost: 500_000n,
+      freeAboveAmount: 20_000_000n,
+      isActive: true,
+      sortOrder: 0,
+    },
+  });
+  const storePickupMethod = await prisma.shippingMethod.upsert({
+    where: { code: 'STORE-PICKUP-TEHRAN' },
+    update: {},
+    create: {
+      code: 'STORE-PICKUP-TEHRAN',
+      name: 'تحویل حضوری از فروشگاه ولیعصر',
+      type: 'STORE_PICKUP',
+      baseCost: 0n,
+      warehouseId: warehouseStore.id,
+      isActive: true,
+      sortOrder: 1,
+    },
+  });
+
+  // `CartPricingService`'s two configurable inputs — real `system.Setting`
+  // rows, not hardcoded fallbacks (ADR-007 decision 6). Values here are
+  // deliberately different from the code's own fallback constants
+  // (FALLBACK_DEFAULT_TAX_RATE_BASIS_POINTS = 0, FALLBACK_MAX_QUANTITY_
+  // PER_LINE = 20) so a seeded database visibly demonstrates the
+  // config-driven path, not the fallback path.
+  await prisma.setting.upsert({
+    where: { key: 'pricing.default_tax_rate_basis_points' },
+    update: {},
+    create: {
+      key: 'pricing.default_tax_rate_basis_points',
+      value: 900,
+      description: 'Default tax rate (basis points) applied when a SKU has no explicit rate',
+    },
+  });
+  await prisma.setting.upsert({
+    where: { key: 'cart.max_quantity_per_line' },
+    update: {},
+    create: {
+      key: 'cart.max_quantity_per_line',
+      value: 10,
+      description: 'Maximum quantity allowed on a single cart line',
+    },
+  });
+
+  /** Money-as-string breakdown line, matching `breakdownToJson`'s exact
+   * shape (services/api's `cart.mapper.ts`) so a seeded `breakdown` Json
+   * column round-trips through `breakdownFromJson` exactly like a real
+   * one computed by `PricingResolver`. */
+  const breakdownLine = (props: {
+    productSkuId: string;
+    quantity: number;
+    basePrice: bigint;
+    resolvedUnitPrice: bigint;
+    lineDiscount: bigint;
+    lineTax: bigint;
+    lineSubtotal: bigint;
+    taxRateBasisPoints: number;
+  }) => ({
+    productSkuId: props.productSkuId,
+    quantity: props.quantity,
+    basePrice: props.basePrice.toString(),
+    resolvedUnitPrice: props.resolvedUnitPrice.toString(),
+    lineDiscount: props.lineDiscount.toString(),
+    lineTax: props.lineTax.toString(),
+    lineSubtotal: props.lineSubtotal.toString(),
+    taxRateBasisPoints: props.taxRateBasisPoints,
+  });
+
+  // --- active customer cart (Sara): aviator x1 + WELCOME10 + home delivery ---
+  // subtotal 12,500,000 - discount 1,250,000 (10%) = 11,250,000 taxable;
+  // tax 9% of 11,250,000 = 1,012,500; shipping 500,000 (below the
+  // 20,000,000 free-shipping floor); grandTotal = 12,762,500.
+  const customerCart = await prisma.cart.upsert({
+    where: { id: '00000000-0000-4000-9000-000000000001' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-9000-000000000001',
+      customerId: customer.id,
+      status: 'ACTIVE',
+      currency: 'IRR',
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60_000),
+    },
+  });
+  await prisma.cartItem.upsert({
+    where: {
+      cartId_productSkuId_configurationHash: {
+        cartId: customerCart.id,
+        productSkuId: sku.id,
+        configurationHash: '',
+      },
+    },
+    update: {},
+    create: {
+      cartId: customerCart.id,
+      productSkuId: sku.id,
+      quantity: 1,
+      unitPriceSnapshot: 12_500_000n,
+      currency: 'IRR',
+    },
+  });
+  await prisma.cartCoupon.upsert({
+    where: { cartId: customerCart.id },
+    update: {},
+    create: {
+      cartId: customerCart.id,
+      couponId: welcomeCoupon.id,
+      code: welcomeCoupon.code,
+      resolvedDiscount: 1_250_000n,
+    },
+  });
+  await prisma.cartShippingSelection.upsert({
+    where: { cartId: customerCart.id },
+    update: {},
+    create: {
+      cartId: customerCart.id,
+      shippingMethodId: homeDeliveryMethod.id,
+      estimatedCost: 500_000n,
+    },
+  });
+  const existingCustomerCartSnapshot = await prisma.cartPriceSnapshot.findFirst({
+    where: { cartId: customerCart.id },
+  });
+  if (!existingCustomerCartSnapshot) {
+    await prisma.cartPriceSnapshot.create({
+      data: {
+        cartId: customerCart.id,
+        currency: 'IRR',
+        subtotal: 12_500_000n,
+        discountTotal: 1_250_000n,
+        taxTotal: 1_012_500n,
+        shippingTotal: 500_000n,
+        grandTotal: 12_762_500n,
+        breakdown: [
+          breakdownLine({
+            productSkuId: sku.id,
+            quantity: 1,
+            basePrice: 12_500_000n,
+            resolvedUnitPrice: 11_250_000n,
+            lineDiscount: 1_250_000n,
+            lineTax: 1_012_500n,
+            lineSubtotal: 12_500_000n,
+            taxRateBasisPoints: 900,
+          }),
+        ],
+      },
+    });
+  }
+
+  // --- guest cart: clubmaster (discounted) SKU x2, no coupon/shipping yet ---
+  const guestCartToken = 'seed-guest-cart-token-0000000000000000000000000000';
+  const guestCart = await prisma.cart.upsert({
+    where: { guestToken: guestCartToken },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-9000-000000000002',
+      guestToken: guestCartToken,
+      status: 'ACTIVE',
+      currency: 'IRR',
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60_000),
+    },
+  });
+  await prisma.cartItem.upsert({
+    where: {
+      cartId_productSkuId_configurationHash: {
+        cartId: guestCart.id,
+        productSkuId: clubmasterSku.id,
+        configurationHash: '',
+      },
+    },
+    update: {},
+    create: {
+      cartId: guestCart.id,
+      productSkuId: clubmasterSku.id,
+      quantity: 2,
+      unitPriceSnapshot: 9_800_000n,
+      currency: 'IRR',
+    },
+  });
+
+  // --- checkout-ready fixture: its own cart (aviator x1, no coupon),
+  // reserved from the store's aviator stock, validated PASSED, and frozen
+  // at READY_FOR_PAYMENT — subtotal 12,500,000, tax 9% = 1,125,000, store
+  // pickup shipping 0, grandTotal 13,625,000. ---
+  const checkoutReadyCart = await prisma.cart.upsert({
+    where: { id: '00000000-0000-4000-9000-000000000003' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-9000-000000000003',
+      customerId: customer.id,
+      status: 'CHECKOUT_STARTED',
+      currency: 'IRR',
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60_000),
+    },
+  });
+  await prisma.cartItem.upsert({
+    where: {
+      cartId_productSkuId_configurationHash: {
+        cartId: checkoutReadyCart.id,
+        productSkuId: sku.id,
+        configurationHash: '',
+      },
+    },
+    update: {},
+    create: {
+      cartId: checkoutReadyCart.id,
+      productSkuId: sku.id,
+      quantity: 1,
+      unitPriceSnapshot: 12_500_000n,
+      currency: 'IRR',
+    },
+  });
+
+  const checkoutReadySession = await prisma.checkoutSession.upsert({
+    where: { idempotencyKey: 'SEED-CHECKOUT-READY-1' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-9000-000000000004',
+      cartId: checkoutReadyCart.id,
+      customerId: customer.id,
+      status: 'READY_FOR_PAYMENT',
+      currency: 'IRR',
+      subtotal: 12_500_000n,
+      discountTotal: 0n,
+      taxTotal: 1_125_000n,
+      shippingTotal: 0n,
+      grandTotal: 13_625_000n,
+      pricingSnapshot: {
+        currency: 'IRR',
+        subtotal: '12500000',
+        discountTotal: '0',
+        taxTotal: '1125000',
+        shippingTotal: '0',
+        grandTotal: '13625000',
+      },
+      shippingSnapshot: { shippingMethodId: storePickupMethod.id, estimatedCost: '0' },
+      addressSnapshot: {
+        recipientName: 'Sara Ahmadi',
+        phone: '+989120000002',
+        province: 'Tehran',
+        city: 'Tehran',
+        addressLine1: 'Valiasr St, No. 100',
+        addressLine2: null,
+        postalCode: null,
+      },
+      idempotencyKey: 'SEED-CHECKOUT-READY-1',
+      expiresAt: new Date(Date.now() + 20 * 60_000),
+    },
+  });
+  await prisma.checkoutAddress.upsert({
+    where: { checkoutSessionId: checkoutReadySession.id },
+    update: {},
+    create: {
+      checkoutSessionId: checkoutReadySession.id,
+      customerAddressId: '00000000-0000-4000-8000-000000000001',
+      recipientName: 'Sara Ahmadi',
+      phone: '+989120000002',
+      province: 'Tehran',
+      city: 'Tehran',
+      addressLine1: 'Valiasr St, No. 100',
+    },
+  });
+  const existingCheckoutReadyValidation = await prisma.checkoutValidationResult.findFirst({
+    where: { checkoutSessionId: checkoutReadySession.id },
+  });
+  if (!existingCheckoutReadyValidation) {
+    await prisma.checkoutValidationResult.create({
+      data: { checkoutSessionId: checkoutReadySession.id, outcome: 'PASSED', issues: [] },
+    });
+  }
+  const existingCheckoutReadyTotals = await prisma.checkoutTotals.findFirst({
+    where: { checkoutSessionId: checkoutReadySession.id },
+  });
+  if (!existingCheckoutReadyTotals) {
+    await prisma.checkoutTotals.create({
+      data: {
+        checkoutSessionId: checkoutReadySession.id,
+        currency: 'IRR',
+        subtotal: 12_500_000n,
+        discountTotal: 0n,
+        taxTotal: 1_125_000n,
+        shippingTotal: 0n,
+        grandTotal: 13_625_000n,
+        breakdown: [
+          breakdownLine({
+            productSkuId: sku.id,
+            quantity: 1,
+            basePrice: 12_500_000n,
+            resolvedUnitPrice: 12_500_000n,
+            lineDiscount: 0n,
+            lineTax: 1_125_000n,
+            lineSubtotal: 12_500_000n,
+            taxRateBasisPoints: 900,
+          }),
+        ],
+      },
+    });
+  }
+  // Reserves 1 unit from the store's aviator stock (5 on hand, 0 reserved
+  // — seeded above) — kept separate from `aviatorAtMain`'s own
+  // SEED-RESERVATION-1 fixture so neither example has to account for the
+  // other's math.
+  const checkoutReadyReservation = await prisma.inventoryReservation.upsert({
+    where: {
+      idempotencyKey: `checkout__${checkoutReadySession.id}__${sku.id}`,
+    },
+    update: {},
+    create: {
+      id: randomUUID(),
+      productSkuId: sku.id,
+      warehouseId: warehouseStore.id,
+      locationId: locFloor.id,
+      inventoryItemId: aviatorAtStore.id,
+      quantity: 1,
+      status: 'ACTIVE',
+      sourceType: 'CHECKOUT',
+      sourceId: checkoutReadySession.id,
+      idempotencyKey: `checkout__${checkoutReadySession.id}__${sku.id}`,
+    },
+  });
+  await prisma.inventoryItem.update({
+    where: { id: aviatorAtStore.id },
+    data: { reservedQuantity: 1, availableQuantity: 4 },
+  });
+  await prisma.checkoutReservation.upsert({
+    where: {
+      checkoutSessionId_productSkuId: {
+        checkoutSessionId: checkoutReadySession.id,
+        productSkuId: sku.id,
+      },
+    },
+    update: {},
+    create: {
+      checkoutSessionId: checkoutReadySession.id,
+      productSkuId: sku.id,
+      warehouseId: warehouseStore.id,
+      inventoryReservationId: checkoutReadyReservation.id,
+      quantity: 1,
+    },
+  });
+
+  // --- expired checkout fixture: a guest checkout that never reached an
+  // address/reservation before its 20-minute window ran out. ---
+  const expiredGuestToken = 'seed-guest-cart-token-expired-000000000000000000';
+  const expiredCart = await prisma.cart.upsert({
+    where: { guestToken: expiredGuestToken },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-9000-000000000005',
+      guestToken: expiredGuestToken,
+      status: 'EXPIRED',
+      currency: 'IRR',
+      expiresAt: new Date(Date.now() - 24 * 60 * 60_000),
+    },
+  });
+  await prisma.cartItem.upsert({
+    where: {
+      cartId_productSkuId_configurationHash: {
+        cartId: expiredCart.id,
+        productSkuId: clubmasterSku.id,
+        configurationHash: '',
+      },
+    },
+    update: {},
+    create: {
+      cartId: expiredCart.id,
+      productSkuId: clubmasterSku.id,
+      quantity: 1,
+      unitPriceSnapshot: 9_800_000n,
+      currency: 'IRR',
+    },
+  });
+  const expiredCheckoutSession = await prisma.checkoutSession.upsert({
+    where: { idempotencyKey: 'SEED-CHECKOUT-EXPIRED-1' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-9000-000000000006',
+      cartId: expiredCart.id,
+      guestToken: expiredGuestToken,
+      status: 'EXPIRED',
+      currency: 'IRR',
+      subtotal: 9_800_000n,
+      discountTotal: 0n,
+      taxTotal: 882_000n,
+      shippingTotal: 0n,
+      grandTotal: 10_682_000n,
+      idempotencyKey: 'SEED-CHECKOUT-EXPIRED-1',
+      expiresAt: new Date(Date.now() - 24 * 60 * 60_000 + 20 * 60_000),
+    },
+  });
+  const existingExpiredValidation = await prisma.checkoutValidationResult.findFirst({
+    where: { checkoutSessionId: expiredCheckoutSession.id },
+  });
+  if (!existingExpiredValidation) {
+    await prisma.checkoutValidationResult.create({
+      data: {
+        checkoutSessionId: expiredCheckoutSession.id,
+        outcome: 'FAILED',
+        issues: [
+          { code: 'ADDRESS_INVALID', message: 'No shipping/billing address set on this checkout' },
+        ],
+      },
+    });
+  }
 
   // ---------------------------------------------------------------------
   // cms — a home page, a menu, an FAQ entry
@@ -1166,10 +1660,12 @@ async function main(): Promise<void> {
   console.log(
     '[seed] done — RBAC (38 real permissions across identity/catalog/inventory, role ' +
       'inheritance, a deny-override), admin/customer/support/catalog-editor/inventory-role ' +
-      'users, demo customer, catalog (2 products — one PUBLISHED with variant+SKU+price+' +
-      'media+collection, one DRAFT), inventory (2 warehouses, 3 locations, stock for both ' +
-      'SKUs, a reservation, a low-stock example, a transfer), coupon, CMS/notification/' +
-      'system basics.',
+      'users, demo customer, catalog (3 products — two PUBLISHED with variant+SKU+price+' +
+      'media/collection, one DRAFT), inventory (2 warehouses, 3 locations, stock for all ' +
+      'SKUs, 2 reservations, a low-stock example, a transfer), coupon, cart-checkout (2 ' +
+      'shipping methods, pricing settings, an active customer cart, a guest cart, a ' +
+      'checkout-ready fixture with a real reservation, an expired checkout), CMS/' +
+      'notification/system basics.',
   );
 }
 
