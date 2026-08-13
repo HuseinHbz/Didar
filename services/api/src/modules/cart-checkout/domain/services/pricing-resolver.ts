@@ -1,0 +1,105 @@
+import type { PriceLineBreakdown } from '../entities/price-breakdown.types';
+
+import { DiscountCalculator, type CouponRule } from './discount-calculator';
+import { TaxCalculator } from './tax-calculator';
+
+export class NegativeTotalError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NegativeTotalError';
+  }
+}
+
+export interface PricingLineInput {
+  productSkuId: string;
+  quantity: number;
+  basePrice: bigint;
+  taxRateBasisPoints: number | null;
+}
+
+export interface PricingResolutionInput {
+  lines: readonly PricingLineInput[];
+  coupon: CouponRule | null;
+  defaultTaxRateBasisPoints: number;
+  shippingCost: bigint;
+}
+
+export interface PricingResolution {
+  lines: PriceLineBreakdown[];
+  subtotal: bigint;
+  discountTotal: bigint;
+  taxTotal: bigint;
+  shippingTotal: bigint;
+  grandTotal: bigint;
+}
+
+/**
+ * The one place base_price -> resolved_unit_price -> discount -> tax ->
+ * shipping -> subtotal -> grand_total actually happens (the brief's exact
+ * `pricing_engine.outputs` list) — pure, deterministic, zero I/O. Every
+ * caller (cart price preview, checkout price recalculation) goes through
+ * this same function, so "server-side" and "reproducible" are structural
+ * properties, not conventions someone has to remember to follow.
+ *
+ * Order of operations: subtotal (sum of base_price * quantity) -> discount
+ * (coupon, allocated proportionally per line, `DiscountCalculator`) -> tax
+ * (per line, on the *post-discount* amount, `TaxCalculator`) -> shipping
+ * (a flat total, resolved by the caller via `ShippingCalculator` and
+ * passed in already-computed) -> grand total. Never negative — a discount
+ * larger than the subtotal is a bug in `DiscountCalculator` (which already
+ * caps it), not something this function silently tolerates; it asserts
+ * rather than trusts.
+ */
+export class PricingResolver {
+  static resolve(input: PricingResolutionInput): PricingResolution {
+    const lineSubtotals = input.lines.map((line) => line.basePrice * BigInt(line.quantity));
+    const subtotal = lineSubtotals.reduce((sum, value) => sum + value, 0n);
+
+    const discountTotal = input.coupon
+      ? DiscountCalculator.calculateTotalDiscount(subtotal, input.coupon)
+      : 0n;
+    const lineDiscounts = DiscountCalculator.allocateByLineShare(
+      discountTotal,
+      input.lines.map((line, index) => ({ lineSubtotal: lineSubtotals[index] ?? 0n })),
+      subtotal,
+    );
+
+    const lines: PriceLineBreakdown[] = input.lines.map((line, index) => {
+      const lineSubtotal = lineSubtotals[index] ?? 0n;
+      const lineDiscount = lineDiscounts[index] ?? 0n;
+      const taxRateBasisPoints = TaxCalculator.effectiveRate(
+        line.taxRateBasisPoints,
+        input.defaultTaxRateBasisPoints,
+      );
+      const taxableAmount = lineSubtotal - lineDiscount;
+      const lineTax = TaxCalculator.calculateLineTax(taxableAmount, taxRateBasisPoints);
+      return {
+        productSkuId: line.productSkuId,
+        quantity: line.quantity,
+        basePrice: line.basePrice,
+        resolvedUnitPrice:
+          line.quantity > 0 ? (lineSubtotal - lineDiscount) / BigInt(line.quantity) : 0n,
+        lineDiscount,
+        lineTax,
+        lineSubtotal,
+        taxRateBasisPoints,
+      };
+    });
+
+    const taxTotal = lines.reduce((sum, line) => sum + line.lineTax, 0n);
+    const shippingTotal = input.shippingCost;
+    const grandTotal = subtotal - discountTotal + taxTotal + shippingTotal;
+
+    if (
+      subtotal < 0n ||
+      discountTotal < 0n ||
+      taxTotal < 0n ||
+      shippingTotal < 0n ||
+      grandTotal < 0n
+    ) {
+      throw new NegativeTotalError('Pricing resolution produced a negative total');
+    }
+
+    return { lines, subtotal, discountTotal, taxTotal, shippingTotal, grandTotal };
+  }
+}
