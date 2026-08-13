@@ -69,9 +69,14 @@ export class UnknownPaymentProviderError extends Error {
   }
 }
 
-/** Resolves the real adapter instance for a `PaymentProvider.code`
+/** Resolves the real adapter instance for a `PaymentProvider` row
  * (ADR-008 decision 5) — the one place application-layer use cases go
- * from "which provider row" to "which adapter to call." */
+ * from "which provider row" to "which adapter to call." Takes `isSandbox`
+ * alongside `code` (not just the code) because the adapter needs it to
+ * pick the right base URL at construction time (see `ZarinpalAdapter`'s
+ * own doc comment on why that choice is never made from `config` JSON);
+ * the caller already has the full `PaymentProvider` row loaded by the
+ * time it needs an adapter, so this stays a synchronous, no-I/O lookup. */
 export interface PaymentProviderAdapterRegistry {
-  resolve(providerCode: string): PaymentProviderAdapter;
+  resolve(provider: { code: string; isSandbox: boolean }): PaymentProviderAdapter;
 }

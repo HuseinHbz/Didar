@@ -31,6 +31,23 @@ const envSchema = z.object({
   // queues, hosted in-process here rather than in services/worker (ADR-006
   // decision 8). Same default `services/worker` already uses.
   REDIS_URL: envPrimitives.url.default('redis://localhost:6379'),
+
+  // payment module (Phase 008) — see src/modules/payment/README.md. The
+  // real merchant credential per provider, namespaced by provider code,
+  // never persisted to Postgres (ADR-008 decision 8; `PaymentProvider
+  // .config` holds only non-secret settings). ZarinPal's sandbox
+  // environment accepts any well-formed UUID as `merchant_id` and never
+  // moves real money — this is ZarinPal's own publicly documented sandbox
+  // test value, safe for local dev so `.env.example` boots without an
+  // extra step; a real environment must set its own.
+  PAYMENT_ZARINPAL_MERCHANT_ID: envPrimitives.nonEmptyString.default(
+    '36fd6885-1ecf-11e8-ae1c-005056a205be',
+  ),
+  // Base URL this API is reachable at, used to build ZarinPal's
+  // `callback_url` (where the customer's browser is redirected back to
+  // after paying). Must be reachable from the customer's browser, not
+  // from this server.
+  PAYMENT_ZARINPAL_CALLBACK_BASE_URL: envPrimitives.url.default('http://localhost:4000'),
 });
 
 export type Env = z.infer<typeof envSchema>;
