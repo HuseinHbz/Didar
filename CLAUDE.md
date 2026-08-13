@@ -127,8 +127,13 @@ Phase 002 added the enterprise git workflow + CI quality gate: `main`
 `security` — dependency + secret scan, `build` — frontend/backend split) gated
 by a `quality-gate` job. Branch protection requiring that check is still a
 manual GitHub-admin step (not configurable from inside the repo) — see that
-doc. `develop` currently equals `feature/foundation-monorepo`'s content since
-that branch was never merged to `main` (no PR was requested).
+doc. Every phase's `feature/*` branch is merged to `main` once its PR lands
+(all of Phase 001-008's PRs are merged as of Phase 008; `develop` tracks the
+same tip) — see `docs/deployment/ci-pipeline.md`'s "Numbered branch naming"
+section for the two-digit prefix (`01-feature-foundation-monorepo`, …,
+`08-feature-payment-orchestration`) every phase branch carries from Phase
+001 onward, and for the naming rule to keep following on every future
+branch.
 
 Phase 003 built the real PostgreSQL foundation (blueprint's "settle the
 database/domain skeleton first" ordering principle): the full ERD across all

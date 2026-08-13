@@ -29,6 +29,22 @@ develop ──●──●──●──●──●──●──●───
     feature/* ●        ●  bugfix/*   ● hotfix/* (branched from main, not develop)
 ```
 
+### Numbered branch naming
+
+Every `feature/*` branch in this repo is created and worked in strict phase
+order (each one is a clean-architecture module built on top of everything
+before it — see `CLAUDE.md`'s "Current status"), so from Phase 001 onward
+each gets a two-digit numeric prefix reflecting that order, e.g.
+`01-feature-foundation-monorepo`, `02-feature-ci-pipeline`, …,
+`08-feature-payment-orchestration`. The prefix goes on the branch name
+itself (not a separate `feature/` folder segment) so the ordering is visible
+directly in a plain `git branch`/GitHub branch-list view, not just inferable
+from commit dates. Renumbering an already-pushed branch means creating the
+new name, pushing it, and deleting the old one — do this only after its PR
+is merged into `main`/`develop` (deleting an unmerged branch's only ref
+loses that PR's mergeability). New `bugfix/*`/`hotfix/*` branches don't
+carry a phase number — they're not part of the sequential phase chain.
+
 Commit convention: [Conventional Commits](https://www.conventionalcommits.org)
 (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`, `ci:`, `security:`)
 — see root `CONTRIBUTING.md`.
