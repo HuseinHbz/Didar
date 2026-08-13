@@ -107,5 +107,11 @@ import { InventoryDomainExceptionFilter } from './presentation/filters/inventory
     { provide: AUDIT_LOG_REPOSITORY, useClass: PrismaAuditLogRepository },
     { provide: APP_FILTER, useClass: InventoryDomainExceptionFilter },
   ],
+  // Phase 007 (ADR-007 decision 4) — `ReservationService`/`AllocationService`/
+  // `StockQueryService` are exported so `CartCheckoutModule` can import this
+  // module and inject them directly, reusing the real reservation engine
+  // instead of reimplementing it. Additive, behavior-preserving: nothing
+  // about how this module serves its own controllers changes.
+  exports: [ReservationService, AllocationService, StockQueryService],
 })
 export class InventoryModule {}

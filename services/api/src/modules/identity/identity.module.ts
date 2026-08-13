@@ -203,5 +203,11 @@ import { FieldPermissionInterceptor } from './presentation/interceptors/field-pe
     // Field-level permission demo (see identity.controller.ts)
     FieldPermissionInterceptor,
   ],
+  // Phase 007 (ADR-007) — `JwtTokenService` is exported so
+  // `CartCheckoutModule` can verify an *optional* bearer token itself
+  // (cart/checkout routes are @Public() — they support guest callers, so
+  // the global JwtAuthGuard can't gate them) without reimplementing JWT
+  // verification. Additive, behavior-preserving.
+  exports: [JwtTokenService],
 })
 export class IdentityModule {}

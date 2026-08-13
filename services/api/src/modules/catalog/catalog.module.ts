@@ -98,5 +98,10 @@ import { CatalogDomainExceptionFilter } from './presentation/filters/catalog-dom
     { provide: AUDIT_LOG_REPOSITORY, useClass: PrismaAuditLogRepository },
     { provide: APP_FILTER, useClass: CatalogDomainExceptionFilter },
   ],
+  // Phase 007 (ADR-007 decision 5) — `ProductsService`/`SkusService`/
+  // `PricingService` are exported so `CartCheckoutModule` can import this
+  // module and inject them directly (real lifecycle-status/price reads,
+  // not re-derived). Additive, behavior-preserving.
+  exports: [ProductsService, SkusService, PricingService],
 })
 export class CatalogModule {}
