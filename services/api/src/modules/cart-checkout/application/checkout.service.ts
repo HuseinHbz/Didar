@@ -478,4 +478,30 @@ export class CheckoutService {
     const customer = await this.customers.findByUserId(userId);
     return customer?.id ?? null;
   }
+
+  /**
+   * ADR-007 explicitly reserved `CheckoutSession.status = CONVERTED` for
+   * "once that checkout reaches `READY_FOR_PAYMENT` and payment
+   * orchestration takes over (Phase 008)." Called by the payment
+   * module's `PaymentModule` — via this real service, never a raw Prisma
+   * write against `commerce.checkout_sessions` — the moment a
+   * `PaymentTransaction` verifies successfully (ADR-008 decision 10).
+   * Same idempotent-by-construction shape as `expire()`: converting an
+   * already-`CONVERTED` session is a no-op, and a session that isn't in
+   * `READY_FOR_PAYMENT` at all (already `CANCELLED`/`EXPIRED`) is left
+   * alone rather than forced — a verified payment against a session that
+   * expired out from under it is the payment module's own inconsistency
+   * to surface, not something this method silently overrides.
+   */
+  async markConverted(checkoutId: string): Promise<CheckoutSessionWithDetail> {
+    const detail = await this.sessions.findById(checkoutId);
+    if (!detail) throw new NotFoundException('Checkout session not found');
+    if (CheckoutStateMachine.isNoOp(detail.session.status, 'CONVERTED')) return detail;
+    if (!CheckoutStateMachine.canTransition(detail.session.status, 'CONVERTED')) return detail;
+
+    await this.sessions.updateStatus(detail.session.id, 'CONVERTED', { convertedAt: new Date() });
+    const updated = await this.sessions.findById(checkoutId);
+    if (!updated) throw new NotFoundException('Checkout session not found');
+    return updated;
+  }
 }

@@ -55,6 +55,12 @@ import { ActorResolverGuard } from './presentation/guards/actor-resolver.guard';
  * registered on app bootstrap — see that module's own doc comment for why
  * it re-declares `CartService`/`CheckoutService` as separate instances
  * rather than importing this module back (would create a cycle).
+ *
+ * Exports `CheckoutService` (Phase 008 addition — ADR-008 decision 10):
+ * `PaymentModule` imports this module to call
+ * `CheckoutService.markConverted()` the moment a payment verifies, the
+ * one place that module reaches back into cart-checkout, and only
+ * through this real service.
  */
 @Module({
   imports: [CatalogModule, InventoryModule, IdentityModule, CartCheckoutQueueModule],
@@ -71,5 +77,6 @@ import { ActorResolverGuard } from './presentation/guards/actor-resolver.guard';
     { provide: COUPON_LOOKUP_PORT, useClass: PrismaCouponLookupRepository },
     { provide: APP_FILTER, useClass: CartCheckoutDomainExceptionFilter },
   ],
+  exports: [CheckoutService],
 })
 export class CartCheckoutModule {}
