@@ -48,6 +48,8 @@ graph LR
     commerce -. "shipping_methods.warehouse_id (nullable: STORE_PICKUP)" .-> inventory
     commerce -. "coupon_redemptions.order_id/customer_id" .-> marketing
     commerce -. "cart_coupons.coupon_id" .-> marketing
+    customer -. "payment_intents.customer_id (Phase 008)" .-> commerce
+    identity -. "refunds.requested_by (Phase 008)" .-> commerce
     customer -. "notification_preferences.customer_id" .-> notification
     customer -. "notification_logs.customer_id" .-> notification
     customer -. "analytics_events.customer_id" .-> analytics
@@ -491,10 +493,18 @@ full diagram with every column and design rationale) extended `carts`/
 `cart_item_options`, `cart_price_snapshots`, `cart_coupons`,
 `shipping_methods`, `cart_shipping_selections`, and the entire
 `checkout_sessions`/`checkout_addresses`/`checkout_totals`/
-`checkout_validations`/`checkout_reservations` subtree. The summary below
-is intentionally abbreviated (the cart/checkout half omits the new tables
-entirely — see `cart-checkout-erd.md` for those); `cart-checkout-erd.md` is
-the source of truth for that half of this schema going forward, same
+`checkout_validations`/`checkout_reservations` subtree. Phase 008 (see
+[`payment-erd.md`](./payment-erd.md) for the full diagram) then dropped
+the placeholder `payments`/`refunds`/`PaymentStatus`/`RefundStatus` shown
+below and replaced them with a real 7-table payment orchestration subtree
+(`payment_providers`, `payment_intents`, `payment_attempts`,
+`payment_transactions`, `payment_callbacks`, `refunds`,
+`reconciliation_records`) keyed off `checkout_sessions`, not `orders`. The
+summary below is intentionally abbreviated (it still shows the Phase 003
+placeholder `payments`/`refunds` shape for historical continuity with the
+diagram beneath it, and omits every Phase 007/008 addition entirely — see
+`cart-checkout-erd.md` and `payment-erd.md` for those); both are the
+source of truth for their half of this schema going forward, same
 convention `inventory-erd.md` set above.
 
 ```mermaid
@@ -564,6 +574,14 @@ erDiagram
 `order_items` snapshots `sku`/`name`/`unit_price` at creation — an order's
 totals never change because the live product changed later
 ("order ≠ live product", see [`README.md`](./README.md#conventions)).
+
+**The `payments`/`refunds` tables shown above are the Phase 003 placeholder
+shape and no longer exist** — Phase 008 dropped them and replaced them with
+a real 7-table payment orchestration subtree keyed off `checkout_sessions`
+rather than the non-existent `Order` flow. See
+[`payment-erd.md`](./payment-erd.md) for the current, real shape; kept here
+unedited only so this diagram still matches what earlier phases' own
+diagrams referenced at the time they were written.
 
 ## marketing
 

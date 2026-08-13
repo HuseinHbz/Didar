@@ -67,6 +67,18 @@ locationId)` with a full 7-bucket quantity model, `InventoryLedger`
   `carts`/`cart_items` at authoring time (confirmed directly) — but the
   `guest_token` rename still uses `RENAME COLUMN` for semantic honesty; see
   its own header comment.
+- `20260813000000_payment_orchestration_foundation` (Phase 008) — drops
+  Phase 003's placeholder `commerce.Payment`/`Refund`/`PaymentStatus`/
+  `RefundStatus` (keyed on the nonexistent `Order`, unusable) and replaces
+  them with the real payment orchestration subtree: 5 new enums, 7 new
+  tables (`PaymentProvider`, `PaymentIntent`, `PaymentAttempt`,
+  `PaymentTransaction`, `PaymentCallback`, `Refund`,
+  `ReconciliationRecord`). Full detail: [`payment-erd.md`](./payment-erd.md)
+  and [`docs/adr/ADR-008-payment-orchestration.md`](../adr/ADR-008-payment-orchestration.md).
+  Not data-preserving in the Phase 007 sense — 0 rows existed in the
+  placeholder `payments`/`refunds` tables at authoring time (confirmed
+  directly) — `down.sql` restores that exact placeholder shape; see its
+  own header comment.
 
 This is **not** full coverage of blueprint §57's eventual table list. See
 ["Deliberately out of scope"](#deliberately-out-of-scope) below for exactly
@@ -258,6 +270,15 @@ real local PostgreSQL:
   exists" — fixed by wrapping each `ADD VALUE` in a
   `DO $$ ... IF NOT EXISTS ... $$` guard. See that migration's own header
   comment.
+- Phase 008: the `commerce` payment orchestration addition (5 new enums,
+  7 new tables, replacing Phase 003's 2-table placeholder shape),
+  round-tripped once — up → down → up — with `prisma migrate diff`
+  confirming zero drift at every step and `catalog.products`/
+  `inventory.warehouses`/`commerce.checkout_sessions` row counts confirmed
+  intact throughout. The rollback restores the exact Phase 003 placeholder
+  `payments`/`refunds` shape (0 rows either way), so the round trip is
+  reproducible regardless of how many times it repeats. See
+  [`payment-erd.md`](./payment-erd.md)'s own "Migration" section.
 
 ## Seeding
 
@@ -266,22 +287,26 @@ pnpm --filter @iecp/database seed
 ```
 
 `prisma/seed.ts` walks one coherent slice through every schema — an admin
-user and a demo customer (identity/customer), 38 real RBAC permissions
-across identity/catalog/inventory with 8 roles including a deny-override
-(identity), three products including two priced/published/stocked SKUs —
-one with a catalog-level discount (catalog/finance), two warehouses/three
-locations with real stock, two reservations, a low-stock example, and a
-transfer (inventory), a coupon (marketing), two shipping methods + pricing
-settings + an active customer cart + a guest cart + a checkout-ready
-fixture with a real reservation + an expired checkout (commerce, Phase
-007), a home page/menu/FAQ (cms), notification templates + the demo
-customer's channel preferences (notification), and a feature flag + two
-settings (system). Idempotent throughout (`upsert`, keyed on each model's
-real unique constraint) — safe to run against a freshly-migrated database or
-one that already has this data. Verified idempotent (ran repeatedly across
-Phases 006-007, row counts unchanged) and verified runnable under `iecp_app`
-alone — the seed only needs DML, confirming the least-privilege role is
-sufficient for real application-style writes, not just raw `psql`.
+user and a demo customer (identity/customer), 43 real RBAC permissions
+across identity/catalog/inventory/payment with 10 roles including a
+deny-override (identity), three products including two
+priced/published/stocked SKUs — one with a catalog-level discount
+(catalog/finance), two warehouses/three locations with real stock, two
+reservations, a low-stock example, and a transfer (inventory), a coupon
+(marketing), two shipping methods + pricing settings + an active customer
+cart + a guest cart + a checkout-ready fixture with a real reservation + an
+expired checkout (commerce, Phase 007), a ZarinPal payment provider + three
+payment-intent chains covering a verified success with a partial refund, a
+verified-but-mismatched failure, and an unresolved reconciliation finding
+(commerce, Phase 008), a home page/menu/FAQ (cms), notification templates +
+the demo customer's channel preferences (notification), and a feature flag
++ two settings (system). Idempotent throughout (`upsert`, keyed on each
+model's real unique constraint) — safe to run against a freshly-migrated
+database or one that already has this data. Verified idempotent (ran
+repeatedly across Phases 006-008, row counts unchanged) and verified
+runnable under `iecp_app` alone — the seed only needs DML, confirming the
+least-privilege role is sufficient for real application-style writes, not
+just raw `psql`.
 
 ## Backup/restore
 

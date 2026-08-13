@@ -25,24 +25,25 @@ layering example.
 | `catalog`       | Real product catalog/merchandising: brands, hierarchical categories, manual/dynamic collections, the full product publication lifecycle (`DRAFT → IN_REVIEW → APPROVED → PUBLISHED → UNPUBLISHED`/`ARCHIVED`), the variant/SKU split, storage-agnostic media, admin-defined attributes, pricing (`finance.ProductPrice`/`PriceHistory`), a public storefront read surface. Reuses identity's guards/RBAC/audit log wholesale. See `src/modules/catalog/README.md`.                                                                                                                                                                                                                                                                                      |
 | `inventory`     | Real multi-warehouse inventory: warehouses/locations, an append-only stock ledger (13-value movement vocabulary) with quantity buckets as a maintained cache, an idempotent/concurrency-safe reservation engine (never oversells — proven under real 100-way concurrency), stock transfers (9-state lifecycle), adjustments, stock counts, a config-driven allocation engine, barcode/SKU lookup, a public storefront availability surface, and its own BullMQ queues (reservation expiration, low-stock notification, event publishing). Reuses identity's guards/RBAC/audit log wholesale; integrates with catalog's SKU model without duplicating product identity. See `src/modules/inventory/README.md`.                                           |
 | `cart-checkout` | Real cart + checkout + server-side pricing resolution: guest and authenticated carts (dual-auth `ActorResolverGuard`, not the global `JwtAuthGuard`), configuration-aware line consolidation, coupons/shipping/tax resolved server-side (`base_price → discount → tax → shipping → grand_total`, never trusted from the client), a 6-state checkout session (`OPEN → VALIDATING → READY_FOR_PAYMENT`) with idempotent creation proven race-safe under real concurrency, real inventory reservation via `modules/inventory`'s `ReservationService` (never duplicated), and its own BullMQ queues (`checkout_expiration`, `cart_abandonment`). No admin RBAC — every route is customer/guest ownership-scoped. See `src/modules/cart-checkout/README.md`. |
+| `payment`       | Real provider-independent payment orchestration: a three-level `PaymentIntent → PaymentAttempt → PaymentTransaction` model (never a single row), a real ZarinPal v4 REST adapter (`request.json`/`verify.json`/`reverse.json`/`StartPay` redirect) behind a `PaymentProviderAdapter` interface, server-side verification never inferred from the customer's redirect return, refunds bounded to the captured amount, provider-comparison reconciliation that never silently self-corrects, and its own BullMQ queues (`payment_verification_retry`, `reconciliation`, `refund_status_sync`). Reuses `cart-checkout`'s `ActorResolverGuard` for intent routes, real RBAC (`payment_manager`/`finance_auditor`) for admin refund/reconciliation routes. See `src/modules/payment/README.md`. |
 
-Every other domain in blueprint §2 (`order`, `payment`, …) doesn't exist
-yet — it lands once its slice of the Phase 1 ERD is designed.
+Every other domain in blueprint §2 (`order`, …) doesn't exist yet — it
+lands once its slice of the Phase 1 ERD is designed.
 
 ## Running locally
 
 ```bash
 cp .env.example .env                          # then point DATABASE_URL at a real Postgres (iecp_app role); REDIS_URL for inventory's/cart-checkout's queues
 pnpm --filter @iecp/database migrate:dev      # applies the schema (11 domain schemas, see docs/database/)
-pnpm --filter @iecp/database seed             # admin/customer/support_agent + inventory-role users, roles, permissions, cart/checkout fixtures
+pnpm --filter @iecp/database seed             # admin/customer/support_agent + inventory/payment-role users, roles, permissions, cart/checkout/payment fixtures
 pnpm --filter @iecp/api dev                   # http://localhost:4000/api/v1
 ```
 
 Or via Docker Compose — see `infrastructure/docker/docker-compose.yml` — which
 brings up Postgres/Redis/OpenSearch for the whole monorepo at once. A local
-Redis is required to boot this service since Phase 006 — `modules/inventory`
-and (Phase 007) `modules/cart-checkout` each register their own BullMQ queues
-at startup.
+Redis is required to boot this service since Phase 006 — `modules/inventory`,
+(Phase 007) `modules/cart-checkout`, and (Phase 008) `modules/payment` each
+register their own BullMQ queues at startup.
 
 ## Tests
 

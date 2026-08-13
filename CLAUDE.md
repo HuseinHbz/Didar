@@ -233,16 +233,51 @@ instead of ever throwing — see `docs/architecture/cart-checkout.md`.
 **Backend-only, same precedent**: `apps/admin`/`apps/storefront` are still
 untouched — see `docs/product/cart-checkout.md`.
 
-**Next up is Phase 008** (payment orchestration — provider-independent
-`PaymentProvider`/`PaymentIntent`/`PaymentTransaction` domain model, a real
-Iranian gateway adapter, verification/idempotency/refund/reconciliation),
-then the rest of Phase 1 (see end of blueprint doc "وضعیت فعلی"): the
-remaining real domain modules (`order`, …) beyond `identity`/`catalog`/
-`inventory`/`cart-checkout`, each landing once its slice of the ERD/API
-contract/permission matrix/event map is designed — _before_ further
-UI/design-system work. The stated ordering principle: settle the
-database/domain skeleton first (done for identity, catalog, inventory, and
-cart-checkout; the rest still pending), then design system + admin panel
-structure + web/PWA sitemap + Android structure.
+Phase 008 built the real, provider-independent payment orchestration
+domain on top of cart-checkout: `services/api/src/modules/payment` (see
+its own `README.md`) covers a three-level `PaymentIntent → PaymentAttempt
+→ PaymentTransaction` model (a payment is never one atomic row — a
+customer can be redirected, abandon, and retry), a real ZarinPal v4 REST
+adapter (`request.json` → `Authority` → `/pg/StartPay/:authority` redirect
+→ `verify.json` → `RefID`, plus `reverse.json` for refunds) behind a
+`PaymentProviderAdapter` interface — the actual provider-independence
+boundary, implemented once for real and ready for a second gateway with
+zero changes to the domain/application layers — server-side verification
+that is never inferred from the customer's redirect return (only a real
+server-to-server `verifyPayment()` call, matched against the intent's own
+frozen amount/currency via `VerificationMatcher`), refunds bounded to the
+captured amount (`RefundValidator`), and provider-comparison
+reconciliation that only ever records a finding, never silently
+self-corrects. It imports `CartCheckoutModule` and injects its exported
+`CheckoutService` directly (`markConverted()` on a verified payment,
+reused rather than reimplementing checkout state) and reuses its
+`ActorResolverGuard` for the customer/guest-facing intent routes; admin
+refund/reconciliation routes are real RBAC (5 new `payment.*`
+permissions, `payment_manager`/`finance_auditor` roles). It's the fifth
+full clean-architecture module in this repo and adds three more in-process
+BullMQ queues (`payment_verification_retry`, `reconciliation`,
+`refund_status_sync`). Its own mandatory concurrency e2e suite proved
+(not just declared) three real races fixed the same way Phase 007
+established: `prisma.create()` alone is not race-safe against two truly
+simultaneous callers on the same unique key, so intent creation
+(`checkoutSessionId`), callback recording (`dedupeKey`), and transaction
+verification (`(providerId, providerReference)`) all catch the resulting
+`P2002` and re-read the winner's row — see `docs/architecture/payment.md`.
+This sandboxed development environment cannot reach `sandbox.zarinpal.com`
+(outbound proxy policy denial, confirmed directly) — the adapter is
+written against ZarinPal's real documented contract, but live-network
+verification is a documented gap for a staging environment to close, not
+hidden. **Backend-only, same precedent**: `apps/admin`/`apps/storefront`
+are still untouched — see `docs/product/payment.md`.
+
+**Next up** is the rest of Phase 1 (see end of blueprint doc "وضعیت
+فعلی"): the remaining real domain modules (`order`, …) beyond
+`identity`/`catalog`/`inventory`/`cart-checkout`/`payment`, each landing
+once its slice of the ERD/API contract/permission matrix/event map is
+designed — _before_ further UI/design-system work. The stated ordering
+principle: settle the database/domain skeleton first (done for identity,
+catalog, inventory, cart-checkout, and payment; the rest still pending),
+then design system + admin panel structure + web/PWA sitemap + Android
+structure.
 
 Treat any new architectural decision as needing to stay consistent with this document, or update it explicitly.
