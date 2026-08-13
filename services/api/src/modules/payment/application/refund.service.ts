@@ -38,6 +38,12 @@ export class RefundService {
     private readonly adapters: PaymentProviderAdapterRegistry,
   ) {}
 
+  async get(refundId: string): Promise<Refund> {
+    const refund = await this.refunds.findById(refundId);
+    if (!refund) throw new NotFoundException('Refund not found');
+    return refund;
+  }
+
   /** `POST /payments/refunds` — admin-only (see this module's RBAC
    * permissions). Validates against the transaction's real remaining
    * balance before writing anything; a rejection here never reaches the

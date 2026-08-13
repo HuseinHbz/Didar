@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 
 import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
+import type { Env } from '../../../config/env';
 import type { CheckoutActor } from '../../cart-checkout/application/checkout.service';
 import { CheckoutService } from '../../cart-checkout/application/checkout.service';
 import type { PaymentAttempt } from '../domain/entities/payment-attempt.entity';
@@ -52,6 +54,7 @@ export class PaymentIntentService {
     @Inject(PAYMENT_PROVIDER_ADAPTER_REGISTRY)
     private readonly adapters: PaymentProviderAdapterRegistry,
     private readonly checkout: CheckoutService,
+    private readonly config: ConfigService<Env, true>,
   ) {}
 
   async get(paymentIntentId: string, actor: CheckoutActor): Promise<PaymentIntentWithDetail> {
@@ -123,12 +126,14 @@ export class PaymentIntentService {
    * `FAILED -> AWAITING_PAYMENT` edge `PaymentIntentStateMachine` allows
    * specifically for this). Never legal from `SUCCEEDED`/`EXPIRED`/
    * `CANCELLED` — the state machine itself rejects those.
+   *
+   * Builds the provider's `callback_url` itself, from this service's own
+   * configured base URL plus the resolved `provider.code` — never from a
+   * client-supplied value, so a caller can't redirect the gateway's
+   * return trip anywhere but this API's own
+   * `/payments/callback/:providerCode` route.
    */
-  async startPayment(
-    paymentIntentId: string,
-    actor: CheckoutActor,
-    callbackUrl: string,
-  ): Promise<StartPaymentResult> {
+  async startPayment(paymentIntentId: string, actor: CheckoutActor): Promise<StartPaymentResult> {
     const detail = await this.get(paymentIntentId, actor);
     if (detail.intent.status !== 'CREATED' && detail.intent.status !== 'FAILED') {
       throw new InvalidPaymentIntentTransitionError(detail.intent.status, 'AWAITING_PAYMENT');
@@ -139,11 +144,12 @@ export class PaymentIntentService {
     if (!provider) throw new NotFoundException('Payment provider not found');
     const adapter = this.adapters.resolve(provider);
 
+    const callbackBaseUrl = this.config.get('PAYMENT_ZARINPAL_CALLBACK_BASE_URL', { infer: true });
     const providerIntent = await adapter.createPaymentIntent({
       amount: detail.intent.amount,
       currency: detail.intent.currency,
       description: `Order payment for checkout ${detail.intent.checkoutSessionId}`,
-      callbackUrl,
+      callbackUrl: `${callbackBaseUrl}/payments/callback/${provider.code}`,
     });
 
     const attempt = await this.intents.addAttempt(detail.intent.id, {
