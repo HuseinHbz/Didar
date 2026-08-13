@@ -83,6 +83,14 @@ export type CheckoutAddressId = Brand<string, 'CheckoutAddressId'>;
 export type CheckoutTotalsId = Brand<string, 'CheckoutTotalsId'>;
 export type CheckoutValidationResultId = Brand<string, 'CheckoutValidationResultId'>;
 export type CheckoutReservationId = Brand<string, 'CheckoutReservationId'>;
+// Phase 008 — payment orchestration (see docs/adr/ADR-008-payment-orchestration.md).
+export type PaymentProviderId = Brand<string, 'PaymentProviderId'>;
+export type PaymentIntentId = Brand<string, 'PaymentIntentId'>;
+export type PaymentAttemptId = Brand<string, 'PaymentAttemptId'>;
+export type PaymentTransactionId = Brand<string, 'PaymentTransactionId'>;
+export type PaymentCallbackId = Brand<string, 'PaymentCallbackId'>;
+export type RefundId = Brand<string, 'RefundId'>;
+export type ReconciliationRecordId = Brand<string, 'ReconciliationRecordId'>;
 
 export const asUserId = brandedId<'UserId'>('UserId').as;
 export const asCustomerId = brandedId<'CustomerId'>('CustomerId').as;
@@ -133,3 +141,11 @@ export const asCheckoutValidationResultId = brandedId<'CheckoutValidationResultI
 ).as;
 export const asCheckoutReservationId =
   brandedId<'CheckoutReservationId'>('CheckoutReservationId').as;
+export const asPaymentProviderId = brandedId<'PaymentProviderId'>('PaymentProviderId').as;
+export const asPaymentIntentId = brandedId<'PaymentIntentId'>('PaymentIntentId').as;
+export const asPaymentAttemptId = brandedId<'PaymentAttemptId'>('PaymentAttemptId').as;
+export const asPaymentTransactionId = brandedId<'PaymentTransactionId'>('PaymentTransactionId').as;
+export const asPaymentCallbackId = brandedId<'PaymentCallbackId'>('PaymentCallbackId').as;
+export const asRefundId = brandedId<'RefundId'>('RefundId').as;
+export const asReconciliationRecordId =
+  brandedId<'ReconciliationRecordId'>('ReconciliationRecordId').as;

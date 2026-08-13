@@ -300,3 +300,58 @@ export const CHECKOUT_VALIDATION_ISSUE_CODES = [
   'COUPON_INVALID',
 ] as const;
 export type CheckoutValidationIssueCode = (typeof CHECKOUT_VALIDATION_ISSUE_CODES)[number];
+
+// =============================================================================
+// payment orchestration — Phase 008 (see docs/adr/ADR-008-payment-orchestration.md)
+// =============================================================================
+
+/** `PaymentIntent.status` — the durable "customer owes X" fact's lifecycle
+ * (ADR-008 decision 2). */
+export const PAYMENT_INTENT_STATUSES = [
+  'CREATED',
+  'AWAITING_PAYMENT',
+  'PROCESSING',
+  'SUCCEEDED',
+  'FAILED',
+  'EXPIRED',
+  'CANCELLED',
+] as const;
+export type PaymentIntentStatus = (typeof PAYMENT_INTENT_STATUSES)[number];
+
+/** `PaymentAttempt.status` — one redirect round trip (ADR-008 decision 2). */
+export const PAYMENT_ATTEMPT_STATUSES = [
+  'INITIATED',
+  'REDIRECTED',
+  'RETURNED',
+  'ABANDONED',
+  'EXPIRED',
+] as const;
+export type PaymentAttemptStatus = (typeof PAYMENT_ATTEMPT_STATUSES)[number];
+
+/** `PaymentTransaction.status` — verified settlement record; once
+ * `VERIFIED` no code path updates the row again (ADR-008 decision 2). */
+export const PAYMENT_TRANSACTION_STATUSES = ['PENDING', 'VERIFIED', 'FAILED'] as const;
+export type PaymentTransactionStatus = (typeof PAYMENT_TRANSACTION_STATUSES)[number];
+
+/** `Refund.status` (ADR-008 decision 6) — replaces the unused Phase 003
+ * placeholder `RefundStatus` shape, same "placeholder identified, replaced
+ * with the real thing" precedent every prior phase set. */
+export const REFUND_STATUSES = [
+  'PENDING',
+  'PROCESSING',
+  'COMPLETED',
+  'FAILED',
+  'REJECTED',
+] as const;
+export type RefundStatus = (typeof REFUND_STATUSES)[number];
+
+/** `ReconciliationRecord.status` — recorded, never auto-corrected (ADR-008
+ * decision 7). */
+export const RECONCILIATION_STATUSES = [
+  'MATCHED',
+  'AMOUNT_MISMATCH',
+  'STATUS_MISMATCH',
+  'MISSING_LOCAL',
+  'MISSING_REMOTE',
+] as const;
+export type ReconciliationStatus = (typeof RECONCILIATION_STATUSES)[number];
