@@ -1432,24 +1432,6 @@ enum CartStatus {
   @@schema("commerce")
 }
 
-enum PaymentStatus {
-  PENDING
-  PAID
-  FAILED
-  REFUNDED
-
-  @@schema("commerce")
-}
-
-enum RefundStatus {
-  PENDING
-  APPROVED
-  REJECTED
-  COMPLETED
-
-  @@schema("commerce")
-}
-
 /// blueprint §16-§19; Phase 007 — see docs/adr/ADR-007-cart-checkout.md.
 /// `guestToken` (was `sessionToken`) is the opaque, 256-bit, unguessable
 /// identifier a non-authenticated caller presents via `X-Cart-Token`
@@ -1798,7 +1780,6 @@ model Order {
 
   items         OrderItem[]
   statusHistory OrderStatusHistory[]
-  payments      Payment[]
 
   @@index([customerId])
   @@index([status])
@@ -1841,41 +1822,243 @@ model OrderStatusHistory {
   @@schema("commerce")
 }
 
-model Payment {
-  id             String        @id @default(uuid()) @db.Uuid
-  orderId        String        @map("order_id") @db.Uuid
-  provider       String // adapter name, e.g. "zarinpal" — see docs/product/blueprint.md §75
-  status         PaymentStatus @default(PENDING)
-  amount         BigInt
-  currency       String        @default("IRR")
-  transactionRef String?       @map("transaction_ref")
-  idempotencyKey String?       @unique @map("idempotency_key") // blueprint §67 — one payment per key, no double-charges on retry
-  paidAt         DateTime?     @map("paid_at")
-  createdAt      DateTime      @default(now()) @map("created_at")
-  updatedAt      DateTime      @updatedAt @map("updated_at")
+// =============================================================================
+// payment — provider-independent orchestration (Phase 008 — see
+// docs/adr/ADR-008-payment-orchestration.md). Replaces the Phase 003
+// placeholder Payment/Refund (orderId-keyed — unusable, no Order exists
+// yet). PaymentIntent -> PaymentAttempt -> PaymentTransaction, three
+// levels, not one (ADR-008 decision 2).
+// =============================================================================
 
-  order   Order    @relation(fields: [orderId], references: [id])
-  refunds Refund[]
+enum PaymentIntentStatus {
+  CREATED
+  AWAITING_PAYMENT
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  EXPIRED
+  CANCELLED
 
-  @@index([orderId])
-  @@map("payments")
   @@schema("commerce")
 }
 
+enum PaymentAttemptStatus {
+  INITIATED
+  REDIRECTED
+  RETURNED
+  ABANDONED
+  EXPIRED
+
+  @@schema("commerce")
+}
+
+enum PaymentTransactionStatus {
+  PENDING
+  VERIFIED
+  FAILED
+
+  @@schema("commerce")
+}
+
+enum RefundStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REJECTED
+
+  @@schema("commerce")
+}
+
+enum ReconciliationStatus {
+  MATCHED
+  AMOUNT_MISMATCH
+  STATUS_MISMATCH
+  MISSING_LOCAL
+  MISSING_REMOTE
+
+  @@schema("commerce")
+}
+
+/// A configured payment gateway (ADR-008 decision 5). `config` holds only
+/// non-secret operational settings — the real merchant id/API key each
+/// adapter needs comes from environment variables, namespaced per `code`
+/// (ADR-008 decision 8), never persisted here.
+model PaymentProvider {
+  id                String    @id @default(uuid()) @db.Uuid
+  code              String    @unique // e.g. "zarinpal" — PAYMENT_PROVIDER_ADAPTER resolves on this
+  name              String
+  isActive          Boolean   @default(true) @map("is_active")
+  isSandbox         Boolean   @default(true) @map("is_sandbox")
+  config            Json? // non-secret settings only (callback URL template, timeout, ...)
+  lastHealthCheckAt DateTime? @map("last_health_check_at")
+  lastHealthCheckOk Boolean?  @map("last_health_check_ok")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  intents PaymentIntent[]
+
+  @@map("payment_providers")
+  @@schema("commerce")
+}
+
+/// One per `CheckoutSession` (`@unique` — ADR-008 decisions 1/9); the
+/// durable "customer owes `grandTotal`" fact. `amount`/`currency` are
+/// fixed at creation from the checkout session's own totals, never
+/// re-read live and never accepted from the client. `checkoutSessionId`
+/// is an unenforced pointer to `commerce.checkout_sessions.id` — both
+/// tables live in the same `commerce` schema, but this module never
+/// imports cart-checkout's domain layer directly (real service
+/// injection instead, ADR-008 decision 10), so the FK stays a plain
+/// column, same convention every other same-schema-but-different-module
+/// pointer in this repo follows once the modules themselves don't share
+/// a Prisma relation.
+model PaymentIntent {
+  id                String              @id @default(uuid()) @db.Uuid
+  checkoutSessionId String              @unique @map("checkout_session_id") @db.Uuid
+  customerId        String?             @map("customer_id") @db.Uuid // nullable — guest checkout; -> customer.customers.id, unenforced
+  guestToken        String?             @map("guest_token")
+  providerId        String              @map("provider_id") @db.Uuid
+  status            PaymentIntentStatus @default(CREATED)
+  amount            BigInt
+  currency          String              @default("IRR")
+  idempotencyKey    String              @unique @map("idempotency_key")
+  expiresAt         DateTime?           @map("expires_at")
+  metadata          Json?
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+
+  provider     PaymentProvider      @relation(fields: [providerId], references: [id])
+  attempts     PaymentAttempt[]
+  transactions PaymentTransaction[]
+  callbacks    PaymentCallback[]
+
+  @@index([customerId])
+  @@index([status])
+  @@map("payment_intents")
+  @@schema("commerce")
+}
+
+/// One per redirect round trip (ADR-008 decision 2) — a retried checkout
+/// creates a new attempt, never mutates a prior one.
+model PaymentAttempt {
+  id                String               @id @default(uuid()) @db.Uuid
+  paymentIntentId   String               @map("payment_intent_id") @db.Uuid
+  attemptNumber     Int                  @map("attempt_number")
+  providerAuthority String?              @map("provider_authority") // the gateway's own reference for this attempt (e.g. ZarinPal Authority)
+  redirectUrl       String?              @map("redirect_url")
+  status            PaymentAttemptStatus @default(INITIATED)
+  startedAt         DateTime             @default(now()) @map("started_at")
+  returnedAt        DateTime?            @map("returned_at")
+  createdAt         DateTime             @default(now()) @map("created_at")
+
+  paymentIntent PaymentIntent        @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
+  transactions  PaymentTransaction[]
+
+  @@unique([paymentIntentId, attemptNumber])
+  @@index([paymentIntentId])
+  @@index([providerAuthority])
+  @@map("payment_attempts")
+  @@schema("commerce")
+}
+
+/// The verified, immutable settlement record (ADR-008 decisions 2-3) —
+/// created only from a real server-to-server `verifyPayment()` call.
+/// Never updated once `VERIFIED` — no repository method exposes an
+/// update path for a `VERIFIED` row's `amount`/`status`.
+model PaymentTransaction {
+  id                      String                   @id @default(uuid()) @db.Uuid
+  paymentIntentId         String                   @map("payment_intent_id") @db.Uuid
+  paymentAttemptId        String?                  @map("payment_attempt_id") @db.Uuid
+  providerId              String                   @map("provider_id") @db.Uuid
+  providerReference       String                   @map("provider_reference") // e.g. ZarinPal RefID
+  amount                  BigInt
+  currency                String                   @default("IRR")
+  status                  PaymentTransactionStatus @default(PENDING)
+  verifiedAt              DateTime?                @map("verified_at")
+  rawVerificationResponse Json?                    @map("raw_verification_response")
+  createdAt               DateTime                 @default(now()) @map("created_at")
+  updatedAt               DateTime                 @updatedAt @map("updated_at")
+
+  paymentIntent   PaymentIntent          @relation(fields: [paymentIntentId], references: [id])
+  paymentAttempt  PaymentAttempt?        @relation(fields: [paymentAttemptId], references: [id])
+  refunds         Refund[]
+  reconciliations ReconciliationRecord[]
+
+  @@unique([providerId, providerReference])
+  @@index([paymentIntentId])
+  @@index([status])
+  @@map("payment_transactions")
+  @@schema("commerce")
+}
+
+/// Raw, append-only inbox for every inbound callback/webhook (ADR-008
+/// decision 4) — persisted verbatim before any processing, so a rejected
+/// callback still leaves an audit trail. `dedupeKey` makes a provider's
+/// at-least-once redelivery idempotent by construction.
+model PaymentCallback {
+  id              String    @id @default(uuid()) @db.Uuid
+  paymentIntentId String?   @map("payment_intent_id") @db.Uuid // nullable — may be unresolvable if malformed
+  providerId      String    @map("provider_id") @db.Uuid
+  dedupeKey       String    @unique @map("dedupe_key")
+  rawPayload      Json      @map("raw_payload")
+  signatureValid  Boolean   @map("signature_valid")
+  processedAt     DateTime? @map("processed_at")
+  receivedAt      DateTime  @default(now()) @map("received_at")
+
+  paymentIntent PaymentIntent? @relation(fields: [paymentIntentId], references: [id])
+
+  @@index([paymentIntentId])
+  @@index([providerId])
+  @@map("payment_callbacks")
+  @@schema("commerce")
+}
+
+/// Against an immutable `VERIFIED` transaction — validated to never
+/// exceed the transaction's own amount across every prior non-rejected
+/// refund (ADR-008 decision 6).
 model Refund {
-  id          String       @id @default(uuid()) @db.Uuid
-  paymentId   String       @map("payment_id") @db.Uuid
-  amount      BigInt
-  reason      String?
-  status      RefundStatus @default(PENDING)
-  requestedBy String?      @map("requested_by") @db.Uuid
-  createdAt   DateTime     @default(now()) @map("created_at")
-  updatedAt   DateTime     @updatedAt @map("updated_at")
+  id                      String       @id @default(uuid()) @db.Uuid
+  paymentTransactionId    String       @map("payment_transaction_id") @db.Uuid
+  amount                  BigInt
+  reason                  String?
+  status                  RefundStatus @default(PENDING)
+  requestedBy             String?      @map("requested_by") @db.Uuid // -> identity.users.id, unenforced
+  providerRefundReference String?      @map("provider_refund_reference")
+  idempotencyKey          String       @unique @map("idempotency_key")
+  createdAt               DateTime     @default(now()) @map("created_at")
+  updatedAt               DateTime     @updatedAt @map("updated_at")
 
-  payment Payment @relation(fields: [paymentId], references: [id])
+  paymentTransaction PaymentTransaction @relation(fields: [paymentTransactionId], references: [id])
 
-  @@index([paymentId])
+  @@index([paymentTransactionId])
+  @@index([status])
   @@map("refunds")
+  @@schema("commerce")
+}
+
+/// Compares local `PaymentTransaction` rows against the provider's own
+/// settlement report — records a finding, never silently corrects
+/// (ADR-008 decision 7).
+model ReconciliationRecord {
+  id                   String               @id @default(uuid()) @db.Uuid
+  providerId           String               @map("provider_id") @db.Uuid
+  transactionDate      DateTime             @map("transaction_date") @db.Date
+  paymentTransactionId String?              @map("payment_transaction_id") @db.Uuid // nullable — null for a MISSING_LOCAL finding
+  providerReference    String               @map("provider_reference")
+  localAmount          BigInt?              @map("local_amount")
+  remoteAmount         BigInt?              @map("remote_amount")
+  status               ReconciliationStatus
+  resolvedAt           DateTime?            @map("resolved_at")
+  resolutionNote       String?              @map("resolution_note")
+  createdAt            DateTime             @default(now()) @map("created_at")
+
+  paymentTransaction PaymentTransaction? @relation(fields: [paymentTransactionId], references: [id])
+
+  @@index([providerId])
+  @@index([status])
+  @@index([transactionDate])
+  @@map("reconciliation_records")
   @@schema("commerce")
 }
 
