@@ -71,6 +71,18 @@ export type StockTransferItemId = Brand<string, 'StockTransferItemId'>;
 export type InventoryAdjustmentId = Brand<string, 'InventoryAdjustmentId'>;
 export type StockCountId = Brand<string, 'StockCountId'>;
 export type StockCountItemId = Brand<string, 'StockCountItemId'>;
+// Phase 007 — cart/checkout (see docs/adr/ADR-007-cart-checkout.md).
+export type CartItemId = Brand<string, 'CartItemId'>;
+export type CartItemOptionId = Brand<string, 'CartItemOptionId'>;
+export type CartPriceSnapshotId = Brand<string, 'CartPriceSnapshotId'>;
+export type CartCouponId = Brand<string, 'CartCouponId'>;
+export type CartShippingSelectionId = Brand<string, 'CartShippingSelectionId'>;
+export type ShippingMethodId = Brand<string, 'ShippingMethodId'>;
+export type CheckoutSessionId = Brand<string, 'CheckoutSessionId'>;
+export type CheckoutAddressId = Brand<string, 'CheckoutAddressId'>;
+export type CheckoutTotalsId = Brand<string, 'CheckoutTotalsId'>;
+export type CheckoutValidationResultId = Brand<string, 'CheckoutValidationResultId'>;
+export type CheckoutReservationId = Brand<string, 'CheckoutReservationId'>;
 
 export const asUserId = brandedId<'UserId'>('UserId').as;
 export const asCustomerId = brandedId<'CustomerId'>('CustomerId').as;
@@ -106,3 +118,18 @@ export const asInventoryAdjustmentId =
   brandedId<'InventoryAdjustmentId'>('InventoryAdjustmentId').as;
 export const asStockCountId = brandedId<'StockCountId'>('StockCountId').as;
 export const asStockCountItemId = brandedId<'StockCountItemId'>('StockCountItemId').as;
+export const asCartItemId = brandedId<'CartItemId'>('CartItemId').as;
+export const asCartItemOptionId = brandedId<'CartItemOptionId'>('CartItemOptionId').as;
+export const asCartPriceSnapshotId = brandedId<'CartPriceSnapshotId'>('CartPriceSnapshotId').as;
+export const asCartCouponId = brandedId<'CartCouponId'>('CartCouponId').as;
+export const asCartShippingSelectionId =
+  brandedId<'CartShippingSelectionId'>('CartShippingSelectionId').as;
+export const asShippingMethodId = brandedId<'ShippingMethodId'>('ShippingMethodId').as;
+export const asCheckoutSessionId = brandedId<'CheckoutSessionId'>('CheckoutSessionId').as;
+export const asCheckoutAddressId = brandedId<'CheckoutAddressId'>('CheckoutAddressId').as;
+export const asCheckoutTotalsId = brandedId<'CheckoutTotalsId'>('CheckoutTotalsId').as;
+export const asCheckoutValidationResultId = brandedId<'CheckoutValidationResultId'>(
+  'CheckoutValidationResultId',
+).as;
+export const asCheckoutReservationId =
+  brandedId<'CheckoutReservationId'>('CheckoutReservationId').as;

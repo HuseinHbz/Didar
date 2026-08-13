@@ -240,3 +240,63 @@ export const INVENTORY_RESERVATION_SOURCE_TYPES = [
   'MANUAL',
 ] as const;
 export type InventoryReservationSourceType = (typeof INVENTORY_RESERVATION_SOURCE_TYPES)[number];
+
+// =============================================================================
+// cart/checkout — Phase 007 (see docs/adr/ADR-007-cart-checkout.md)
+// =============================================================================
+
+export const CART_STATUSES = [
+  'ACTIVE',
+  'CHECKOUT_STARTED',
+  'ABANDONED',
+  'CONVERTED',
+  'EXPIRED',
+] as const;
+export type CartStatus = (typeof CART_STATUSES)[number];
+
+export const CHECKOUT_STATUSES = [
+  'OPEN',
+  'VALIDATING',
+  'READY_FOR_PAYMENT',
+  'EXPIRED',
+  'CANCELLED',
+  'CONVERTED',
+] as const;
+export type CheckoutStatus = (typeof CHECKOUT_STATUSES)[number];
+
+export const CHECKOUT_VALIDATION_OUTCOMES = ['PASSED', 'FAILED'] as const;
+export type CheckoutValidationOutcome = (typeof CHECKOUT_VALIDATION_OUTCOMES)[number];
+
+export const SHIPPING_METHOD_TYPES = ['HOME_DELIVERY', 'STORE_PICKUP'] as const;
+export type ShippingMethodType = (typeof SHIPPING_METHOD_TYPES)[number];
+
+/** `CartItemOption.optionType` — an open string union (not a DB enum) since
+ * new option types (e.g. an engraving service) should be addable without a
+ * migration; these are the ones this phase's domain layer actually
+ * recognizes and validates. */
+export const CART_ITEM_OPTION_TYPES = [
+  'LENS_TYPE',
+  'LENS_COATING',
+  'PRESCRIPTION_REFERENCE',
+  'CUSTOMIZATION_REFERENCE',
+] as const;
+export type CartItemOptionType = (typeof CART_ITEM_OPTION_TYPES)[number];
+
+/** `CheckoutValidationResult.issues[].code` — every check the brief's
+ * `checkout_validation` list names gets its own real code, not a generic
+ * "invalid" string. */
+export const CHECKOUT_VALIDATION_ISSUE_CODES = [
+  'CUSTOMER_IDENTITY_INVALID',
+  'CART_NOT_ACTIVE',
+  'PRODUCT_NOT_PUBLISHED',
+  'SKU_NOT_ACTIVE',
+  'PRICE_CHANGED',
+  'QUANTITY_INVALID',
+  'INVENTORY_UNAVAILABLE',
+  'RESERVATION_INVALID',
+  'SHIPPING_METHOD_INVALID',
+  'ADDRESS_INVALID',
+  'PRESCRIPTION_REFERENCE_UNVERIFIED',
+  'COUPON_INVALID',
+] as const;
+export type CheckoutValidationIssueCode = (typeof CHECKOUT_VALIDATION_ISSUE_CODES)[number];
