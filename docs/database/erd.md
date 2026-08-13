@@ -44,7 +44,10 @@ graph LR
     catalog -. "cart_items/order_items.product_sku_id" .-> commerce
     commerce -. "invoices.order_id" .-> finance
     commerce -. "inventory_reservations.source_id (polymorphic: cart/order/POS/manual)" .-> inventory
+    commerce -. "checkout_reservations.inventory_reservation_id" .-> inventory
+    commerce -. "shipping_methods.warehouse_id (nullable: STORE_PICKUP)" .-> inventory
     commerce -. "coupon_redemptions.order_id/customer_id" .-> marketing
+    commerce -. "cart_coupons.coupon_id" .-> marketing
     customer -. "notification_preferences.customer_id" .-> notification
     customer -. "notification_logs.customer_id" .-> notification
     customer -. "analytics_events.customer_id" .-> analytics
@@ -481,6 +484,19 @@ a database `CHECK` constraint — Prisma has no `@@check(...)` support (see
 
 ## commerce
 
+Phase 007 (see [`cart-checkout-erd.md`](./cart-checkout-erd.md) for the
+full diagram with every column and design rationale) extended `carts`/
+`cart_items` (`session_token` renamed `guest_token`, `configuration_hash`/
+`configuration_snapshot` added) and added 10 new tables:
+`cart_item_options`, `cart_price_snapshots`, `cart_coupons`,
+`shipping_methods`, `cart_shipping_selections`, and the entire
+`checkout_sessions`/`checkout_addresses`/`checkout_totals`/
+`checkout_validations`/`checkout_reservations` subtree. The summary below
+is intentionally abbreviated (the cart/checkout half omits the new tables
+entirely — see `cart-checkout-erd.md` for those); `cart-checkout-erd.md` is
+the source of truth for that half of this schema going forward, same
+convention `inventory-erd.md` set above.
+
 ```mermaid
 erDiagram
     carts ||--o{ cart_items : contains
@@ -492,15 +508,17 @@ erDiagram
     carts {
         uuid id PK
         uuid customer_id "nullable, -> customer.customers.id, unenforced"
-        string session_token UK "nullable"
-        enum status "ACTIVE|CONVERTED|ABANDONED"
+        string guest_token UK "nullable — renamed from session_token"
+        enum status "ACTIVE|CHECKOUT_STARTED|ABANDONED|CONVERTED|EXPIRED"
+        timestamp expires_at "nullable"
     }
     cart_items {
         uuid id PK
         uuid cart_id FK
-        uuid product_sku_id "-> catalog.product_skus.id, unenforced"
+        uuid product_sku_id "UK with cart_id+configuration_hash, unenforced"
         int quantity
         bigint unit_price_snapshot
+        string configuration_hash "default ''"
     }
     orders {
         uuid id PK

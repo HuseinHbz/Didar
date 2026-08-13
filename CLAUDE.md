@@ -203,13 +203,46 @@ roles (`inventory_manager`/`warehouse_operator`/`store_manager`/
 precedent**: `apps/admin`/`apps/storefront` are still untouched — see
 `docs/product/inventory.md`.
 
-**Next up is still the rest of Phase 1** (see end of blueprint doc "وضعیت
-فعلی"): the remaining real domain modules (`customer`, `order`, …) beyond
-`identity`/`catalog`/`inventory`, each landing once its slice of the ERD/API
+Phase 007 built the real cart/checkout/pricing-resolution domain on top of
+catalog and inventory: `services/api/src/modules/cart-checkout` (see its
+own `README.md`) covers guest and authenticated carts (dual-auth
+`ActorResolverGuard`, not the global `JwtAuthGuard` — guest checkout would
+otherwise be impossible), configuration-aware line consolidation, a real
+server-side pricing engine (`base_price → resolved_unit_price → discount →
+tax → shipping → grand_total`, `PricingResolver`, pure and unit-tested,
+never trusting a client-supplied total), coupons re-validated against the
+real `marketing.Coupon` on every apply and reprice, database-driven
+shipping methods, a 6-state checkout session (`OPEN → VALIDATING →
+READY_FOR_PAYMENT → {EXPIRED|CANCELLED|CONVERTED}`) with idempotent
+creation, and real inventory reservation integration — `CatalogModule`/
+`InventoryModule` gained small additive `exports` arrays so this module
+injects their real `ProductsService`/`PricingService`/`ReservationService`/
+`AllocationService` directly rather than reimplementing any catalog or
+reservation logic. It's the fourth full clean-architecture module in this
+repo and the first composed almost entirely from other modules' exported
+services; it registers **no** new RBAC permissions (every route is
+customer/guest ownership-scoped, not admin-gated) but does add two more
+in-process BullMQ queues (`checkout_expiration`, `cart_abandonment`,
+following Phase 006's own precedent for where queue processors live). Its
+own mandatory concurrency e2e suite found and fixed a real gap during
+development — `prisma.upsert()` alone is not race-safe against two truly
+simultaneous callers on the same unique key, so both
+`PrismaCheckoutSessionRepository.create()` and `PrismaCartRepository.
+addItem()` now catch the resulting `P2002` and re-read the winner's row
+instead of ever throwing — see `docs/architecture/cart-checkout.md`.
+**Backend-only, same precedent**: `apps/admin`/`apps/storefront` are still
+untouched — see `docs/product/cart-checkout.md`.
+
+**Next up is Phase 008** (payment orchestration — provider-independent
+`PaymentProvider`/`PaymentIntent`/`PaymentTransaction` domain model, a real
+Iranian gateway adapter, verification/idempotency/refund/reconciliation),
+then the rest of Phase 1 (see end of blueprint doc "وضعیت فعلی"): the
+remaining real domain modules (`order`, …) beyond `identity`/`catalog`/
+`inventory`/`cart-checkout`, each landing once its slice of the ERD/API
 contract/permission matrix/event map is designed — _before_ further
 UI/design-system work. The stated ordering principle: settle the
-database/domain skeleton first (done for identity, catalog, and inventory;
-the rest still pending), then design system + admin panel structure +
-web/PWA sitemap + Android structure.
+database/domain skeleton first (done for identity, catalog, inventory, and
+cart-checkout; the rest still pending), then design system + admin panel
+structure + web/PWA sitemap + Android structure.
 
 Treat any new architectural decision as needing to stay consistent with this document, or update it explicitly.

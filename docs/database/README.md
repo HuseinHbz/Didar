@@ -10,7 +10,7 @@ cross-schema overview.
 
 ## Status
 
-`schema.prisma` defines 78 models across the 11 schemas below, across four
+`schema.prisma` defines 88 models across the 11 schemas below, across five
 applied migrations, each exercised end-to-end — migrate up, roll back,
 re-apply — against a real local PostgreSQL, not just validated for syntax:
 
@@ -54,6 +54,19 @@ locationId)` with a full 7-bucket quantity model, `InventoryLedger`
   Data-preserving (existing warehouse/inventory-item/transaction rows carried
   forward, mapped to the new movement-type vocabulary) — see its own header
   comment for the exact old→new mapping.
+- `20260812225852_cart_checkout_pricing_foundation` (Phase 007) — extends
+  `commerce` for real cart/checkout/pricing: `Cart`/`CartItem` extended
+  (guest-token rename, configuration snapshot/hash), six new tables
+  (`CartItemOption`, `CartPriceSnapshot`, `CartCoupon`,
+  `CartShippingSelection`, `ShippingMethod`) and the entire
+  `CheckoutSession`/`CheckoutAddress`/`CheckoutTotals`/
+  `CheckoutValidationResult`/`CheckoutReservation` subtree. Full detail:
+  [`cart-checkout-erd.md`](./cart-checkout-erd.md) and
+  [`docs/adr/ADR-007-cart-checkout.md`](../adr/ADR-007-cart-checkout.md).
+  Not data-preserving in the Phase 005/006 sense — 0 rows existed in
+  `carts`/`cart_items` at authoring time (confirmed directly) — but the
+  `guest_token` rename still uses `RENAME COLUMN` for semantic honesty; see
+  its own header comment.
 
 This is **not** full coverage of blueprint §57's eventual table list. See
 ["Deliberately out of scope"](#deliberately-out-of-scope) below for exactly
@@ -233,6 +246,18 @@ real local PostgreSQL:
   collapse queries needed `MIN(id::text)::uuid` — Postgres has no `MIN(uuid)`
   aggregate — with the cast placed outside the `OVER(...)` window clause, not
   inside it. See that migration's own `down.sql` header comment.
+- Phase 007: the `commerce` cart/checkout extension (10 new tables +
+  `Cart`/`CartItem` extended), round-tripped **twice** — up → down → up,
+  repeated a second time to confirm reproducibility after fixing an
+  enum-reapply bug — with `prisma migrate diff` confirming zero drift at
+  every step and `catalog.products`/`inventory.warehouses` row counts
+  confirmed intact throughout both rounds. One real bug caught this way:
+  `CartStatus`'s two new enum values (`CHECKOUT_STARTED`, `EXPIRED`) can't
+  be removed by `down.sql` (Postgres has no `ALTER TYPE ... DROP VALUE`),
+  so a bare `ADD VALUE` on reapply failed with "enum label already
+  exists" — fixed by wrapping each `ADD VALUE` in a
+  `DO $$ ... IF NOT EXISTS ... $$` guard. See that migration's own header
+  comment.
 
 ## Seeding
 
@@ -243,15 +268,18 @@ pnpm --filter @iecp/database seed
 `prisma/seed.ts` walks one coherent slice through every schema — an admin
 user and a demo customer (identity/customer), 38 real RBAC permissions
 across identity/catalog/inventory with 8 roles including a deny-override
-(identity), two products including one priced, published, stocked SKU
-(catalog/finance), two warehouses/three locations with real stock, a
-reservation, a low-stock example, and a transfer (inventory), a coupon
-(marketing), a home page/menu/FAQ (cms), notification templates + the demo
-customer's channel preferences (notification), and a feature flag + a
-setting (system). Idempotent throughout (`upsert`, keyed on each model's
+(identity), three products including two priced/published/stocked SKUs —
+one with a catalog-level discount (catalog/finance), two warehouses/three
+locations with real stock, two reservations, a low-stock example, and a
+transfer (inventory), a coupon (marketing), two shipping methods + pricing
+settings + an active customer cart + a guest cart + a checkout-ready
+fixture with a real reservation + an expired checkout (commerce, Phase
+007), a home page/menu/FAQ (cms), notification templates + the demo
+customer's channel preferences (notification), and a feature flag + two
+settings (system). Idempotent throughout (`upsert`, keyed on each model's
 real unique constraint) — safe to run against a freshly-migrated database or
-one that already has this data. Verified idempotent (ran three times across
-Phase 006, row counts unchanged) and verified runnable under `iecp_app`
+one that already has this data. Verified idempotent (ran repeatedly across
+Phases 006-007, row counts unchanged) and verified runnable under `iecp_app`
 alone — the seed only needs DML, confirming the least-privilege role is
 sufficient for real application-style writes, not just raw `psql`.
 

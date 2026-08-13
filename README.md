@@ -114,11 +114,12 @@ Run any of these against one workspace with `pnpm --filter <name> <script>`, e.g
 
 Phase 0 (product/architecture definition), the Phase 001 monorepo-foundation
 task, Phase 003's real PostgreSQL ERD, Phase 004's identity/RBAC module,
-Phase 005's product catalog/merchandising module, and Phase 006's
-multi-warehouse inventory/ledger/reservation module are done — see
-`CLAUDE.md`'s "Current status" for exactly what each does and doesn't
-include. Next up: the remaining Phase 1 domain modules (`customer`,
-`order`, …).
+Phase 005's product catalog/merchandising module, Phase 006's
+multi-warehouse inventory/ledger/reservation module, and Phase 007's
+cart/checkout/pricing-resolution/reservation-integration module are done —
+see `CLAUDE.md`'s "Current status" for exactly what each does and doesn't
+include. Next up: Phase 008's payment orchestration module, then the
+remaining Phase 1 domain modules (`order`, …).
 
 ## License
 
