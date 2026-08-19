@@ -5,6 +5,7 @@ import type {
   InvoiceItem as PrismaInvoiceItem,
   Order as PrismaOrder,
   OrderItem as PrismaOrderItem,
+  OrderPromotion as PrismaOrderPromotion,
   OrderStatusHistory as PrismaOrderStatusHistory,
   Shipment as PrismaShipment,
   ShipmentEvent as PrismaShipmentEvent,
@@ -15,6 +16,7 @@ import { Fulfillment } from '../domain/entities/fulfillment.entity';
 import { InvoiceItem } from '../domain/entities/invoice-item.entity';
 import { Invoice } from '../domain/entities/invoice.entity';
 import { OrderItem } from '../domain/entities/order-item.entity';
+import { OrderPromotion } from '../domain/entities/order-promotion.entity';
 import { OrderStatusHistory } from '../domain/entities/order-status-history.entity';
 import { Order } from '../domain/entities/order.entity';
 import { ShipmentEvent } from '../domain/entities/shipment-event.entity';
@@ -62,6 +64,21 @@ export function orderItemToDomain(row: PrismaOrderItem): OrderItem {
     discountAmount: row.discountAmount,
     taxAmount: row.taxAmount,
     lineTotal: row.lineTotal,
+    createdAt: row.createdAt,
+  });
+}
+
+export function orderPromotionToDomain(row: PrismaOrderPromotion): OrderPromotion {
+  return OrderPromotion.create({
+    id: row.id,
+    orderId: row.orderId,
+    promotionId: row.promotionId,
+    promotionName: row.promotionName,
+    couponId: row.couponId,
+    couponCode: row.couponCode,
+    discountType: row.discountType,
+    discountAmount: row.discountAmount,
+    affectedItemIds: row.affectedItemIds as string[],
     createdAt: row.createdAt,
   });
 }

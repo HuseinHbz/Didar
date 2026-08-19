@@ -24,6 +24,20 @@ export class OrderStatusHistoryResponseDto {
   @ApiProperty() createdAt!: Date;
 }
 
+/** ADR-011 decision 7 — Phase 010's immutable promotion snapshot,
+ * finally surfaced on the order read path. */
+export class OrderPromotionResponseDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty({ format: 'uuid' }) promotionId!: string;
+  @ApiProperty() promotionName!: string;
+  @ApiProperty({ nullable: true, format: 'uuid' }) couponId!: string | null;
+  @ApiProperty({ nullable: true }) couponCode!: string | null;
+  @ApiProperty() discountType!: string;
+  @ApiProperty() discountAmount!: string;
+  @ApiProperty({ type: [String] }) affectedItemIds!: string[];
+  @ApiProperty() createdAt!: Date;
+}
+
 export class OrderResponseDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() orderNumber!: string;
@@ -50,6 +64,7 @@ export class OrderResponseDto {
   @ApiProperty({ type: [OrderItemResponseDto] }) items!: OrderItemResponseDto[];
   @ApiProperty({ type: [OrderStatusHistoryResponseDto] })
   statusHistory!: OrderStatusHistoryResponseDto[];
+  @ApiProperty({ type: [OrderPromotionResponseDto] }) promotions!: OrderPromotionResponseDto[];
   @ApiProperty() createdAt!: Date;
   @ApiProperty() updatedAt!: Date;
 
@@ -95,6 +110,17 @@ export class OrderResponseDto {
       changedBy: entry.changedBy,
       note: entry.note,
       createdAt: entry.createdAt,
+    }));
+    dto.promotions = detail.promotions.map((promotion) => ({
+      id: promotion.id,
+      promotionId: promotion.promotionId,
+      promotionName: promotion.promotionName,
+      couponId: promotion.couponId,
+      couponCode: promotion.couponCode,
+      discountType: promotion.discountType,
+      discountAmount: promotion.discountAmount.toString(),
+      affectedItemIds: [...promotion.affectedItemIds],
+      createdAt: promotion.createdAt,
     }));
     dto.createdAt = detail.order.createdAt;
     dto.updatedAt = detail.order.updatedAt;
