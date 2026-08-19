@@ -504,4 +504,14 @@ export class CheckoutService {
     if (!updated) throw new NotFoundException('Checkout session not found');
     return updated;
   }
+
+  /** Reserved for Phase 009's `OrderConversionService` (ADR-009 decision
+   * 4) — a system-internal read with no ownership check, same reasoning
+   * `expireIntents()`/`listAwaitingVerification()` already establish for
+   * this module's own sweep: the actor-ownership layer exists to protect
+   * HTTP-facing customer/guest access, not a system-to-system call with no
+   * acting user. Never exposed through a controller. */
+  async findByIdSystem(checkoutId: string): Promise<CheckoutSessionWithDetail | null> {
+    return this.sessions.findById(checkoutId);
+  }
 }

@@ -275,12 +275,17 @@ sweep to drive forward, exactly the separation instruction #11 states
 ("Order owns commercial state. Payment owns money movement."). For a
 still-`PENDING_PAYMENT` order (nothing was ever charged), cancellation
 short-circuits before any refund call — there is nothing to refund.
-Every reservation the order's originating checkout held is released via
-`ReservationService.release()` (skipped defensively for any reservation
-already `CONVERTED` — a cancellation after conversion doesn't try to
-un-consume stock already sold; `Fulfillment`-level unwind, if any exists
-yet, is a separate, explicit admin action outside this phase's automated
-scope).
+Deliberately does **not** restock inventory: by the time an `Order` row
+exists at all, `OrderConversionService.convertFromCheckout()` has already
+called `ReservationService.convert()` on every reservation the checkout
+held, so the stock is genuinely sold, not merely held — there is nothing
+left to *release*. A refund-triggered restock (crediting the sold
+quantity back onto the shelf) is a real, deliberate gap, the same one
+`docs/product/payment.md`'s own Phase 008 scope already declares
+("A refund-triggered inventory restock or `Order`-status transition"),
+not a new omission this phase introduces. `Fulfillment`-level unwind, if
+any exists yet, is a separate, explicit admin action outside this phase's
+automated scope.
 
 ## Decision 11 — Guest ownership, IDOR, and admin/POS-created orders
 
@@ -329,6 +334,10 @@ not hidden behind a fake success response.
 - **Per-`OrderItem` partial cancellation** — only whole-order cancellation
   (Decision 5/10) is implemented; cancelling one line of a multi-line
   order while keeping the rest is not.
+- **A refund-triggered inventory restock** (Decision 10) — cancelling a
+  paid order asks Payment for a refund but never credits the sold
+  quantity back onto the shelf; the same gap
+  `docs/product/payment.md`'s own Phase 008 scope already declares.
 - **A credit-note/re-issue mechanic for a `VOID`ed invoice** — voiding
   records the fact; a corrected replacement invoice is a manual follow-up.
 - **An admin "create order directly" endpoint bypassing checkout/payment**

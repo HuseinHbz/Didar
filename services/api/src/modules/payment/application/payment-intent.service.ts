@@ -265,6 +265,30 @@ export class PaymentIntentService {
     return intent;
   }
 
+  /** Reserved for Phase 009's `OrderConversionService` (ADR-009 decision
+   * 4) — the one place Order reaches back into Payment for a checkout's
+   * intent, same "additive hook for the next phase" pattern ADR-008
+   * decision 10 reserved `CheckoutService.markConverted()` for this
+   * module. Returns full detail (attempts/transactions) so the caller can
+   * find the `VERIFIED` transaction without a second round trip. */
+  async findByCheckoutSessionId(
+    checkoutSessionId: string,
+  ): Promise<PaymentIntentWithDetail | null> {
+    const intent = await this.intents.findByCheckoutSessionId(checkoutSessionId);
+    if (!intent) return null;
+    return this.intents.findById(intent.id);
+  }
+
+  /** Reserved for Phase 009's `OrderService.cancel()` (ADR-009 decision
+   * 10) — a system-internal read by id, no actor/ownership check (same
+   * reasoning `findByCheckoutSessionId()` above and
+   * `CheckoutService.findByIdSystem()` already establish), used to
+   * resolve the `VERIFIED` `PaymentTransaction` a cancellation's refund
+   * request needs. Never exposed through a controller. */
+  async findById(paymentIntentId: string): Promise<PaymentIntentWithDetail | null> {
+    return this.intents.findById(paymentIntentId);
+  }
+
   /** Consumer side of the `payment_verification_retry` sweep's
    * verification-retry half — every intent whose latest attempt was
    * redirected before `olderThan` and never returned. Never invoked by

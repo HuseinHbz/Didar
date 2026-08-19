@@ -66,5 +66,11 @@ import { PaymentDomainExceptionFilter } from './presentation/filters/payment-dom
     ReconciliationService,
     { provide: APP_FILTER, useClass: PaymentDomainExceptionFilter },
   ],
+  // Phase 009 — additive: PaymentIntentService (findByCheckoutSessionId(),
+  // ADR-009 decision 4) and RefundService (order cancellation's refund
+  // request, ADR-009 decision 10) are the two services OrderModule reaches
+  // back into, same "additive export for the next phase" pattern this
+  // module's own README documents CartCheckoutModule using for it.
+  exports: [PaymentIntentService, RefundService],
 })
 export class PaymentModule {}
