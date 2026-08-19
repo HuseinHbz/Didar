@@ -22,16 +22,35 @@ export class OrderAdminController {
     private readonly conversion: OrderConversionService,
   ) {}
 
+  /** ADR-011 decision 6 — real, database-backed search/filter: status,
+   * payment state, fulfillment state, a placed-date range, and a
+   * specific customer, any combination at once. All applied as genuine
+   * `WHERE` clauses (`PrismaOrderRepository.list()`), never fetched-then-
+   * filtered here. */
   @Get()
   @RequirePermission('order.read')
   @ApiOkResponse({ type: [OrderResponseDto] })
   async list(
     @Query('status') status?: OrderListFilter['status'],
+    @Query('paymentStatus') paymentStatus?: OrderListFilter['paymentStatus'],
+    @Query('fulfillmentStatus') fulfillmentStatus?: OrderListFilter['fulfillmentStatus'],
+    @Query('customerId') customerId?: string,
+    @Query('placedFrom') placedFrom?: string,
+    @Query('placedTo') placedTo?: string,
     @Query('limit') limitRaw?: string,
     @Query('cursor') cursor?: string,
   ) {
     const limit = limitRaw ? Math.min(Math.max(Number(limitRaw), 1), 100) : 20;
-    const { items, nextCursor } = await this.orders.listForAdmin({ status, limit, cursor });
+    const { items, nextCursor } = await this.orders.listForAdmin({
+      status,
+      paymentStatus,
+      fulfillmentStatus,
+      customerId,
+      placedFrom: placedFrom ? new Date(placedFrom) : undefined,
+      placedTo: placedTo ? new Date(placedTo) : undefined,
+      limit,
+      cursor,
+    });
     const detailed = await Promise.all(items.map((order) => this.orders.getForAdmin(order.id)));
     return { items: detailed.map((item) => OrderResponseDto.fromDomain(item)), nextCursor };
   }
