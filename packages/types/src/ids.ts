@@ -160,8 +160,7 @@ export type ShipmentId = Brand<string, 'ShipmentId'>;
 export type ShipmentEventId = Brand<string, 'ShipmentEventId'>;
 
 export const asOrderItemId = brandedId<'OrderItemId'>('OrderItemId').as;
-export const asOrderStatusHistoryId =
-  brandedId<'OrderStatusHistoryId'>('OrderStatusHistoryId').as;
+export const asOrderStatusHistoryId = brandedId<'OrderStatusHistoryId'>('OrderStatusHistoryId').as;
 export const asInvoiceId = brandedId<'InvoiceId'>('InvoiceId').as;
 export const asInvoiceItemId = brandedId<'InvoiceItemId'>('InvoiceItemId').as;
 export const asFulfillmentId = brandedId<'FulfillmentId'>('FulfillmentId').as;
