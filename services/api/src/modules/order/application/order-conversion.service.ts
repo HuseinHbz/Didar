@@ -24,6 +24,11 @@ import { InvoiceService } from './invoice.service';
  * from the `order_conversion` sweep as a reliability backstop for a
  * customer who never returns to trigger anything synchronously. Both
  * paths call this exact method, never two diverging implementations.
+ * `convertFromCheckout` also resumes cleanly if a prior call crashed
+ * between `orders.create()` and `checkout.markConverted()` — an existing
+ * order still `PENDING_PAYMENT` is treated as unfinished, not done, and
+ * the method falls through to complete the remaining steps on it rather
+ * than returning it stuck (see that method's own inline comment).
  */
 @Injectable()
 export class OrderConversionService {
@@ -53,20 +58,32 @@ export class OrderConversionService {
    */
   async convertFromCheckout(checkoutSessionId: string): Promise<Order | null> {
     const existingOrder = await this.orders.findByCheckoutSessionId(checkoutSessionId);
-    if (existingOrder) return existingOrder;
+    // Genuinely done: the PAID transition below already ran for this order
+    // on a prior call. Return immediately — the fast, common path.
+    if (existingOrder && existingOrder.status !== 'PENDING_PAYMENT') return existingOrder;
+    // `existingOrder` here is either null (first attempt) or a real but
+    // *stuck* row: `orders.create()` below succeeded on an earlier call,
+    // but the process crashed before reaching `checkout.markConverted()`
+    // at the end of this method — so a retry (or the `order_conversion`
+    // sweep) lands back here with the checkout still not CONVERTED. Fall
+    // through and resume from wherever it stopped, reusing the existing
+    // order row instead of creating a second one, so this method's own
+    // doc comment ("idempotent... both paths call this exact method")
+    // stays true even across a mid-flight crash, not just for a clean
+    // second call.
 
     const intentDetail = await this.payments.findByCheckoutSessionId(checkoutSessionId);
-    if (intentDetail?.intent.status !== 'SUCCEEDED') return null;
+    if (intentDetail?.intent.status !== 'SUCCEEDED') return existingOrder ?? null;
 
     const verifiedTransaction = intentDetail.transactions.find((t) => t.isVerified);
-    if (!verifiedTransaction) return null;
+    if (!verifiedTransaction) return existingOrder ?? null;
 
     const checkoutDetail = await this.checkout.findByIdSystem(checkoutSessionId);
     if (!checkoutDetail) {
       this.logger.warn(
         `checkout_session_missing_for_verified_payment checkoutSessionId=${checkoutSessionId}`,
       );
-      return null;
+      return existingOrder ?? null;
     }
     const { session } = checkoutDetail;
 
@@ -89,21 +106,23 @@ export class OrderConversionService {
       });
     }
 
-    const order = await this.orders.create({
-      checkoutSessionId,
-      paymentIntentId: intentDetail.intent.id,
-      customerId: session.customerId,
-      guestToken: session.guestToken,
-      source: 'STOREFRONT',
-      currency: session.currency,
-      subtotal: session.subtotal,
-      discountTotal: session.discountTotal,
-      taxTotal: session.taxTotal,
-      shippingTotal: session.shippingTotal,
-      grandTotal: session.grandTotal,
-      shippingAddressSnapshot: session.addressSnapshot ?? {},
-      items,
-    });
+    const order =
+      existingOrder ??
+      (await this.orders.create({
+        checkoutSessionId,
+        paymentIntentId: intentDetail.intent.id,
+        customerId: session.customerId,
+        guestToken: session.guestToken,
+        source: 'STOREFRONT',
+        currency: session.currency,
+        subtotal: session.subtotal,
+        discountTotal: session.discountTotal,
+        taxTotal: session.taxTotal,
+        shippingTotal: session.shippingTotal,
+        grandTotal: session.grandTotal,
+        shippingAddressSnapshot: session.addressSnapshot ?? {},
+        items,
+      }));
 
     // Reconcile inventory reservation -> allocation (ADR-009 decision 4
     // step 4). Skipped defensively for any reservation already CONVERTED
