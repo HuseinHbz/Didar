@@ -25,6 +25,37 @@ function sha256Hex(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+/** `ORD-YYYYMMDD-NNNNNN` / `INV-YYYYMMDD-NNNNNN` — same format and same
+ * real Postgres sequences (`commerce.order_number_seq`/
+ * `finance.invoice_number_seq`, ADR-009 decision 6) services/api's
+ * `PrismaOrderRepository`/`PrismaInvoiceRepository` draw from.
+ * Reimplemented here, not imported — same standalone-script rationale
+ * `sha256Hex` above documents. */
+function formatSequenceNumber(prefix: string, seq: bigint, drawnAt: Date): string {
+  const y = drawnAt.getUTCFullYear();
+  const m = String(drawnAt.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(drawnAt.getUTCDate()).padStart(2, '0');
+  return `${prefix}-${y}${m}${d}-${seq.toString().padStart(6, '0')}`;
+}
+
+async function nextOrderNumber(): Promise<string> {
+  const rows = await prisma.$queryRaw<
+    { nextval: bigint }[]
+  >`SELECT nextval('commerce.order_number_seq') AS nextval`;
+  const nextval = rows[0]?.nextval;
+  if (nextval === undefined) throw new Error('[seed] order_number_seq.nextval() returned no row');
+  return formatSequenceNumber('ORD', nextval, new Date());
+}
+
+async function nextInvoiceNumber(): Promise<string> {
+  const rows = await prisma.$queryRaw<
+    { nextval: bigint }[]
+  >`SELECT nextval('finance.invoice_number_seq') AS nextval`;
+  const nextval = rows[0]?.nextval;
+  if (nextval === undefined) throw new Error('[seed] invoice_number_seq.nextval() returned no row');
+  return formatSequenceNumber('INV', nextval, new Date());
+}
+
 async function main(): Promise<void> {
   // ---------------------------------------------------------------------
   // identity — the real permission registry (matching what
@@ -204,6 +235,50 @@ async function main(): Promise<void> {
       action: 'reconciliation.resolve',
       description: 'Record a resolution note on a reconciliation finding',
     },
+    // order (Phase 009) — matching what services/api's order module
+    // actually checks via @RequirePermission (see that module's README
+    // and docs/adr/ADR-009-order-fulfillment.md). Order creation itself
+    // is never client-triggered (only OrderConversionService, from a
+    // verified payment) — `order.create` gates only the admin manual
+    // conversion-retry route, not a generic "create an order" endpoint.
+    { module: 'order', action: 'read', description: 'Read any order (admin/support scope)' },
+    {
+      module: 'order',
+      action: 'create',
+      description: 'Manually retry checkout->order conversion for a verified payment',
+    },
+    {
+      module: 'order',
+      action: 'update',
+      description: 'Update a fulfillment record on an order',
+    },
+    { module: 'order', action: 'cancel', description: 'Cancel an order' },
+    { module: 'order', action: 'approve', description: 'Approve an order for processing' },
+    { module: 'order', action: 'fulfill', description: 'Create a fulfillment for an order' },
+    { module: 'order', action: 'ship', description: 'Create a shipment for a fulfillment' },
+    { module: 'order', action: 'complete', description: 'Mark an order COMPLETED' },
+    {
+      module: 'order',
+      action: 'refund',
+      description: 'Request a partial refund against a paid order',
+    },
+    { module: 'order', action: 'invoice.read', description: "Read an order's invoice" },
+    {
+      module: 'order',
+      action: 'invoice.create',
+      description: 'Manually (re)issue an invoice for an order',
+    },
+    { module: 'order', action: 'invoice.void', description: 'Void an issued invoice' },
+    {
+      module: 'order',
+      action: 'shipment.read',
+      description: "Read an order's shipments",
+    },
+    {
+      module: 'order',
+      action: 'shipment.update',
+      description: 'Update a shipment status/tracking event',
+    },
   ];
   const permissions = await Promise.all(
     permissionDefs.map((def) =>
@@ -276,11 +351,16 @@ async function main(): Promise<void> {
   await grant(adminRole.id, 'identity.roles.manage');
   await grant(adminRole.id, 'identity.permissions.manage');
   await grant(adminRole.id, 'identity.audit_logs.view');
-  // admin gets every catalog.*/inventory.*/payment.* permission — the
-  // module-access gate (@RequireModule) and every @RequirePermission check
-  // both pass for admin, same as identity's own endpoints.
+  // admin gets every catalog.*/inventory.*/payment.*/order.* permission —
+  // the module-access gate (@RequireModule) and every @RequirePermission
+  // check both pass for admin, same as identity's own endpoints.
   for (const def of permissionDefs) {
-    if (def.module === 'catalog' || def.module === 'inventory' || def.module === 'payment') {
+    if (
+      def.module === 'catalog' ||
+      def.module === 'inventory' ||
+      def.module === 'payment' ||
+      def.module === 'order'
+    ) {
       await grant(adminRole.id, `${def.module}.${def.action}`);
     }
   }
@@ -426,6 +506,45 @@ async function main(): Promise<void> {
     await grant(financeAuditorRole.id, `payment.${action}`);
   }
 
+  // Two order roles (Phase 009 — docs/security/order-fulfillment-security.md
+  // has the full matrix): `order_manager` gets every order.* permission (a
+  // department head — can approve/cancel/refund/complete orders and void
+  // invoices); `fulfillment_clerk` is the warehouse-floor role — can read
+  // orders, create fulfillments/shipments, and update their status, but
+  // cannot approve, cancel, refund, complete an order, or void an invoice
+  // — the same "floor role can't approve its own sensitive action" shape
+  // `warehouse_operator`/`finance_auditor` already established; real
+  // fixture for the e2e suite's permission-bypass case (a fulfillment
+  // clerk calling POST .../cancel or .../refund must 403).
+  const orderManagerRole = await prisma.role.upsert({
+    where: { name: 'order_manager' },
+    update: { description: 'Full order module access — every order.* permission' },
+    create: {
+      name: 'order_manager',
+      description: 'Full order module access — every order.* permission',
+    },
+  });
+  for (const def of permissionDefs) {
+    if (def.module === 'order') {
+      await grant(orderManagerRole.id, `order.${def.action}`);
+    }
+  }
+  const fulfillmentClerkRole = await prisma.role.upsert({
+    where: { name: 'fulfillment_clerk' },
+    update: {
+      description:
+        'Warehouse-floor fulfillment — create/update fulfillments and shipments; cannot approve, cancel, refund, or complete an order',
+    },
+    create: {
+      name: 'fulfillment_clerk',
+      description:
+        'Warehouse-floor fulfillment — create/update fulfillments and shipments; cannot approve, cancel, refund, or complete an order',
+    },
+  });
+  for (const action of ['read', 'update', 'fulfill', 'ship', 'shipment.read', 'shipment.update']) {
+    await grant(fulfillmentClerkRole.id, `order.${action}`);
+  }
+
   const adminUser = await prisma.user.upsert({
     where: { phone: '+989120000001' },
     update: {},
@@ -546,6 +665,26 @@ async function main(): Promise<void> {
     ['+989120000010', 'finance-auditor@iecp.dev', financeAuditorRole.id],
   ];
   for (const [phone, email, roleId] of paymentRoleUsers) {
+    const user = await prisma.user.upsert({
+      where: { phone },
+      update: {},
+      create: { phone, email, isActive: true, phoneVerifiedAt: new Date() },
+    });
+    await prisma.userRole.upsert({
+      where: { userId_roleId: { userId: user.id, roleId } },
+      update: {},
+      create: { userId: user.id, roleId },
+    });
+  }
+
+  // Eleventh-twelfth users: one per order role — real fixtures for the
+  // e2e suite's order permission-bypass cases (fulfillment_clerk calling
+  // POST .../cancel or .../refund must 403).
+  const orderRoleUsers: [string, string, string][] = [
+    ['+989120000011', 'order-manager@iecp.dev', orderManagerRole.id],
+    ['+989120000012', 'fulfillment-clerk@iecp.dev', fulfillmentClerkRole.id],
+  ];
+  for (const [phone, email, roleId] of orderRoleUsers) {
     const user = await prisma.user.upsert({
       where: { phone },
       update: {},
@@ -1444,14 +1583,21 @@ async function main(): Promise<void> {
     },
   });
 
+  // Phase 009: this fixture backs the order section's own "paid" order
+  // below (`successIntent`'s SUCCEEDED/VERIFIED chain, ADR-009 decision 4)
+  // — its `status` moves to CONVERTED (what `CheckoutService.markConverted`
+  // sets for real once an order is created from it) rather than staying
+  // READY_FOR_PAYMENT forever. `update` carries this on a re-run against a
+  // database seeded before Phase 009 existed, same convergent-not-merely-
+  // additive convention `permission.deleteMany` above already established.
   const checkoutReadySession = await prisma.checkoutSession.upsert({
     where: { idempotencyKey: 'SEED-CHECKOUT-READY-1' },
-    update: {},
+    update: { status: 'CONVERTED' },
     create: {
       id: '00000000-0000-4000-9000-000000000004',
       cartId: checkoutReadyCart.id,
       customerId: customer.id,
-      status: 'READY_FOR_PAYMENT',
+      status: 'CONVERTED',
       currency: 'IRR',
       subtotal: 12_500_000n,
       discountTotal: 0n,
@@ -1866,6 +2012,672 @@ async function main(): Promise<void> {
   }
 
   // ---------------------------------------------------------------------
+  // order (Phase 009 — see docs/adr/ADR-009-order-fulfillment.md): four
+  // Order fixtures covering the brief's own explicit list (paid, unpaid,
+  // cancelled, fulfilled), each with its own real checkout/payment chain
+  // — an `Order` always has a real, unique `checkoutSessionId`/
+  // `paymentIntentId` (ADR-009 decision 1), never a synthetic one.
+  // ---------------------------------------------------------------------
+
+  // --- Order 1 — PAID, not yet fulfilled, PARTIALLY_REFUNDED. Reuses the
+  // checkout-ready fixture above (now CONVERTED) and Chain 1's SUCCEEDED
+  // intent/VERIFIED transaction from the payment section, so this order's
+  // paidTotal/refundedTotal line up exactly with that section's own
+  // SEED-REFUND-1 (1,000,000 of the 13,625,000 paid). ---
+  const order1ShippingSnapshot = {
+    recipientName: 'Sara Ahmadi',
+    phone: '+989120000002',
+    province: 'Tehran',
+    city: 'Tehran',
+    addressLine1: 'Valiasr St, No. 100',
+    addressLine2: null,
+    postalCode: null,
+  };
+  let order1 = await prisma.order.findUnique({
+    where: { checkoutSessionId: checkoutReadySession.id },
+  });
+  order1 ??= await prisma.order.create({
+    data: {
+      orderNumber: await nextOrderNumber(),
+      checkoutSessionId: checkoutReadySession.id,
+      paymentIntentId: successIntent.id,
+      customerId: customer.id,
+      source: 'STOREFRONT',
+      status: 'PAID',
+      paymentStatus: 'PARTIALLY_REFUNDED',
+      fulfillmentStatus: 'UNFULFILLED',
+      currency: 'IRR',
+      subtotal: 12_500_000n,
+      taxTotal: 1_125_000n,
+      grandTotal: 13_625_000n,
+      paidTotal: 13_625_000n,
+      refundedTotal: 1_000_000n,
+      shippingAddressSnapshot: order1ShippingSnapshot,
+      items: {
+        create: {
+          productSkuId: sku.id,
+          skuSnapshot: sku.skuCode,
+          nameSnapshot: 'Ray-Ban Aviator Classic',
+          unitPriceSnapshot: 12_500_000n,
+          quantity: 1,
+          taxAmount: 1_125_000n,
+          lineTotal: 12_500_000n,
+        },
+      },
+      statusHistory: {
+        create: [
+          {
+            fromStatus: null,
+            toStatus: 'PENDING_PAYMENT',
+            note: 'Order created from a verified payment',
+          },
+          {
+            fromStatus: 'PENDING_PAYMENT',
+            toStatus: 'PAID',
+            note: 'Payment verified — order marked PAID',
+          },
+        ],
+      },
+    },
+  });
+  await prisma.invoice.upsert({
+    where: { orderId: order1.id },
+    update: {},
+    create: {
+      invoiceNumber: await nextInvoiceNumber(),
+      orderId: order1.id,
+      customerId: customer.id,
+      status: 'ISSUED',
+      currency: 'IRR',
+      subtotal: 12_500_000n,
+      taxTotal: 1_125_000n,
+      grandTotal: 13_625_000n,
+      issuedAt: new Date(),
+      items: {
+        create: {
+          description: 'Ray-Ban Aviator Classic',
+          quantity: 1,
+          unitPrice: 12_500_000n,
+          lineTotal: 12_500_000n,
+        },
+      },
+    },
+  });
+
+  // --- Order 2 — genuinely UNPAID/PENDING_PAYMENT: not a normally-
+  // reachable customer-facing state (an Order is only ever created from
+  // an already-verified payment, ADR-009 decision 4), but a real one —
+  // this represents the narrow crash-recovery window where
+  // `OrderConversionService.convertFromCheckout()`'s `orders.create()`
+  // step succeeded but the process died before the following PAID
+  // transition/invoice issuance/`checkout.markConverted()` steps ran.
+  // `OrderConversionService` now resumes cleanly from exactly this state
+  // (see that service's own inline comment) — this fixture exists so
+  // that resume path has something real to exercise. Its own guest
+  // checkout stays READY_FOR_PAYMENT (never reached `markConverted()`),
+  // even though its payment intent already SUCCEEDED/VERIFIED — a real,
+  // if unusual, mid-flight combination. ---
+  const order2GuestToken = 'seed-guest-cart-token-unpaid-000000000000000000';
+  const order2Cart = await prisma.cart.upsert({
+    where: { id: '00000000-0000-4000-9000-000000000009' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-9000-000000000009',
+      guestToken: order2GuestToken,
+      status: 'CHECKOUT_STARTED',
+      currency: 'IRR',
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60_000),
+    },
+  });
+  await prisma.cartItem.upsert({
+    where: {
+      cartId_productSkuId_configurationHash: {
+        cartId: order2Cart.id,
+        productSkuId: clubmasterSku.id,
+        configurationHash: '',
+      },
+    },
+    update: {},
+    create: {
+      cartId: order2Cart.id,
+      productSkuId: clubmasterSku.id,
+      quantity: 1,
+      unitPriceSnapshot: 9_800_000n,
+      currency: 'IRR',
+    },
+  });
+  const order2Checkout = await prisma.checkoutSession.upsert({
+    where: { idempotencyKey: 'SEED-CHECKOUT-STUCK-ORDER-1' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-9000-00000000000a',
+      cartId: order2Cart.id,
+      guestToken: order2GuestToken,
+      status: 'READY_FOR_PAYMENT',
+      currency: 'IRR',
+      subtotal: 9_800_000n,
+      taxTotal: 882_000n,
+      grandTotal: 10_682_000n,
+      idempotencyKey: 'SEED-CHECKOUT-STUCK-ORDER-1',
+      expiresAt: new Date(Date.now() + 20 * 60_000),
+    },
+  });
+  const order2Intent = await prisma.paymentIntent.upsert({
+    where: { checkoutSessionId: order2Checkout.id },
+    update: {},
+    create: {
+      checkoutSessionId: order2Checkout.id,
+      providerId: zarinpalProvider.id,
+      status: 'SUCCEEDED',
+      amount: 10_682_000n,
+      currency: 'IRR',
+      idempotencyKey: 'SEED-PAYMENT-STUCK-ORDER-1',
+      expiresAt: new Date(Date.now() + 30 * 60_000),
+    },
+  });
+  const order2Attempt = await prisma.paymentAttempt.upsert({
+    where: {
+      paymentIntentId_attemptNumber: { paymentIntentId: order2Intent.id, attemptNumber: 1 },
+    },
+    update: {},
+    create: {
+      paymentIntentId: order2Intent.id,
+      attemptNumber: 1,
+      providerAuthority: 'SEED-AUTHORITY-STUCK-000000000000000000000000',
+      status: 'RETURNED',
+      returnedAt: new Date(),
+    },
+  });
+  await prisma.paymentTransaction.upsert({
+    where: {
+      providerId_providerReference: {
+        providerId: zarinpalProvider.id,
+        providerReference: 'SEED-REFID-STUCK-1',
+      },
+    },
+    update: {},
+    create: {
+      paymentIntentId: order2Intent.id,
+      paymentAttemptId: order2Attempt.id,
+      providerId: zarinpalProvider.id,
+      providerReference: 'SEED-REFID-STUCK-1',
+      amount: 10_682_000n,
+      currency: 'IRR',
+      status: 'VERIFIED',
+      verifiedAt: new Date(),
+      rawVerificationResponse: { code: 100, message: 'Verified', ref_id: 'SEED-REFID-STUCK-1' },
+    },
+  });
+  let order2 = await prisma.order.findUnique({ where: { checkoutSessionId: order2Checkout.id } });
+  order2 ??= await prisma.order.create({
+    data: {
+      orderNumber: await nextOrderNumber(),
+      checkoutSessionId: order2Checkout.id,
+      paymentIntentId: order2Intent.id,
+      guestToken: order2GuestToken,
+      source: 'STOREFRONT',
+      // status/paymentStatus/fulfillmentStatus/paidTotal/refundedTotal
+      // deliberately left at their schema defaults (PENDING_PAYMENT/
+      // UNPAID/UNFULFILLED/0/0) — see this fixture's own comment above.
+      currency: 'IRR',
+      subtotal: 9_800_000n,
+      taxTotal: 882_000n,
+      grandTotal: 10_682_000n,
+      shippingAddressSnapshot: {},
+      items: {
+        create: {
+          productSkuId: clubmasterSku.id,
+          skuSnapshot: clubmasterSku.skuCode,
+          nameSnapshot: 'Ray-Ban Clubmaster Classic',
+          unitPriceSnapshot: 9_800_000n,
+          quantity: 1,
+          taxAmount: 882_000n,
+          lineTotal: 9_800_000n,
+        },
+      },
+      statusHistory: {
+        create: {
+          fromStatus: null,
+          toStatus: 'PENDING_PAYMENT',
+          note: 'Order created from a verified payment',
+        },
+      },
+    },
+  });
+
+  // --- Order 3 — PAID then CANCELLED. paymentStatus stays PAID (never
+  // auto-refunded on cancel — a real, deliberate, documented gap, ADR-009
+  // decision 10 and this module's own OrderService.cancel() doc comment;
+  // same shape as RefundService's own Phase 008 gap). ---
+  const order3Cart = await prisma.cart.upsert({
+    where: { id: '00000000-0000-4000-9000-00000000000b' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-9000-00000000000b',
+      customerId: customer.id,
+      status: 'CHECKOUT_STARTED',
+      currency: 'IRR',
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60_000),
+    },
+  });
+  await prisma.cartItem.upsert({
+    where: {
+      cartId_productSkuId_configurationHash: {
+        cartId: order3Cart.id,
+        productSkuId: clubmasterSku.id,
+        configurationHash: '',
+      },
+    },
+    update: {},
+    create: {
+      cartId: order3Cart.id,
+      productSkuId: clubmasterSku.id,
+      quantity: 2,
+      unitPriceSnapshot: 9_800_000n,
+      currency: 'IRR',
+    },
+  });
+  const order3Checkout = await prisma.checkoutSession.upsert({
+    where: { idempotencyKey: 'SEED-CHECKOUT-CANCELLED-ORDER-1' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-9000-00000000000c',
+      cartId: order3Cart.id,
+      customerId: customer.id,
+      status: 'CONVERTED',
+      currency: 'IRR',
+      subtotal: 19_600_000n,
+      taxTotal: 1_764_000n,
+      grandTotal: 21_364_000n,
+      idempotencyKey: 'SEED-CHECKOUT-CANCELLED-ORDER-1',
+      expiresAt: new Date(Date.now() + 20 * 60_000),
+    },
+  });
+  const order3Intent = await prisma.paymentIntent.upsert({
+    where: { checkoutSessionId: order3Checkout.id },
+    update: {},
+    create: {
+      checkoutSessionId: order3Checkout.id,
+      customerId: customer.id,
+      providerId: zarinpalProvider.id,
+      status: 'SUCCEEDED',
+      amount: 21_364_000n,
+      currency: 'IRR',
+      idempotencyKey: 'SEED-PAYMENT-CANCELLED-ORDER-1',
+      expiresAt: new Date(Date.now() + 30 * 60_000),
+    },
+  });
+  const order3Attempt = await prisma.paymentAttempt.upsert({
+    where: {
+      paymentIntentId_attemptNumber: { paymentIntentId: order3Intent.id, attemptNumber: 1 },
+    },
+    update: {},
+    create: {
+      paymentIntentId: order3Intent.id,
+      attemptNumber: 1,
+      providerAuthority: 'SEED-AUTHORITY-CANCELLED-00000000000000000000',
+      status: 'RETURNED',
+      returnedAt: new Date(),
+    },
+  });
+  await prisma.paymentTransaction.upsert({
+    where: {
+      providerId_providerReference: {
+        providerId: zarinpalProvider.id,
+        providerReference: 'SEED-REFID-CANCELLED-1',
+      },
+    },
+    update: {},
+    create: {
+      paymentIntentId: order3Intent.id,
+      paymentAttemptId: order3Attempt.id,
+      providerId: zarinpalProvider.id,
+      providerReference: 'SEED-REFID-CANCELLED-1',
+      amount: 21_364_000n,
+      currency: 'IRR',
+      status: 'VERIFIED',
+      verifiedAt: new Date(),
+      rawVerificationResponse: { code: 100, message: 'Verified', ref_id: 'SEED-REFID-CANCELLED-1' },
+    },
+  });
+  let order3 = await prisma.order.findUnique({ where: { checkoutSessionId: order3Checkout.id } });
+  order3 ??= await prisma.order.create({
+    data: {
+      orderNumber: await nextOrderNumber(),
+      checkoutSessionId: order3Checkout.id,
+      paymentIntentId: order3Intent.id,
+      customerId: customer.id,
+      source: 'STOREFRONT',
+      status: 'CANCELLED',
+      paymentStatus: 'PAID',
+      fulfillmentStatus: 'UNFULFILLED',
+      currency: 'IRR',
+      subtotal: 19_600_000n,
+      taxTotal: 1_764_000n,
+      grandTotal: 21_364_000n,
+      paidTotal: 21_364_000n,
+      cancelledAt: new Date(),
+      shippingAddressSnapshot: order1ShippingSnapshot,
+      items: {
+        create: {
+          productSkuId: clubmasterSku.id,
+          skuSnapshot: clubmasterSku.skuCode,
+          nameSnapshot: 'Ray-Ban Clubmaster Classic',
+          unitPriceSnapshot: 9_800_000n,
+          quantity: 2,
+          taxAmount: 1_764_000n,
+          lineTotal: 19_600_000n,
+        },
+      },
+      statusHistory: {
+        create: [
+          {
+            fromStatus: null,
+            toStatus: 'PENDING_PAYMENT',
+            note: 'Order created from a verified payment',
+          },
+          {
+            fromStatus: 'PENDING_PAYMENT',
+            toStatus: 'PAID',
+            note: 'Payment verified — order marked PAID',
+          },
+          {
+            fromStatus: 'PAID',
+            toStatus: 'CANCELLED',
+            changedBy: adminUser.id,
+            note: 'Cancelled — customer requested cancellation before fulfillment',
+          },
+        ],
+      },
+    },
+  });
+  await prisma.invoice.upsert({
+    where: { orderId: order3.id },
+    update: {},
+    create: {
+      invoiceNumber: await nextInvoiceNumber(),
+      orderId: order3.id,
+      customerId: customer.id,
+      status: 'ISSUED',
+      currency: 'IRR',
+      subtotal: 19_600_000n,
+      taxTotal: 1_764_000n,
+      grandTotal: 21_364_000n,
+      issuedAt: new Date(),
+      items: {
+        create: {
+          description: 'Ray-Ban Clubmaster Classic',
+          quantity: 2,
+          unitPrice: 9_800_000n,
+          lineTotal: 19_600_000n,
+        },
+      },
+    },
+  });
+
+  // --- Order 4 — the full happy path: PAID -> PROCESSING ->
+  // READY_TO_FULFILL -> FULFILLED, one Fulfillment (DELIVERED) covering
+  // both order lines, one Shipment (DELIVERED) with a real tracking
+  // history, and an issued Invoice. ---
+  const order4Cart = await prisma.cart.upsert({
+    where: { id: '00000000-0000-4000-9000-00000000000d' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-9000-00000000000d',
+      customerId: customer.id,
+      status: 'CHECKOUT_STARTED',
+      currency: 'IRR',
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60_000),
+    },
+  });
+  for (const [productSkuId, quantity, unitPrice] of [
+    [sku.id, 1, 12_500_000n],
+    [clubmasterSku.id, 1, 9_800_000n],
+  ] as const) {
+    await prisma.cartItem.upsert({
+      where: {
+        cartId_productSkuId_configurationHash: {
+          cartId: order4Cart.id,
+          productSkuId,
+          configurationHash: '',
+        },
+      },
+      update: {},
+      create: {
+        cartId: order4Cart.id,
+        productSkuId,
+        quantity,
+        unitPriceSnapshot: unitPrice,
+        currency: 'IRR',
+      },
+    });
+  }
+  const order4Checkout = await prisma.checkoutSession.upsert({
+    where: { idempotencyKey: 'SEED-CHECKOUT-FULFILLED-ORDER-1' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-9000-00000000000e',
+      cartId: order4Cart.id,
+      customerId: customer.id,
+      status: 'CONVERTED',
+      currency: 'IRR',
+      subtotal: 22_300_000n,
+      taxTotal: 2_007_000n,
+      grandTotal: 24_307_000n,
+      idempotencyKey: 'SEED-CHECKOUT-FULFILLED-ORDER-1',
+      expiresAt: new Date(Date.now() + 20 * 60_000),
+    },
+  });
+  const order4Intent = await prisma.paymentIntent.upsert({
+    where: { checkoutSessionId: order4Checkout.id },
+    update: {},
+    create: {
+      checkoutSessionId: order4Checkout.id,
+      customerId: customer.id,
+      providerId: zarinpalProvider.id,
+      status: 'SUCCEEDED',
+      amount: 24_307_000n,
+      currency: 'IRR',
+      idempotencyKey: 'SEED-PAYMENT-FULFILLED-ORDER-1',
+      expiresAt: new Date(Date.now() + 30 * 60_000),
+    },
+  });
+  const order4Attempt = await prisma.paymentAttempt.upsert({
+    where: {
+      paymentIntentId_attemptNumber: { paymentIntentId: order4Intent.id, attemptNumber: 1 },
+    },
+    update: {},
+    create: {
+      paymentIntentId: order4Intent.id,
+      attemptNumber: 1,
+      providerAuthority: 'SEED-AUTHORITY-FULFILLED-00000000000000000000',
+      status: 'RETURNED',
+      returnedAt: new Date(),
+    },
+  });
+  await prisma.paymentTransaction.upsert({
+    where: {
+      providerId_providerReference: {
+        providerId: zarinpalProvider.id,
+        providerReference: 'SEED-REFID-FULFILLED-1',
+      },
+    },
+    update: {},
+    create: {
+      paymentIntentId: order4Intent.id,
+      paymentAttemptId: order4Attempt.id,
+      providerId: zarinpalProvider.id,
+      providerReference: 'SEED-REFID-FULFILLED-1',
+      amount: 24_307_000n,
+      currency: 'IRR',
+      status: 'VERIFIED',
+      verifiedAt: new Date(),
+      rawVerificationResponse: { code: 100, message: 'Verified', ref_id: 'SEED-REFID-FULFILLED-1' },
+    },
+  });
+  let order4 = await prisma.order.findUnique({ where: { checkoutSessionId: order4Checkout.id } });
+  order4 ??= await prisma.order.create({
+    data: {
+      orderNumber: await nextOrderNumber(),
+      checkoutSessionId: order4Checkout.id,
+      paymentIntentId: order4Intent.id,
+      customerId: customer.id,
+      source: 'STOREFRONT',
+      status: 'FULFILLED',
+      paymentStatus: 'PAID',
+      fulfillmentStatus: 'FULFILLED',
+      currency: 'IRR',
+      subtotal: 22_300_000n,
+      taxTotal: 2_007_000n,
+      grandTotal: 24_307_000n,
+      paidTotal: 24_307_000n,
+      shippingAddressSnapshot: order1ShippingSnapshot,
+      items: {
+        create: [
+          {
+            productSkuId: sku.id,
+            skuSnapshot: sku.skuCode,
+            nameSnapshot: 'Ray-Ban Aviator Classic',
+            unitPriceSnapshot: 12_500_000n,
+            quantity: 1,
+            taxAmount: 1_125_000n,
+            lineTotal: 12_500_000n,
+          },
+          {
+            productSkuId: clubmasterSku.id,
+            skuSnapshot: clubmasterSku.skuCode,
+            nameSnapshot: 'Ray-Ban Clubmaster Classic',
+            unitPriceSnapshot: 9_800_000n,
+            quantity: 1,
+            taxAmount: 882_000n,
+            lineTotal: 9_800_000n,
+          },
+        ],
+      },
+      statusHistory: {
+        create: [
+          {
+            fromStatus: null,
+            toStatus: 'PENDING_PAYMENT',
+            note: 'Order created from a verified payment',
+          },
+          {
+            fromStatus: 'PENDING_PAYMENT',
+            toStatus: 'PAID',
+            note: 'Payment verified — order marked PAID',
+          },
+          {
+            fromStatus: 'PAID',
+            toStatus: 'PROCESSING',
+            changedBy: adminUser.id,
+            note: 'Approved for processing',
+          },
+          {
+            fromStatus: 'PROCESSING',
+            toStatus: 'READY_TO_FULFILL',
+            changedBy: adminUser.id,
+            note: 'Stock allocated, ready to pack',
+          },
+          {
+            fromStatus: 'READY_TO_FULFILL',
+            toStatus: 'FULFILLED',
+            changedBy: adminUser.id,
+            note: 'All items fulfilled and delivered',
+          },
+        ],
+      },
+    },
+  });
+  const order4Items = await prisma.orderItem.findMany({ where: { orderId: order4.id } });
+  const order4AviatorItem = order4Items.find((item) => item.productSkuId === sku.id);
+  const order4ClubmasterItem = order4Items.find((item) => item.productSkuId === clubmasterSku.id);
+  if (!order4AviatorItem || !order4ClubmasterItem) {
+    throw new Error('[seed] order4 fulfillment fixture: expected order items missing');
+  }
+
+  let order4Fulfillment = await prisma.fulfillment.findFirst({ where: { orderId: order4.id } });
+  order4Fulfillment ??= await prisma.fulfillment.create({
+    data: {
+      orderId: order4.id,
+      status: 'DELIVERED',
+      warehouseId: warehouseCentral.id,
+      packedAt: new Date(Date.now() - 3 * 24 * 60 * 60_000),
+      shippedAt: new Date(Date.now() - 2 * 24 * 60 * 60_000),
+      deliveredAt: new Date(Date.now() - 1 * 24 * 60 * 60_000),
+      items: {
+        create: [
+          { orderItemId: order4AviatorItem.id, quantity: 1 },
+          { orderItemId: order4ClubmasterItem.id, quantity: 1 },
+        ],
+      },
+    },
+  });
+  await prisma.shipment.upsert({
+    where: { fulfillmentId: order4Fulfillment.id },
+    update: {},
+    create: {
+      fulfillmentId: order4Fulfillment.id,
+      carrier: 'Tipax',
+      trackingNumber: 'SEED-TRACKING-000000000001',
+      status: 'DELIVERED',
+      shippedAt: new Date(Date.now() - 2 * 24 * 60 * 60_000),
+      deliveredAt: new Date(Date.now() - 1 * 24 * 60 * 60_000),
+      events: {
+        create: [
+          {
+            status: 'PENDING',
+            source: 'MANUAL_ADMIN',
+            occurredAt: new Date(Date.now() - 3 * 24 * 60 * 60_000),
+          },
+          {
+            status: 'IN_TRANSIT',
+            location: 'Tehran sorting hub',
+            source: 'MANUAL_ADMIN',
+            occurredAt: new Date(Date.now() - 2 * 24 * 60 * 60_000),
+          },
+          {
+            status: 'DELIVERED',
+            location: 'Valiasr St, No. 100, Tehran',
+            source: 'MANUAL_ADMIN',
+            occurredAt: new Date(Date.now() - 1 * 24 * 60 * 60_000),
+          },
+        ],
+      },
+    },
+  });
+  await prisma.invoice.upsert({
+    where: { orderId: order4.id },
+    update: {},
+    create: {
+      invoiceNumber: await nextInvoiceNumber(),
+      orderId: order4.id,
+      customerId: customer.id,
+      status: 'ISSUED',
+      currency: 'IRR',
+      subtotal: 22_300_000n,
+      taxTotal: 2_007_000n,
+      grandTotal: 24_307_000n,
+      issuedAt: new Date(),
+      items: {
+        create: [
+          {
+            description: 'Ray-Ban Aviator Classic',
+            quantity: 1,
+            unitPrice: 12_500_000n,
+            lineTotal: 12_500_000n,
+          },
+          {
+            description: 'Ray-Ban Clubmaster Classic',
+            quantity: 1,
+            unitPrice: 9_800_000n,
+            lineTotal: 9_800_000n,
+          },
+        ],
+      },
+    },
+  });
+
+  // ---------------------------------------------------------------------
   // cms — a home page, a menu, an FAQ entry
   // ---------------------------------------------------------------------
   const homePage = await prisma.page.upsert({
@@ -1966,16 +2778,19 @@ async function main(): Promise<void> {
   });
 
   console.log(
-    '[seed] done — RBAC (43 real permissions across identity/catalog/inventory/payment, role ' +
-      'inheritance, a deny-override), admin/customer/support/catalog-editor/inventory-role/' +
-      'payment-role users, demo customer, catalog (3 products — two PUBLISHED with variant+' +
-      'SKU+price+media/collection, one DRAFT), inventory (2 warehouses, 3 locations, stock ' +
-      'for all SKUs, 2 reservations, a low-stock example, a transfer), coupon, cart-checkout ' +
-      '(2 shipping methods, pricing settings, an active customer cart, a guest cart, a ' +
-      'checkout-ready fixture with a real reservation, an expired checkout), payment (ZarinPal ' +
-      'provider, a SUCCEEDED intent with a VERIFIED transaction + partial refund, a FAILED ' +
-      'intent with a mismatched transaction, an unresolved AMOUNT_MISMATCH reconciliation ' +
-      'finding), CMS/notification/system basics.',
+    '[seed] done — RBAC (57 real permissions across identity/catalog/inventory/payment/order, ' +
+      'role inheritance, a deny-override), admin/customer/support/catalog-editor/inventory-role/' +
+      'payment-role/order-role users, demo customer, catalog (3 products — two PUBLISHED with ' +
+      'variant+SKU+price+media/collection, one DRAFT), inventory (2 warehouses, 3 locations, ' +
+      'stock for all SKUs, 2 reservations, a low-stock example, a transfer), coupon, ' +
+      'cart-checkout (2 shipping methods, pricing settings, an active customer cart, a guest ' +
+      'cart, a checkout-ready fixture with a real reservation, an expired checkout), payment ' +
+      '(ZarinPal provider, a SUCCEEDED intent with a VERIFIED transaction + partial refund, a ' +
+      'FAILED intent with a mismatched transaction, an unresolved AMOUNT_MISMATCH reconciliation ' +
+      'finding), order (a PAID/PARTIALLY_REFUNDED order + issued invoice, a genuinely UNPAID/' +
+      'PENDING_PAYMENT order demonstrating the conversion crash-recovery window, a PAID-then-' +
+      'CANCELLED order + issued invoice, a FULFILLED order with a DELIVERED fulfillment/' +
+      'shipment/tracking history + issued invoice), CMS/notification/system basics.',
   );
 }
 
