@@ -10,8 +10,11 @@ import type { Shipment } from '../../domain/entities/shipment.entity';
 import type {
   FulfillmentRepositoryPort,
   FulfillmentWithDetail,
+  StatusUpdateResult,
 } from '../../domain/ports/fulfillment.repository.port';
 import { FulfillmentQuantityValidator } from '../../domain/services/fulfillment-quantity-validator';
+import { FulfillmentStateMachine } from '../../domain/services/fulfillment-state-machine';
+import { ShipmentStateMachine } from '../../domain/services/shipment-state-machine';
 import {
   fulfillmentItemToDomain,
   fulfillmentToDomain,
@@ -112,55 +115,85 @@ export class PrismaFulfillmentRepository implements FulfillmentRepositoryPort {
     orderId: string;
     warehouseId?: string | null;
     items: readonly { orderItemId: string; quantity: number }[];
+    idempotencyKey?: string | null;
   }): Promise<Fulfillment> {
-    const row = await prisma.$transaction(async (tx) => {
-      for (const item of props.items) {
-        const { orderedQuantity, alreadyFulfilledQuantity } = await lockAndSumFulfilled(
-          tx,
-          item.orderItemId,
-        );
-        FulfillmentQuantityValidator.assertFulfillable(
-          item.orderItemId,
-          orderedQuantity,
-          alreadyFulfilledQuantity,
-          item.quantity,
-        );
-      }
+    try {
+      const row = await prisma.$transaction(async (tx) => {
+        for (const item of props.items) {
+          const { orderedQuantity, alreadyFulfilledQuantity } = await lockAndSumFulfilled(
+            tx,
+            item.orderItemId,
+          );
+          FulfillmentQuantityValidator.assertFulfillable(
+            item.orderItemId,
+            orderedQuantity,
+            alreadyFulfilledQuantity,
+            item.quantity,
+          );
+        }
 
-      return tx.fulfillment.create({
-        data: {
-          id: randomUUID(),
-          orderId: props.orderId,
-          warehouseId: props.warehouseId ?? null,
-          items: {
-            create: props.items.map((item) => ({
-              id: randomUUID(),
-              orderItemId: item.orderItemId,
-              quantity: item.quantity,
-            })),
+        return tx.fulfillment.create({
+          data: {
+            id: randomUUID(),
+            orderId: props.orderId,
+            warehouseId: props.warehouseId ?? null,
+            idempotencyKey: props.idempotencyKey ?? null,
+            items: {
+              create: props.items.map((item) => ({
+                id: randomUUID(),
+                orderItemId: item.orderItemId,
+                quantity: item.quantity,
+              })),
+            },
           },
-        },
+        });
       });
-    });
-    return fulfillmentToDomain(row);
+      return fulfillmentToDomain(row);
+    } catch (error) {
+      if (props.idempotencyKey && isUniqueViolationOn(error, 'idempotency_key')) {
+        const existing = await prisma.fulfillment.findUnique({
+          where: { idempotencyKey: props.idempotencyKey },
+        });
+        if (existing) return fulfillmentToDomain(existing);
+      }
+      throw error;
+    }
   }
 
+  /** ADR-011 decision 1 — row-locks the fulfillment, re-checks
+   * `FulfillmentStateMachine` against the *locked* status before writing.
+   * See the port's own doc comment for the full contract. */
   async updateStatus(
     id: string,
     status: FulfillmentStatus,
     extra?: { packedAt?: Date; shippedAt?: Date; deliveredAt?: Date; cancelledAt?: Date },
-  ): Promise<Fulfillment> {
-    const row = await prisma.fulfillment.update({
-      where: { id },
-      data: {
-        status,
-        packedAt: extra?.packedAt,
-        shippedAt: extra?.shippedAt,
-        deliveredAt: extra?.deliveredAt,
-        cancelledAt: extra?.cancelledAt,
-      },
+  ): Promise<StatusUpdateResult<Fulfillment>> {
+    const result = await prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<{ status: FulfillmentStatus }[]>(
+        Prisma.sql`SELECT status FROM commerce.fulfillments WHERE id = ${id}::uuid FOR UPDATE`,
+      );
+      const currentStatus = locked[0]?.status;
+      if (currentStatus === undefined) throw new Error(`Fulfillment ${id} not found`);
+
+      if (FulfillmentStateMachine.isNoOp(currentStatus, status)) {
+        const unchanged = await tx.fulfillment.findUniqueOrThrow({ where: { id } });
+        return { row: unchanged, transitioned: false };
+      }
+      FulfillmentStateMachine.assertTransition(currentStatus, status);
+
+      const updated = await tx.fulfillment.update({
+        where: { id },
+        data: {
+          status,
+          packedAt: extra?.packedAt,
+          shippedAt: extra?.shippedAt,
+          deliveredAt: extra?.deliveredAt,
+          cancelledAt: extra?.cancelledAt,
+        },
+      });
+      return { row: updated, transitioned: true };
     });
-    return fulfillmentToDomain(row);
+    return { entity: fulfillmentToDomain(result.row), transitioned: result.transitioned };
   }
 
   /** Idempotent on `fulfillmentId` (`@unique`) — same P2002-catch-and-reread
@@ -188,16 +221,38 @@ export class PrismaFulfillmentRepository implements FulfillmentRepositoryPort {
     }
   }
 
+  async findShipmentByTrackingNumber(trackingNumber: string): Promise<Shipment | null> {
+    const row = await prisma.shipment.findUnique({ where: { trackingNumber } });
+    return row ? shipmentToDomain(row) : null;
+  }
+
+  /** ADR-011 decision 1 — same row-lock + re-check technique as
+   * `updateStatus()` above, applied to `commerce.shipments`. */
   async updateShipmentStatus(
     shipmentId: string,
     status: ShipmentStatus,
     extra?: { shippedAt?: Date; deliveredAt?: Date },
-  ): Promise<Shipment> {
-    const row = await prisma.shipment.update({
-      where: { id: shipmentId },
-      data: { status, shippedAt: extra?.shippedAt, deliveredAt: extra?.deliveredAt },
+  ): Promise<StatusUpdateResult<Shipment>> {
+    const result = await prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<{ status: ShipmentStatus }[]>(
+        Prisma.sql`SELECT status FROM commerce.shipments WHERE id = ${shipmentId}::uuid FOR UPDATE`,
+      );
+      const currentStatus = locked[0]?.status;
+      if (currentStatus === undefined) throw new Error(`Shipment ${shipmentId} not found`);
+
+      if (ShipmentStateMachine.isNoOp(currentStatus, status)) {
+        const unchanged = await tx.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
+        return { row: unchanged, transitioned: false };
+      }
+      ShipmentStateMachine.assertTransition(currentStatus, status);
+
+      const updated = await tx.shipment.update({
+        where: { id: shipmentId },
+        data: { status, shippedAt: extra?.shippedAt, deliveredAt: extra?.deliveredAt },
+      });
+      return { row: updated, transitioned: true };
     });
-    return shipmentToDomain(row);
+    return { entity: shipmentToDomain(result.row), transitioned: result.transitioned };
   }
 
   async addShipmentEvent(
