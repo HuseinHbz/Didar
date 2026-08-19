@@ -179,4 +179,51 @@ export class OrderService {
     });
     return updated;
   }
+
+  /** `POST /admin/orders/:id/refund` (`order.refund`) — a partial refund
+   * on a still-active order, distinct from `cancel()`: the order itself
+   * is untouched (no status/state-machine transition), only its
+   * `refundedTotal` cache moves once the refund is requested. Never
+   * exceeds what remains refundable — `RefundService.requestRefund()`'s
+   * own `RefundValidator` is the real guard (Phase 008), this method never
+   * duplicates that check. */
+  async requestPartialRefund(
+    orderId: string,
+    actorUserId: string,
+    amount: bigint,
+    reason?: string | null,
+  ): Promise<Order> {
+    const detail = await this.getForAdmin(orderId);
+    if (detail.order.paidTotal <= 0n) {
+      throw new ForbiddenException('This order has no payment to refund');
+    }
+
+    const intentDetail = await this.payments.findById(detail.order.paymentIntentId);
+    const transaction = intentDetail?.transactions.find((t) => t.isVerified);
+    if (!transaction) {
+      throw new NotFoundException('No verified payment transaction found for this order');
+    }
+
+    await this.refunds.requestRefund({
+      paymentTransactionId: transaction.id,
+      amount,
+      reason: reason ?? undefined,
+      requestedBy: actorUserId,
+      idempotencyKey: `order-partial-refund__${orderId}__${amount.toString()}`,
+    });
+
+    const updated = await this.orders.updatePaymentState(orderId, {
+      paymentStatus: 'PARTIALLY_REFUNDED',
+      paidTotal: detail.order.paidTotal,
+      refundedTotal: detail.order.refundedTotal + amount,
+    });
+    await this.auditLog.record({
+      actorId: actorUserId,
+      action: 'ORDER_REFUND_REQUESTED',
+      entityType: 'Order',
+      entityId: orderId,
+      newValue: { amount: amount.toString(), reason: reason ?? null },
+    });
+    return updated;
+  }
 }
