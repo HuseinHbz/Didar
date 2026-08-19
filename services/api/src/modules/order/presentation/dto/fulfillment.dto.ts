@@ -3,14 +3,17 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
   IsUUID,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
 
+import type { Shipment } from '../../domain/entities/shipment.entity';
 import type { FulfillmentWithDetail } from '../../domain/ports/fulfillment.repository.port';
 
 export class FulfillmentItemInputDto {
@@ -26,14 +29,25 @@ export class CreateFulfillmentDto {
   @ValidateNested({ each: true })
   @Type(() => FulfillmentItemInputDto)
   items!: FulfillmentItemInputDto[];
+  /** ADR-011 decision 2 — optional; a caller that supplies one and
+   * retries the exact same request gets back the original fulfillment
+   * instead of creating a second, real duplicate. */
+  @ApiProperty({ required: false, maxLength: 200 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  idempotencyKey?: string;
 }
 
+/** `DELIVERED` deliberately excluded — ADR-011 decision 4: a fulfillment
+ * only ever reaches `DELIVERED` via its shipment's own dedicated
+ * `POST .../shipments/:id/deliver` route, never this generic PATCH. */
 export class UpdateFulfillmentStatusDto {
   @ApiProperty({
-    enum: ['ALLOCATED', 'PROCESSING', 'PACKED', 'READY', 'SHIPPED', 'DELIVERED', 'CANCELLED'],
+    enum: ['ALLOCATED', 'PROCESSING', 'PACKED', 'READY', 'SHIPPED', 'CANCELLED'],
   })
-  @IsString()
-  status!: 'ALLOCATED' | 'PROCESSING' | 'PACKED' | 'READY' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
+  @IsIn(['ALLOCATED', 'PROCESSING', 'PACKED', 'READY', 'SHIPPED', 'CANCELLED'])
+  status!: 'ALLOCATED' | 'PROCESSING' | 'PACKED' | 'READY' | 'SHIPPED' | 'CANCELLED';
 }
 
 export class CreateShipmentDto {
@@ -41,10 +55,12 @@ export class CreateShipmentDto {
   @ApiProperty({ required: false }) @IsOptional() @IsString() trackingNumber?: string;
 }
 
+/** `DELIVERED` deliberately excluded — see `UpdateFulfillmentStatusDto`'s
+ * own doc comment; the dedicated deliver route is the only path to it. */
 export class UpdateShipmentStatusDto {
-  @ApiProperty({ enum: ['IN_TRANSIT', 'DELIVERED', 'FAILED', 'CANCELLED'] })
-  @IsString()
-  status!: 'IN_TRANSIT' | 'DELIVERED' | 'FAILED' | 'CANCELLED';
+  @ApiProperty({ enum: ['IN_TRANSIT', 'FAILED', 'CANCELLED'] })
+  @IsIn(['IN_TRANSIT', 'FAILED', 'CANCELLED'])
+  status!: 'IN_TRANSIT' | 'FAILED' | 'CANCELLED';
 
   @ApiProperty({ required: false }) @IsOptional() @IsString() location?: string;
 }
@@ -71,6 +87,31 @@ export class ShipmentResponseDto {
   @ApiProperty({ nullable: true }) shippedAt!: Date | null;
   @ApiProperty({ nullable: true }) deliveredAt!: Date | null;
   @ApiProperty({ type: [ShipmentEventResponseDto] }) events!: ShipmentEventResponseDto[];
+}
+
+/** ADR-011 decision 5 — the tracking-number lookup response: enough to
+ * find the fulfillment (and, from there via a second call, the order)
+ * without eagerly joining the whole aggregate. */
+export class ShipmentSummaryResponseDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty({ format: 'uuid' }) fulfillmentId!: string;
+  @ApiProperty({ nullable: true }) carrier!: string | null;
+  @ApiProperty({ nullable: true }) trackingNumber!: string | null;
+  @ApiProperty() status!: string;
+  @ApiProperty({ nullable: true }) shippedAt!: Date | null;
+  @ApiProperty({ nullable: true }) deliveredAt!: Date | null;
+
+  static fromDomain(shipment: Shipment): ShipmentSummaryResponseDto {
+    const dto = new ShipmentSummaryResponseDto();
+    dto.id = shipment.id;
+    dto.fulfillmentId = shipment.fulfillmentId;
+    dto.carrier = shipment.carrier;
+    dto.trackingNumber = shipment.trackingNumber;
+    dto.status = shipment.status;
+    dto.shippedAt = shipment.shippedAt;
+    dto.deliveredAt = shipment.deliveredAt;
+    return dto;
+  }
 }
 
 export class FulfillmentResponseDto {

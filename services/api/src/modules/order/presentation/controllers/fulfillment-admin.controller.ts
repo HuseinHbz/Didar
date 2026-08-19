@@ -14,9 +14,9 @@ import {
   UpdateShipmentStatusDto,
 } from '../dto/fulfillment.dto';
 
-/** Admin fulfillment + shipment routes (ADR-009 decisions 8/12) —
- * `order.fulfill`/`order.ship`/`order.shipment.*` permissions, no
- * ownership check (admin/support scope). */
+/** Admin fulfillment + shipment routes (ADR-009 decisions 8/12, hardened
+ * by ADR-011) — `order.fulfill`/`order.ship`/`order.shipment.*`
+ * permissions, no ownership check (admin/support scope). */
 @ApiTags('admin/orders')
 @Controller('admin/orders/:orderId')
 export class FulfillmentAdminController {
@@ -41,6 +41,7 @@ export class FulfillmentAdminController {
     const fulfillment = await this.fulfillments.create(orderId, actorId, {
       warehouseId: dto.warehouseId,
       items: dto.items,
+      idempotencyKey: dto.idempotencyKey,
     });
     const detail = await this.fulfillments.get(fulfillment.id);
     return FulfillmentResponseDto.fromDomain(detail);
@@ -80,6 +81,8 @@ export class FulfillmentAdminController {
     return detail.map((item) => FulfillmentResponseDto.fromDomain(item));
   }
 
+  /** Never accepts `DELIVERED` (`UpdateShipmentStatusDto`'s own enum
+   * excludes it) — see `POST .../shipments/:shipmentId/deliver` below. */
   @Patch('shipments/:shipmentId')
   @RequirePermission('order.shipment.update')
   @ApiOkResponse()
@@ -89,5 +92,15 @@ export class FulfillmentAdminController {
     @Body() dto: UpdateShipmentStatusDto,
   ) {
     return this.fulfillments.updateShipmentStatus(shipmentId, actorId, dto.status, dto.location);
+  }
+
+  /** ADR-011 decision 4 — the one route that can confirm delivery, gated
+   * by its own `order.shipment.deliver` permission, distinct from generic
+   * `order.shipment.update`. */
+  @Post('shipments/:shipmentId/deliver')
+  @RequirePermission('order.shipment.deliver')
+  @ApiOkResponse()
+  async confirmDelivery(@Param('shipmentId') shipmentId: string, @CurrentUserId() actorId: UserId) {
+    return this.fulfillments.confirmDelivery(shipmentId, actorId);
   }
 }

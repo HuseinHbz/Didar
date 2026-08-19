@@ -26,6 +26,7 @@ import { FulfillmentAdminController } from './presentation/controllers/fulfillme
 import { InvoiceAdminController } from './presentation/controllers/invoice-admin.controller';
 import { OrderAdminController } from './presentation/controllers/order-admin.controller';
 import { OrderController } from './presentation/controllers/order.controller';
+import { ShipmentLookupAdminController } from './presentation/controllers/shipment-lookup-admin.controller';
 import { OrderDomainExceptionFilter } from './presentation/filters/order-domain-exception.filter';
 
 /**
@@ -66,6 +67,7 @@ import { OrderDomainExceptionFilter } from './presentation/filters/order-domain-
     OrderController,
     OrderAdminController,
     FulfillmentAdminController,
+    ShipmentLookupAdminController,
     InvoiceAdminController,
   ],
   providers: [
