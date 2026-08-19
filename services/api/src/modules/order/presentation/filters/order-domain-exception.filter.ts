@@ -7,6 +7,7 @@ import {
 } from '../../domain/services/fulfillment-quantity-validator';
 import { InvalidFulfillmentTransitionError } from '../../domain/services/fulfillment-state-machine';
 import { InvalidInvoiceTransitionError } from '../../domain/services/invoice-state-machine';
+import { OrderNotReadyToCompleteError } from '../../domain/services/order-completion-validator';
 import { InvalidOrderTransitionError } from '../../domain/services/order-state-machine';
 import { InvalidShipmentTransitionError } from '../../domain/services/shipment-state-machine';
 
@@ -20,7 +21,10 @@ import { InvalidShipmentTransitionError } from '../../domain/services/shipment-s
  * `isNoOp`/`canTransition` checks before a transition error could ever be
  * thrown. `OverFulfillmentError` is 409 (a real state conflict — the
  * remaining quantity has already changed under the caller); a malformed
- * request quantity is 400.
+ * request quantity is 400. `OrderNotReadyToCompleteError` (ADR-011
+ * decision 3) is 409 — the order exists and the request is well-formed,
+ * it just isn't actually done yet, the same "real conflict, not a
+ * validation error" shape every other state-conflict case here uses.
  */
 @Catch(
   InvalidOrderTransitionError,
@@ -29,6 +33,7 @@ import { InvalidShipmentTransitionError } from '../../domain/services/shipment-s
   InvalidShipmentTransitionError,
   OverFulfillmentError,
   NonPositiveFulfillmentQuantityError,
+  OrderNotReadyToCompleteError,
 )
 export class OrderDomainExceptionFilter implements ExceptionFilter {
   catch(exception: Error, host: ArgumentsHost): void {
@@ -47,7 +52,8 @@ export class OrderDomainExceptionFilter implements ExceptionFilter {
       exception instanceof InvalidFulfillmentTransitionError ||
       exception instanceof InvalidInvoiceTransitionError ||
       exception instanceof InvalidShipmentTransitionError ||
-      exception instanceof OverFulfillmentError
+      exception instanceof OverFulfillmentError ||
+      exception instanceof OrderNotReadyToCompleteError
     ) {
       return HttpStatus.CONFLICT;
     }

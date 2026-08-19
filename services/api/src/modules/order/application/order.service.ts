@@ -8,11 +8,16 @@ import { PaymentIntentService } from '../../payment/application/payment-intent.s
 import { RefundService } from '../../payment/application/refund.service';
 import type { Order } from '../domain/entities/order.entity';
 import {
+  FULFILLMENT_REPOSITORY,
+  type FulfillmentRepositoryPort,
+} from '../domain/ports/fulfillment.repository.port';
+import {
   ORDER_REPOSITORY,
   type OrderListFilter,
   type OrderRepositoryPort,
   type OrderWithDetail,
 } from '../domain/ports/order.repository.port';
+import { OrderCompletionValidator } from '../domain/services/order-completion-validator';
 import { OrderStateMachine } from '../domain/services/order-state-machine';
 
 export interface OrderActor {
@@ -30,6 +35,7 @@ export interface OrderActor {
 export class OrderService {
   constructor(
     @Inject(ORDER_REPOSITORY) private readonly orders: OrderRepositoryPort,
+    @Inject(FULFILLMENT_REPOSITORY) private readonly fulfillments: FulfillmentRepositoryPort,
     @Inject(AUDIT_LOG_REPOSITORY) private readonly auditLog: AuditLogRepositoryPort,
     private readonly payments: PaymentIntentService,
     private readonly refunds: RefundService,
@@ -97,11 +103,23 @@ export class OrderService {
     return updated;
   }
 
-  /** `POST /admin/orders/:id/complete` — `FULFILLED -> COMPLETED`, the
-   * final admin confirmation once delivery is done. */
+  /** `POST /admin/orders/:id/complete` — `FULFILLED -> COMPLETED`.
+   * ADR-011 decision 3: this is a server-derived fact, not an admin
+   * button — `OrderCompletionValidator` checks every non-cancelled
+   * `Fulfillment` is actually `DELIVERED` (not merely quantity-covered)
+   * and the order's payment state is settled *before* the state-machine
+   * edge is even asserted, raising a real `OrderNotReadyToCompleteError`
+   * (409) when it isn't. */
   async complete(orderId: string, actorUserId: string): Promise<Order> {
     const detail = await this.getForAdmin(orderId);
     if (OrderStateMachine.isNoOp(detail.order.status, 'COMPLETED')) return detail.order;
+
+    const fulfillments = await this.fulfillments.listByOrderId(orderId);
+    OrderCompletionValidator.assertReady({
+      fulfillmentStatus: detail.order.fulfillmentStatus,
+      paymentStatus: detail.order.paymentStatus,
+      fulfillments: fulfillments.map((f) => ({ status: f.fulfillment.status })),
+    });
     OrderStateMachine.assertTransition(detail.order.status, 'COMPLETED');
     const updated = await this.orders.updateStatus(orderId, 'COMPLETED', actorUserId, null, {
       completedAt: new Date(),
