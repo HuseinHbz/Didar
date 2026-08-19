@@ -1,8 +1,13 @@
-# Order Management, Invoice & Fulfillment — Phase 009 scope
+# Order Management, Invoice & Fulfillment — Phase 009 scope, hardened in Phase 011
 
-Full architectural rationale: [`docs/adr/ADR-009-order-fulfillment.md`](../adr/ADR-009-order-fulfillment.md).
-Full endpoint/permission reference: [`docs/api/order.md`](../api/order.md) /
-[`docs/security/order-security.md`](../security/order-security.md).
+Full architectural rationale: [`docs/adr/ADR-009-order-fulfillment.md`](../adr/ADR-009-order-fulfillment.md)
+(Phase 009 — the original build) and
+[`docs/adr/ADR-011-order-lifecycle-hardening.md`](../adr/ADR-011-order-lifecycle-hardening.md)
+(Phase 011 — hardening, never a rebuild). Full endpoint/permission
+reference: [`docs/api/order.md`](../api/order.md)/[`docs/api/fulfillment.md`](../api/fulfillment.md)/
+[`docs/api/shipping.md`](../api/shipping.md) /
+[`docs/security/order-security.md`](../security/order-security.md)/
+[`docs/security/fulfillment-security.md`](../security/fulfillment-security.md).
 Business/product framing this phase implements: `docs/product/blueprint.md`
 §17, §25, §54. This document says what's real **today** versus still
 aspirational — same convention as `docs/product/payment.md`.
@@ -88,10 +93,48 @@ Order (PENDING_PAYMENT|PAID|PROCESSING|READY_TO_FULFILL|PARTIALLY_FULFILLED|
   `CheckoutSession`/`PaymentIntent` already are — a mismatched actor gets
   `403`, never a data leak through a `404` that reveals existence.
 
+## What Phase 011 hardened (real gaps found by inspection, not decoration)
+
+- **Two previously-undetected concurrency races closed** — fulfillment-
+  status and shipment-status transitions are now row-locked
+  (`SELECT ... FOR UPDATE`) the same way `Order.status` already was;
+  proven under real concurrent duplicate requests, not assumed safe by
+  analogy.
+- **Fulfillment creation is now idempotency-key aware** — a retried
+  "create this fulfillment" request never creates a second logical
+  fulfillment.
+- **Order completion is a derived server-side fact**, not an admin
+  button — `OrderCompletionValidator` requires every non-cancelled
+  `Fulfillment` to actually be `DELIVERED` (not merely quantity-covered)
+  and the order's payment state to be settled before `COMPLETED` is
+  reachable.
+- **Delivery confirmation is its own route, permission, and audit
+  action** (`order.shipment.deliver`), separate from generic shipment
+  status updates.
+- **Tracking numbers are unique and searchable** — a real `@unique`
+  constraint plus an admin lookup route, still never client-forged (still
+  admin-entered only).
+- **Real, database-backed admin order search/filtering** — payment
+  state, fulfillment state, date range, customer — replacing the
+  previous status-only filter.
+- **The order read surface now exposes its Phase 010 promotion
+  snapshot** — a gap Phase 010's own final report flagged explicitly.
+
+See ADR-011 for the full rationale, including the one gap Phase 011
+deliberately did **not** close (see "Deliberately not built this phase"
+below).
+
 ## Deliberately not built this phase
 
 - **A live courier API integration** — one manual adapter only (ADR-009
   decision 12).
+- **Inventory restock on order cancellation** — explicitly re-evaluated
+  in Phase 011 (the brief's own explicit prompt) and deliberately still
+  deferred: the current schema/reservation lineage cannot trace, at the
+  granularity a correct restock needs, which specific warehouse/location
+  absorbed a given order line's decrement — see ADR-011 decision 8 for
+  the full reasoning. Same no-automatic-restock precedent
+  `docs/product/payment.md` already set for refunds, not a new omission.
 - **Post-delivery returns/RMA/dispute handling** beyond what Phase 008's
   refund/reconciliation already surfaces.
 - **Per-line-item partial cancellation** — only whole-order cancellation.
