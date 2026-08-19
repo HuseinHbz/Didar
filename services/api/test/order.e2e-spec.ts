@@ -205,11 +205,15 @@ describe('Order (e2e)', () => {
   };
 
   /** Drives a fresh cart all the way to `READY_FOR_PAYMENT`, as a guest
-   * (no `authToken`) or as an authenticated customer (`authToken` set). */
+   * (no `authToken`) or as an authenticated customer (`authToken` set).
+   * `couponCode`, when given, is applied to the cart before checkout is
+   * created — used only by the promotion-snapshot-visibility test below;
+   * every other caller leaves it undefined and this is a no-op for them. */
   const createReadyForPaymentCheckout = async (
     skuId: string,
     quantity: number,
     authToken?: string,
+    couponCode?: string,
   ): Promise<{ checkoutId: string; guestToken: string; grandTotal: string }> => {
     const auth = (req: request.Test): request.Test =>
       authToken ? req.set('Authorization', `Bearer ${authToken}`) : req;
@@ -224,6 +228,10 @@ describe('Order (e2e)', () => {
     await cartAuth(request(server).post('/cart/items'))
       .send({ productSkuId: skuId, quantity })
       .expect(201);
+
+    if (couponCode) {
+      await cartAuth(request(server).post('/cart/coupon')).send({ code: couponCode }).expect(201);
+    }
 
     const checkoutRes = await cartAuth(request(server).post('/checkout'))
       .send({ cartId: cart.id })
@@ -290,11 +298,13 @@ describe('Order (e2e)', () => {
     skuId: string,
     quantity: number,
     authToken?: string,
+    couponCode?: string,
   ): Promise<{ order: OrderBody; checkoutId: string; guestToken: string }> => {
     const { checkoutId, guestToken } = await createReadyForPaymentCheckout(
       skuId,
       quantity,
       authToken,
+      couponCode,
     );
     await payCheckout(checkoutId, authToken ? { authToken } : { guestToken });
     const convertReq = authToken
@@ -775,6 +785,434 @@ describe('Order (e2e)', () => {
 
       const shipments = await prisma.shipment.findMany({ where: { fulfillmentId } });
       expect(shipments).toHaveLength(1);
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // ADR-011 hardening — completion readiness, dedicated delivery route,
+  // tracking-number lookup, admin search/filter, fulfillment-creation
+  // idempotency over real HTTP, promotion-snapshot visibility, invoice
+  // immutability.
+  // -------------------------------------------------------------------
+  describe('ADR-011 hardening', () => {
+    /** Random Iranian-mobile-shaped phone (`iranMobileSchema`) — a fresh
+     * customer per call, so promotion tests below don't collide with a
+     * fixture customer's own `perCustomerLimit` across repeated runs of
+     * this file. */
+    const randomPhone = (): string =>
+      `+989${String(Math.floor(100_000_000 + Math.random() * 900_000_000))}`;
+
+    /** Drives a fresh order to READY_TO_FULFILL, fulfills the one line,
+     * walks the fulfillment PENDING -> ... -> SHIPPED, creates its
+     * shipment, and marks it IN_TRANSIT — one step short of DELIVERED.
+     * The shared "almost there" fixture for every test below that needs
+     * a real shipment in a deliverable state without itself asserting
+     * anything about delivery. */
+    const driveShipmentToInTransit = async (): Promise<{
+      orderId: string;
+      fulfillmentId: string;
+      shipmentId: string;
+      trackingNumber: string;
+    }> => {
+      const sku = await createFreshSellableSku(5);
+      const { order } = await driveToOrder(sku, 1, customerToken);
+      await request(server)
+        .post(`/admin/orders/${order.id}/approve`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(201);
+      await request(server)
+        .post(`/admin/orders/${order.id}/approve`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(201);
+      const orderItemId = order.items[0]?.id;
+      if (!orderItemId) throw new Error('expected an order item');
+
+      const fulfillmentRes = await request(server)
+        .post(`/admin/orders/${order.id}/fulfillments`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ warehouseId: mainWarehouseId, items: [{ orderItemId, quantity: 1 }] })
+        .expect(201);
+      const fulfillmentId = body<FulfillmentBody>(fulfillmentRes).id;
+
+      for (const status of ['ALLOCATED', 'PROCESSING', 'PACKED', 'READY', 'SHIPPED']) {
+        await request(server)
+          .patch(`/admin/orders/${order.id}/fulfillments/${fulfillmentId}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ status })
+          .expect(200);
+      }
+
+      const trackingNumber = `E2E-ADR011-${randomUUID()}`;
+      const shipmentRes = await request(server)
+        .post(`/admin/orders/${order.id}/fulfillments/${fulfillmentId}/shipments`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ carrier: 'Tipax', trackingNumber })
+        .expect(201);
+      const shipmentId = body<ShipmentBody>(shipmentRes).id;
+
+      await request(server)
+        .patch(`/admin/orders/${order.id}/shipments/${shipmentId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'IN_TRANSIT' })
+        .expect(200);
+
+      return { orderId: order.id, fulfillmentId, shipmentId, trackingNumber };
+    };
+
+    describe('completion readiness (ADR-011 decision 3)', () => {
+      it('rejects /complete with 409 while the sole fulfillment is SHIPPED but not yet DELIVERED', async () => {
+        const { orderId } = await driveShipmentToInTransit();
+        await request(server)
+          .post(`/admin/orders/${orderId}/complete`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(409);
+      });
+
+      it('rejects /complete with 409 for an order that has no fulfillment at all', async () => {
+        const sku = await createFreshSellableSku(5);
+        const { order } = await driveToOrder(sku, 1, customerToken);
+        await request(server)
+          .post(`/admin/orders/${order.id}/approve`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(201);
+        await request(server)
+          .post(`/admin/orders/${order.id}/approve`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(201);
+        // Still READY_TO_FULFILL — never fulfilled, let alone delivered.
+        await request(server)
+          .post(`/admin/orders/${order.id}/complete`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(409);
+      });
+
+      it('allows /complete once the sole fulfillment reaches DELIVERED', async () => {
+        const { orderId, shipmentId } = await driveShipmentToInTransit();
+        await request(server)
+          .post(`/admin/orders/${orderId}/shipments/${shipmentId}/deliver`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(201);
+        const completed = body<OrderBody>(
+          await request(server)
+            .post(`/admin/orders/${orderId}/complete`)
+            .set('Authorization', `Bearer ${adminToken}`)
+            .expect(201),
+        );
+        expect(completed.status).toBe('COMPLETED');
+      });
+    });
+
+    describe('dedicated delivery route RBAC (ADR-011 decision 4)', () => {
+      it('fulfillment_clerk gets 403 on POST .../deliver though it can update shipment status generally', async () => {
+        const { orderId, shipmentId } = await driveShipmentToInTransit();
+        await request(server)
+          .post(`/admin/orders/${orderId}/shipments/${shipmentId}/deliver`)
+          .set('Authorization', `Bearer ${fulfillmentClerkToken}`)
+          .expect(403);
+
+        // The floor role really can update this same shipment generally —
+        // this is a boundary on DELIVERED specifically, not a blanket
+        // shipment-update lockout.
+        await request(server)
+          .patch(`/admin/orders/${orderId}/shipments/${shipmentId}`)
+          .set('Authorization', `Bearer ${fulfillmentClerkToken}`)
+          .send({ status: 'IN_TRANSIT', location: 'e2e re-check' })
+          .expect(200);
+
+        await request(server)
+          .post(`/admin/orders/${orderId}/shipments/${shipmentId}/deliver`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(201);
+      });
+    });
+
+    describe('generic status routes structurally reject DELIVERED', () => {
+      it('PATCH fulfillment status with DELIVERED is a 400, never a real transition', async () => {
+        const { orderId, fulfillmentId } = await driveShipmentToInTransit();
+        await request(server)
+          .patch(`/admin/orders/${orderId}/fulfillments/${fulfillmentId}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ status: 'DELIVERED' })
+          .expect(400);
+        const fulfillment = await prisma.fulfillment.findUniqueOrThrow({
+          where: { id: fulfillmentId },
+        });
+        expect(fulfillment.status).toBe('SHIPPED');
+      });
+
+      it('PATCH shipment status with DELIVERED is a 400, never a real transition', async () => {
+        const { orderId, shipmentId } = await driveShipmentToInTransit();
+        await request(server)
+          .patch(`/admin/orders/${orderId}/shipments/${shipmentId}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ status: 'DELIVERED' })
+          .expect(400);
+        const shipment = await prisma.shipment.findUniqueOrThrow({ where: { id: shipmentId } });
+        expect(shipment.status).toBe('IN_TRANSIT');
+      });
+    });
+
+    describe('tracking-number lookup (ADR-011 decision 5)', () => {
+      it('finds a shipment by its exact tracking number', async () => {
+        const { shipmentId, trackingNumber } = await driveShipmentToInTransit();
+        const res = await request(server)
+          .get(`/admin/shipments/by-tracking/${trackingNumber}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(200);
+        expect(body<ShipmentBody>(res).id).toBe(shipmentId);
+      });
+
+      it('404s for an unknown tracking number', async () => {
+        await request(server)
+          .get(`/admin/shipments/by-tracking/NO-SUCH-TRACKING-${randomUUID()}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(404);
+      });
+
+      it('403s for a plain customer (admin-only route)', async () => {
+        const { trackingNumber } = await driveShipmentToInTransit();
+        await request(server)
+          .get(`/admin/shipments/by-tracking/${trackingNumber}`)
+          .set('Authorization', `Bearer ${customerToken}`)
+          .expect(403);
+      });
+    });
+
+    describe('admin search/filtering (ADR-011 decision 6)', () => {
+      it('filters by customerId, paymentStatus, fulfillmentStatus, and a placed-date range — all real WHERE clauses', async () => {
+        // Deliberately two fresh, single-use customers, each with exactly
+        // one order — the shared `customerToken` fixture accumulates
+        // orders across this whole file's other tests (and across
+        // repeated runs of this same file), and every assertion below
+        // that isn't itself testing `customerId` still scopes its query
+        // by `customerId` for that reason: `id: 'asc'` pagination over a
+        // random UUID key means an *unscoped* paymentStatus/
+        // fulfillmentStatus/placedFrom query's `limit` is not guaranteed
+        // to reach a just-created order once the table has grown past it
+        // — a real pagination fact, not a bug in the filter itself, but
+        // one this test must not be sensitive to.
+        const customerAToken = await provisionCustomer(randomPhone());
+        const otherCustomerToken = await provisionCustomer(randomPhone());
+        const skuA = await createFreshSellableSku(5);
+        const skuB = await createFreshSellableSku(5);
+        const { order: orderA } = await driveToOrder(skuA, 1, customerAToken);
+        const { order: orderB } = await driveToOrder(skuB, 1, otherCustomerToken);
+
+        const orderADetail = body<{ customerId: string }>(
+          await request(server)
+            .get(`/admin/orders/${orderA.id}`)
+            .set('Authorization', `Bearer ${adminToken}`)
+            .expect(200),
+        );
+        const orderBDetail = body<{ customerId: string }>(
+          await request(server)
+            .get(`/admin/orders/${orderB.id}`)
+            .set('Authorization', `Bearer ${adminToken}`)
+            .expect(200),
+        );
+
+        const byCustomer = body<{ items: OrderBody[] }>(
+          await request(server)
+            .get(`/admin/orders?customerId=${orderADetail.customerId}&limit=100`)
+            .set('Authorization', `Bearer ${adminToken}`)
+            .expect(200),
+        );
+        expect(byCustomer.items.map((item) => item.id)).toEqual([orderA.id]);
+
+        const byPaymentAndFulfillment = body<{ items: OrderBody[] }>(
+          await request(server)
+            .get(
+              `/admin/orders?customerId=${orderADetail.customerId}&paymentStatus=PAID&fulfillmentStatus=UNFULFILLED&limit=100`,
+            )
+            .set('Authorization', `Bearer ${adminToken}`)
+            .expect(200),
+        );
+        expect(byPaymentAndFulfillment.items.map((item) => item.id)).toEqual([orderA.id]);
+
+        const wrongPaymentStatus = body<{ items: OrderBody[] }>(
+          await request(server)
+            .get(`/admin/orders?customerId=${orderADetail.customerId}&paymentStatus=UNPAID&limit=100`)
+            .set('Authorization', `Bearer ${adminToken}`)
+            .expect(200),
+        );
+        expect(wrongPaymentStatus.items).toHaveLength(0);
+
+        const futureOnly = body<{ items: OrderBody[] }>(
+          await request(server)
+            .get(
+              `/admin/orders?customerId=${orderBDetail.customerId}&placedFrom=${new Date(Date.now() + 86_400_000).toISOString()}&limit=100`,
+            )
+            .set('Authorization', `Bearer ${adminToken}`)
+            .expect(200),
+        );
+        expect(futureOnly.items).toHaveLength(0);
+
+        const sinceAnHourAgo = body<{ items: OrderBody[] }>(
+          await request(server)
+            .get(
+              `/admin/orders?customerId=${orderBDetail.customerId}&placedFrom=${new Date(Date.now() - 3_600_000).toISOString()}&limit=100`,
+            )
+            .set('Authorization', `Bearer ${adminToken}`)
+            .expect(200),
+        );
+        expect(sinceAnHourAgo.items.map((item) => item.id)).toEqual([orderB.id]);
+      });
+    });
+
+    describe('fulfillment-creation idempotency over real HTTP (ADR-011 decision 2)', () => {
+      it('two sequential POSTs sharing an idempotencyKey converge to exactly one Fulfillment row', async () => {
+        const sku = await createFreshSellableSku(10);
+        const { order } = await driveToOrder(sku, 2, customerToken);
+        await request(server)
+          .post(`/admin/orders/${order.id}/approve`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(201);
+        await request(server)
+          .post(`/admin/orders/${order.id}/approve`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(201);
+        const orderItemId = order.items[0]?.id;
+        if (!orderItemId) throw new Error('expected an order item');
+        const idempotencyKey = `e2e-http-${randomUUID()}`;
+
+        const first = await request(server)
+          .post(`/admin/orders/${order.id}/fulfillments`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ items: [{ orderItemId, quantity: 1 }], idempotencyKey })
+          .expect(201);
+        const second = await request(server)
+          .post(`/admin/orders/${order.id}/fulfillments`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ items: [{ orderItemId, quantity: 1 }], idempotencyKey })
+          .expect(201);
+        expect(body<FulfillmentBody>(first).id).toBe(body<FulfillmentBody>(second).id);
+
+        const rows = await prisma.fulfillment.findMany({ where: { idempotencyKey } });
+        expect(rows).toHaveLength(1);
+      });
+
+      it('10 concurrent POSTs sharing an idempotencyKey converge to exactly one Fulfillment row', async () => {
+        const sku = await createFreshSellableSku(10);
+        const { order } = await driveToOrder(sku, 2, customerToken);
+        await request(server)
+          .post(`/admin/orders/${order.id}/approve`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(201);
+        await request(server)
+          .post(`/admin/orders/${order.id}/approve`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(201);
+        const orderItemId = order.items[0]?.id;
+        if (!orderItemId) throw new Error('expected an order item');
+        const idempotencyKey = `e2e-http-concurrent-${randomUUID()}`;
+
+        const results = await Promise.all(
+          Array.from({ length: 10 }, () =>
+            request(server)
+              .post(`/admin/orders/${order.id}/fulfillments`)
+              .set('Authorization', `Bearer ${adminToken}`)
+              .send({ items: [{ orderItemId, quantity: 1 }], idempotencyKey }),
+          ),
+        );
+        for (const res of results) expect(res.status).toBe(201);
+        const ids = new Set(results.map((res) => body<FulfillmentBody>(res).id));
+        expect(ids.size).toBe(1);
+
+        const rows = await prisma.fulfillment.findMany({ where: { idempotencyKey } });
+        expect(rows).toHaveLength(1);
+      });
+    });
+
+    describe('promotion snapshot visibility (ADR-011 decision 7)', () => {
+      it('surfaces the immutable OrderPromotion snapshot on both the customer and admin order read paths', async () => {
+        const promoCustomerToken = await provisionCustomer(randomPhone());
+        const sku = await createFreshSellableSku(5); // 5,000,000 rial, sunglasses category
+        const { order } = await driveToOrder(sku, 1, promoCustomerToken, 'DIDAR20');
+
+        // The cart also clears the seed's automatic free-shipping minimum
+        // (3,000,000), so two OrderPromotion rows are expected here: the
+        // coupon-gated DIDAR20 discount plus the automatic, no-coupon
+        // free-shipping promotion — this asserts the coupon one is
+        // present and correctly snapshotted, not that it's the only one.
+        const customerRes = await request(server)
+          .get(`/orders/${order.id}`)
+          .set('Authorization', `Bearer ${promoCustomerToken}`)
+          .expect(200);
+        const customerDetail = body<{
+          promotions: { promotionId: string; couponCode: string | null; discountAmount: string }[];
+        }>(customerRes);
+        expect(customerDetail.promotions.length).toBeGreaterThanOrEqual(1);
+        const didar20 = customerDetail.promotions.find((p) => p.couponCode === 'DIDAR20');
+        expect(didar20).toBeDefined();
+        expect(BigInt(didar20?.discountAmount ?? '0')).toBeGreaterThan(0n);
+
+        const adminRes = await request(server)
+          .get(`/admin/orders/${order.id}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(200);
+        const adminDetail = body<{ promotions: { promotionId: string }[] }>(adminRes);
+        expect(adminDetail.promotions.map((p) => p.promotionId).sort()).toEqual(
+          customerDetail.promotions.map((p) => p.promotionId).sort(),
+        );
+      });
+    });
+
+    describe('invoice immutability re-proof', () => {
+      it('the issued invoice grandTotal is unaffected by a later partial refund on the order', async () => {
+        const sku = await createFreshSellableSku(5);
+        const { order } = await driveToOrder(sku, 1, customerToken);
+        const issued = body<InvoiceBody & { grandTotal: string }>(
+          await request(server)
+            .post(`/admin/orders/${order.id}/invoice`)
+            .set('Authorization', `Bearer ${adminToken}`)
+            .expect(201),
+        );
+
+        await request(server)
+          .post(`/admin/orders/${order.id}/refund`)
+          .set('Authorization', `Bearer ${orderManagerToken}`)
+          .send({ amount: 500_000, reason: 'e2e invoice-immutability check' })
+          .expect(201);
+
+        const afterRefund = body<InvoiceBody & { grandTotal: string }>(
+          await request(server)
+            .get(`/admin/orders/${order.id}/invoice`)
+            .set('Authorization', `Bearer ${adminToken}`)
+            .expect(200),
+        );
+        expect(afterRefund.grandTotal).toBe(issued.grandTotal);
+        expect(afterRefund.id).toBe(issued.id);
+      });
+
+      it('void is idempotent, and fulfillment_clerk (no order.invoice.* grant) gets 403 on it', async () => {
+        const sku = await createFreshSellableSku(5);
+        const { order } = await driveToOrder(sku, 1, customerToken);
+        await request(server)
+          .post(`/admin/orders/${order.id}/invoice`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(201);
+
+        await request(server)
+          .post(`/admin/orders/${order.id}/invoice/void`)
+          .set('Authorization', `Bearer ${fulfillmentClerkToken}`)
+          .expect(403);
+
+        const firstVoid = body<InvoiceBody & { voidedAt: string }>(
+          await request(server)
+            .post(`/admin/orders/${order.id}/invoice/void`)
+            .set('Authorization', `Bearer ${adminToken}`)
+            .expect(201),
+        );
+        expect(firstVoid.status).toBe('VOID');
+
+        const secondVoid = body<InvoiceBody & { voidedAt: string }>(
+          await request(server)
+            .post(`/admin/orders/${order.id}/invoice/void`)
+            .set('Authorization', `Bearer ${adminToken}`)
+            .expect(201),
+        );
+        expect(secondVoid.voidedAt).toBe(firstVoid.voidedAt);
+      });
     });
   });
 
