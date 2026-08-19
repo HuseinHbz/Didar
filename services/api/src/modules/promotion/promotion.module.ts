@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 
+import { AUDIT_LOG_REPOSITORY } from '../identity/domain/ports/audit-log.repository.port';
+import { PrismaAuditLogRepository } from '../identity/infrastructure/repositories/prisma-audit-log.repository';
+
 import { CouponRedemptionService } from './application/coupon-redemption.service';
 import { CouponService } from './application/coupon.service';
 import { PromotionResolutionService } from './application/promotion-resolution.service';
@@ -25,6 +28,11 @@ import { PromotionDomainExceptionFilter } from './presentation/filters/promotion
  * hop or a duplicated implementation. Imports `PromotionQueueModule` so
  * the `promotion_expiration`/`coupon_reservation_cleanup` sweeps
  * (ADR-010 decision 9) actually get registered on app bootstrap.
+ * `AUDIT_LOG_REPOSITORY` is re-bound to `PrismaAuditLogRepository` here
+ * (a stateless wrapper over the shared Prisma client) — same "reuse the
+ * port, rebind the implementation locally" pattern
+ * `catalog`/`order` already established, not a dependency on
+ * `IdentityModule` itself.
  */
 @Module({
   imports: [PromotionQueueModule],
@@ -33,6 +41,7 @@ import { PromotionDomainExceptionFilter } from './presentation/filters/promotion
     { provide: PROMOTION_REPOSITORY, useClass: PrismaPromotionRepository },
     { provide: COUPON_REPOSITORY, useClass: PrismaCouponRepository },
     { provide: CUSTOMER_CONTEXT_PORT, useClass: PrismaCustomerContextRepository },
+    { provide: AUDIT_LOG_REPOSITORY, useClass: PrismaAuditLogRepository },
     PromotionService,
     CouponService,
     PromotionResolutionService,

@@ -24,6 +24,15 @@ import { PrismaPromotionRepository } from '../src/modules/promotion/infrastructu
  * uses for `Order.checkoutSessionId`-adjacent fields) — every
  * `checkoutSessionId` below is a bare `randomUUID()`, no real checkout
  * session required to exercise the reservation ledger in isolation.
+ *
+ * Every promotion created here targets one throwaway `randomUUID()` SKU
+ * (never zero target rows) — ADR-010 decision 4's "zero target rows
+ * means the whole cart" rule means an untargeted `ACTIVE` promotion
+ * would otherwise auto-apply to every real cart in this shared database,
+ * corrupting `promotion.e2e-spec.ts`'s own `discountTotal` assertions
+ * when both files run in the same `test:e2e` process — a real bug this
+ * suite found and fixed on itself the first time it ran alongside its
+ * sibling.
  */
 describe('Promotion/Coupon repositories (integration)', () => {
   const promotions = new PrismaPromotionRepository();
@@ -57,7 +66,8 @@ describe('Promotion/Coupon repositories (integration)', () => {
       getDiscountBasisPoints: null,
       bundlePrice: null,
       rules: [],
-      targets: [],
+      // Never zero rows — see the file-level doc comment above.
+      targets: [{ type: 'SKU', refId: randomUUID() }],
     });
     return promotions.updateStatus(promotion.id, 'ACTIVE');
   };
@@ -348,7 +358,7 @@ describe('Promotion/Coupon repositories (integration)', () => {
         getDiscountBasisPoints: null,
         bundlePrice: null,
         rules: [],
-        targets: [],
+        targets: [{ type: 'SKU', refId: randomUUID() }],
       });
       await promotions.updateStatus(past.id, 'ACTIVE');
       const current = await createActivePromotion();
@@ -382,7 +392,7 @@ describe('Promotion/Coupon repositories (integration)', () => {
         getDiscountBasisPoints: null,
         bundlePrice: null,
         rules: [],
-        targets: [],
+        targets: [{ type: 'SKU', refId: randomUUID() }],
       });
       await promotions.updateStatus(promotion.id, 'ACTIVE');
 

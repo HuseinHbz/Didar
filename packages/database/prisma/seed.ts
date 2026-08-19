@@ -2976,11 +2976,12 @@ async function main(): Promise<void> {
   });
 
   console.log(
-    '[seed] done — RBAC (57 real permissions across identity/catalog/inventory/payment/order, ' +
-      'role inheritance, a deny-override), admin/customer/support/catalog-editor/inventory-role/' +
-      'payment-role/order-role users, demo customer, catalog (3 products — two PUBLISHED with ' +
+    '[seed] done — RBAC (70 real permissions across identity/catalog/inventory/payment/order/' +
+      'promotion/coupon, role inheritance, a deny-override), admin/customer/support/' +
+      'catalog-editor/inventory-role/payment-role/order-role/promotion-manager/promotion-editor ' +
+      'users, demo customer, catalog (3 products — two PUBLISHED with ' +
       'variant+SKU+price+media/collection, one DRAFT), inventory (2 warehouses, 3 locations, ' +
-      'stock for all SKUs, 2 reservations, a low-stock example, a transfer), coupon, ' +
+      'stock for all SKUs, 2 reservations, a low-stock example, a transfer), ' +
       'cart-checkout (2 shipping methods, pricing settings, an active customer cart, a guest ' +
       'cart, a checkout-ready fixture with a real reservation, an expired checkout), payment ' +
       '(ZarinPal provider, a SUCCEEDED intent with a VERIFIED transaction + partial refund, a ' +
@@ -2988,7 +2989,9 @@ async function main(): Promise<void> {
       'finding), order (a PAID/PARTIALLY_REFUNDED order + issued invoice, a genuinely UNPAID/' +
       'PENDING_PAYMENT order demonstrating the conversion crash-recovery window, a PAID-then-' +
       'CANCELLED order + issued invoice, a FULFILLED order with a DELIVERED fulfillment/' +
-      'shipment/tracking history + issued invoice), CMS/notification/system basics.',
+      'shipment/tracking history + issued invoice), promotion (3 promotions — percentage/' +
+      'fixed-amount/automatic-free-shipping — plus 5 coupons covering active/expired/future/' +
+      'single-use fixtures), CMS/notification/system basics.',
   );
 }
 

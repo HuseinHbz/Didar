@@ -1,7 +1,8 @@
-import type { PromotionStatus } from '@iecp/types';
+import type { PromotionStatus, UserId } from '@iecp/types';
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 
+import { CurrentUserId } from '../../../identity/presentation/decorators/current-user.decorator';
 import { RequirePermission } from '../../../identity/presentation/decorators/require-permission.decorator';
 import { CouponService } from '../../application/coupon.service';
 import { PromotionService } from '../../application/promotion.service';
@@ -52,81 +53,92 @@ export class PromotionAdminController {
   @Post()
   @RequirePermission('promotion.create')
   @ApiOkResponse({ type: PromotionResponseDto })
-  async create(@Body() dto: CreatePromotionDto) {
-    const promotion = await this.promotions.create({
-      name: dto.name,
-      description: dto.description ?? null,
-      priority: dto.priority ?? 100,
-      startsAt: dto.startsAt ? new Date(dto.startsAt) : null,
-      endsAt: dto.endsAt ? new Date(dto.endsAt) : null,
-      usageLimit: dto.usageLimit ?? null,
-      perCustomerLimit: dto.perCustomerLimit ?? null,
-      stackable: dto.stackable ?? false,
-      exclusive: dto.exclusive ?? false,
-      minimumCartValue: dto.minimumCartValue ? BigInt(dto.minimumCartValue) : null,
-      maximumDiscount: dto.maximumDiscount ? BigInt(dto.maximumDiscount) : null,
-      currency: 'IRR',
-      requiresCoupon: dto.requiresCoupon ?? true,
-      discountType: dto.discountType,
-      discountValue: dto.discountValue ? BigInt(dto.discountValue) : null,
-      buyQuantity: dto.buyQuantity ?? null,
-      getQuantity: dto.getQuantity ?? null,
-      getDiscountBasisPoints: dto.getDiscountBasisPoints ?? null,
-      bundlePrice: dto.bundlePrice ? BigInt(dto.bundlePrice) : null,
-      rules: toRules(dto.rules) ?? [],
-      targets: dto.targets ?? [],
-    });
+  async create(@Body() dto: CreatePromotionDto, @CurrentUserId() actorId: UserId) {
+    const promotion = await this.promotions.create(
+      {
+        name: dto.name,
+        description: dto.description ?? null,
+        priority: dto.priority ?? 100,
+        startsAt: dto.startsAt ? new Date(dto.startsAt) : null,
+        endsAt: dto.endsAt ? new Date(dto.endsAt) : null,
+        usageLimit: dto.usageLimit ?? null,
+        perCustomerLimit: dto.perCustomerLimit ?? null,
+        stackable: dto.stackable ?? false,
+        exclusive: dto.exclusive ?? false,
+        minimumCartValue: dto.minimumCartValue ? BigInt(dto.minimumCartValue) : null,
+        maximumDiscount: dto.maximumDiscount ? BigInt(dto.maximumDiscount) : null,
+        currency: 'IRR',
+        requiresCoupon: dto.requiresCoupon ?? true,
+        discountType: dto.discountType,
+        discountValue: dto.discountValue ? BigInt(dto.discountValue) : null,
+        buyQuantity: dto.buyQuantity ?? null,
+        getQuantity: dto.getQuantity ?? null,
+        getDiscountBasisPoints: dto.getDiscountBasisPoints ?? null,
+        bundlePrice: dto.bundlePrice ? BigInt(dto.bundlePrice) : null,
+        rules: toRules(dto.rules) ?? [],
+        targets: dto.targets ?? [],
+      },
+      actorId,
+    );
     return PromotionResponseDto.fromDomain(promotion);
   }
 
   @Patch(':id')
   @RequirePermission('promotion.update')
   @ApiOkResponse({ type: PromotionResponseDto })
-  async update(@Param('id') id: string, @Body() dto: UpdatePromotionDto) {
-    const promotion = await this.promotions.update(id, {
-      name: dto.name,
-      description: dto.description,
-      priority: dto.priority,
-      startsAt: dto.startsAt ? new Date(dto.startsAt) : undefined,
-      endsAt: dto.endsAt ? new Date(dto.endsAt) : undefined,
-      usageLimit: dto.usageLimit,
-      perCustomerLimit: dto.perCustomerLimit,
-      stackable: dto.stackable,
-      exclusive: dto.exclusive,
-      minimumCartValue: dto.minimumCartValue ? BigInt(dto.minimumCartValue) : undefined,
-      maximumDiscount: dto.maximumDiscount ? BigInt(dto.maximumDiscount) : undefined,
-      requiresCoupon: dto.requiresCoupon,
-      discountType: dto.discountType,
-      discountValue: dto.discountValue ? BigInt(dto.discountValue) : undefined,
-      buyQuantity: dto.buyQuantity,
-      getQuantity: dto.getQuantity,
-      getDiscountBasisPoints: dto.getDiscountBasisPoints,
-      bundlePrice: dto.bundlePrice ? BigInt(dto.bundlePrice) : undefined,
-      rules: toRules(dto.rules),
-      targets: dto.targets,
-    });
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdatePromotionDto,
+    @CurrentUserId() actorId: UserId,
+  ) {
+    const promotion = await this.promotions.update(
+      id,
+      {
+        name: dto.name,
+        description: dto.description,
+        priority: dto.priority,
+        startsAt: dto.startsAt ? new Date(dto.startsAt) : undefined,
+        endsAt: dto.endsAt ? new Date(dto.endsAt) : undefined,
+        usageLimit: dto.usageLimit,
+        perCustomerLimit: dto.perCustomerLimit,
+        stackable: dto.stackable,
+        exclusive: dto.exclusive,
+        minimumCartValue: dto.minimumCartValue ? BigInt(dto.minimumCartValue) : undefined,
+        maximumDiscount: dto.maximumDiscount ? BigInt(dto.maximumDiscount) : undefined,
+        requiresCoupon: dto.requiresCoupon,
+        discountType: dto.discountType,
+        discountValue: dto.discountValue ? BigInt(dto.discountValue) : undefined,
+        buyQuantity: dto.buyQuantity,
+        getQuantity: dto.getQuantity,
+        getDiscountBasisPoints: dto.getDiscountBasisPoints,
+        bundlePrice: dto.bundlePrice ? BigInt(dto.bundlePrice) : undefined,
+        rules: toRules(dto.rules),
+        targets: dto.targets,
+      },
+      actorId,
+    );
     return PromotionResponseDto.fromDomain(promotion);
   }
 
   @Post(':id/activate')
   @RequirePermission('promotion.activate')
   @ApiOkResponse({ type: PromotionResponseDto })
-  async activate(@Param('id') id: string) {
-    return PromotionResponseDto.fromDomain(await this.promotions.activate(id));
+  async activate(@Param('id') id: string, @CurrentUserId() actorId: UserId) {
+    return PromotionResponseDto.fromDomain(await this.promotions.activate(id, actorId));
   }
 
   @Post(':id/pause')
   @RequirePermission('promotion.pause')
   @ApiOkResponse({ type: PromotionResponseDto })
-  async pause(@Param('id') id: string) {
-    return PromotionResponseDto.fromDomain(await this.promotions.pause(id));
+  async pause(@Param('id') id: string, @CurrentUserId() actorId: UserId) {
+    return PromotionResponseDto.fromDomain(await this.promotions.pause(id, actorId));
   }
 
   @Post(':id/archive')
   @RequirePermission('promotion.archive')
   @ApiOkResponse({ type: PromotionResponseDto })
-  async archive(@Param('id') id: string) {
-    return PromotionResponseDto.fromDomain(await this.promotions.archive(id));
+  async archive(@Param('id') id: string, @CurrentUserId() actorId: UserId) {
+    return PromotionResponseDto.fromDomain(await this.promotions.archive(id, actorId));
   }
 
   /** Read-only convenience view — rules/targets have no independent
