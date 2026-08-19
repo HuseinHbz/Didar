@@ -16,7 +16,12 @@ import type {
   OrderWithDetail,
 } from '../../domain/ports/order.repository.port';
 import { OrderStateMachine } from '../../domain/services/order-state-machine';
-import { orderItemToDomain, orderStatusHistoryToDomain, orderToDomain } from '../order.mapper';
+import {
+  orderItemToDomain,
+  orderPromotionToDomain,
+  orderStatusHistoryToDomain,
+  orderToDomain,
+} from '../order.mapper';
 
 function isUniqueViolationOn(error: unknown, column: string): boolean {
   return (
@@ -40,13 +45,18 @@ export class PrismaOrderRepository implements OrderRepositoryPort {
   async findById(id: string): Promise<OrderWithDetail | null> {
     const row = await prisma.order.findUnique({
       where: { id },
-      include: { items: true, statusHistory: { orderBy: { createdAt: 'asc' } } },
+      include: {
+        items: true,
+        statusHistory: { orderBy: { createdAt: 'asc' } },
+        promotions: { orderBy: { createdAt: 'asc' } },
+      },
     });
     if (!row) return null;
     return {
       order: orderToDomain(row),
       items: row.items.map(orderItemToDomain),
       statusHistory: row.statusHistory.map(orderStatusHistoryToDomain),
+      promotions: row.promotions.map(orderPromotionToDomain),
     };
   }
 
@@ -65,12 +75,21 @@ export class PrismaOrderRepository implements OrderRepositoryPort {
     return row ? orderToDomain(row) : null;
   }
 
+  /** ADR-011 decision 6 — every filter is a real `WHERE` clause; date
+   * range and status filters are only meaningful together with an
+   * `AND`, never fetched-then-filtered in application code. */
   async list(filter: OrderListFilter): Promise<{ items: Order[]; nextCursor: string | null }> {
     const rows = await prisma.order.findMany({
       where: {
         customerId: filter.customerId,
         guestToken: filter.guestToken,
         status: filter.status,
+        paymentStatus: filter.paymentStatus,
+        fulfillmentStatus: filter.fulfillmentStatus,
+        placedAt:
+          filter.placedFrom || filter.placedTo
+            ? { gte: filter.placedFrom, lte: filter.placedTo }
+            : undefined,
       },
       orderBy: { id: 'asc' },
       take: filter.limit + 1,

@@ -6,6 +6,7 @@ import type {
 } from '@iecp/types';
 
 import type { OrderItem } from '../entities/order-item.entity';
+import type { OrderPromotion } from '../entities/order-promotion.entity';
 import type { OrderStatusHistory } from '../entities/order-status-history.entity';
 import type { Order } from '../entities/order.entity';
 
@@ -15,12 +16,25 @@ export interface OrderWithDetail {
   order: Order;
   items: OrderItem[];
   statusHistory: OrderStatusHistory[];
+  /** ADR-011 decision 7 — Phase 010's immutable promotion snapshot,
+   * read back so the order detail response can finally surface it (a
+   * gap Phase 010's own final report flagged explicitly). */
+  promotions: OrderPromotion[];
 }
 
 export interface OrderListFilter {
   customerId?: string;
   guestToken?: string;
   status?: OrderStatus;
+  /** ADR-011 decision 6 — real admin search/filter fields, all applied as
+   * genuine Postgres `WHERE` clauses (`PrismaOrderRepository.list()`),
+   * never fetched-then-filtered in application code. Used by
+   * `admin/orders` only — the customer-facing `list()` path keeps its own
+   * ownership-scoped `customerId`/`guestToken` filter unchanged. */
+  paymentStatus?: OrderPaymentStatus;
+  fulfillmentStatus?: OrderFulfillmentStatus;
+  placedFrom?: Date;
+  placedTo?: Date;
   limit: number;
   /** Opaque cursor from a previous page's `nextCursor` — same shape
    * `AuditLogRepositoryPort.list()` already established. */
