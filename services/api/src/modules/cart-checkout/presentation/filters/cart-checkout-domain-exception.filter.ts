@@ -1,9 +1,12 @@
 import { ArgumentsHost, Catch, type ExceptionFilter, HttpStatus } from '@nestjs/common';
 import type { Response } from 'express';
 
+import {
+  CouponNotApplicableError,
+  CouponUsageLimitExceededError,
+} from '../../../promotion/domain/errors/promotion-domain.errors';
 import { InvalidQuantityError } from '../../domain/services/cart-quantity-rules';
 import { InvalidCheckoutTransitionError } from '../../domain/services/checkout-state-machine';
-import { CouponNotApplicableError } from '../../domain/services/discount-calculator';
 import { NegativeTotalError } from '../../domain/services/pricing-resolver';
 import { ShippingMethodUnavailableError } from '../../domain/services/shipping-calculator';
 
@@ -25,6 +28,7 @@ import { ShippingMethodUnavailableError } from '../../domain/services/shipping-c
 @Catch(
   InvalidQuantityError,
   CouponNotApplicableError,
+  CouponUsageLimitExceededError,
   ShippingMethodUnavailableError,
   InvalidCheckoutTransitionError,
   NegativeTotalError,
@@ -42,6 +46,7 @@ export class CartCheckoutDomainExceptionFilter implements ExceptionFilter {
 
   private statusFor(exception: Error): number {
     if (exception instanceof InvalidCheckoutTransitionError) return HttpStatus.CONFLICT;
+    if (exception instanceof CouponUsageLimitExceededError) return HttpStatus.CONFLICT;
     if (exception instanceof NegativeTotalError) return HttpStatus.INTERNAL_SERVER_ERROR;
     return HttpStatus.BAD_REQUEST;
   }

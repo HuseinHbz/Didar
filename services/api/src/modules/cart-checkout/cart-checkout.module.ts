@@ -4,19 +4,18 @@ import { APP_FILTER } from '@nestjs/core';
 import { CatalogModule } from '../catalog/catalog.module';
 import { IdentityModule } from '../identity/identity.module';
 import { InventoryModule } from '../inventory/inventory.module';
+import { PromotionModule } from '../promotion/promotion.module';
 
 import { CartPricingService } from './application/cart-pricing.service';
 import { CartService } from './application/cart.service';
 import { CheckoutService } from './application/checkout.service';
 import { CART_REPOSITORY } from './domain/ports/cart.repository.port';
 import { CHECKOUT_SESSION_REPOSITORY } from './domain/ports/checkout-session.repository.port';
-import { COUPON_LOOKUP_PORT } from './domain/ports/coupon-lookup.port';
 import { CUSTOMER_LOOKUP_PORT } from './domain/ports/customer-lookup.port';
 import { SHIPPING_METHOD_REPOSITORY } from './domain/ports/shipping-method.repository.port';
 import { CartCheckoutQueueModule } from './infrastructure/queues/cart-checkout-queue.module';
 import { PrismaCartRepository } from './infrastructure/repositories/prisma-cart.repository';
 import { PrismaCheckoutSessionRepository } from './infrastructure/repositories/prisma-checkout-session.repository';
-import { PrismaCouponLookupRepository } from './infrastructure/repositories/prisma-coupon-lookup.repository';
 import { PrismaCustomerLookupRepository } from './infrastructure/repositories/prisma-customer-lookup.repository';
 import { PrismaShippingMethodRepository } from './infrastructure/repositories/prisma-shipping-method.repository';
 import { CartController } from './presentation/controllers/cart.controller';
@@ -75,7 +74,13 @@ import { ActorResolverGuard } from './presentation/guards/actor-resolver.guard';
  * module's own binding.
  */
 @Module({
-  imports: [CatalogModule, InventoryModule, IdentityModule, CartCheckoutQueueModule],
+  imports: [
+    CatalogModule,
+    InventoryModule,
+    IdentityModule,
+    PromotionModule,
+    CartCheckoutQueueModule,
+  ],
   controllers: [CartController, CheckoutController],
   providers: [
     CartService,
@@ -86,7 +91,6 @@ import { ActorResolverGuard } from './presentation/guards/actor-resolver.guard';
     { provide: SHIPPING_METHOD_REPOSITORY, useClass: PrismaShippingMethodRepository },
     { provide: CHECKOUT_SESSION_REPOSITORY, useClass: PrismaCheckoutSessionRepository },
     { provide: CUSTOMER_LOOKUP_PORT, useClass: PrismaCustomerLookupRepository },
-    { provide: COUPON_LOOKUP_PORT, useClass: PrismaCouponLookupRepository },
     { provide: APP_FILTER, useClass: CartCheckoutDomainExceptionFilter },
   ],
   exports: [CheckoutService, ActorResolverGuard, CUSTOMER_LOOKUP_PORT, IdentityModule],

@@ -8,6 +8,7 @@ import { SkusService } from '../../catalog/application/skus.service';
 import { AllocationService } from '../../inventory/application/allocation.service';
 import { ReservationService } from '../../inventory/application/reservation.service';
 import { StockQueryService } from '../../inventory/application/stock-query.service';
+import { CouponRedemptionService } from '../../promotion/application/coupon-redemption.service';
 import type { CheckoutSession } from '../domain/entities/checkout-session.entity';
 import type { CheckoutValidationIssue } from '../domain/entities/checkout-validation-result.entity';
 import {
@@ -72,6 +73,7 @@ export class CheckoutService {
     private readonly allocation: AllocationService,
     private readonly reservations: ReservationService,
     private readonly pricing: CartPricingService,
+    private readonly couponRedemption: CouponRedemptionService,
   ) {}
 
   async get(checkoutId: string, actor: CheckoutActor): Promise<CheckoutSessionWithDetail> {
@@ -262,14 +264,6 @@ export class CheckoutService {
     const cart = await this.carts.findById(detail.session.cartId);
     if (!cart) throw new NotFoundException('Source cart no longer exists');
 
-    const couponRule = cart.coupon
-      ? ((
-          await this.pricing
-            .resolveCouponRule(cart.coupon.code, detail.session.customerId)
-            .catch(() => null)
-        )?.rule ?? null)
-      : null;
-
     let shippingCost = cart.shippingSelection?.estimatedCost ?? 0n;
     if (cart.shippingSelection && detail.address) {
       const subtotal = cart.items.reduce((sum, item) => sum + item.lineSubtotal, 0n);
@@ -278,7 +272,11 @@ export class CheckoutService {
         .catch(() => cart.shippingSelection?.estimatedCost ?? 0n);
     }
 
-    const resolution = await this.pricing.resolve(cart.items, couponRule, shippingCost);
+    const resolution = await this.pricing.resolve(
+      cart.items,
+      { customerId: detail.session.customerId, couponCode: cart.coupon?.code ?? null },
+      shippingCost,
+    );
     await this.sessions.recordTotals(detail.session.id, {
       currency: cart.cart.currency,
       subtotal: resolution.subtotal,
@@ -379,6 +377,10 @@ export class CheckoutService {
     for (const reservation of detail.reservations) {
       await this.reservations.release(reservation.inventoryReservationId).catch(() => undefined);
     }
+    // Release any coupon/promotion redemption reservation this checkout
+    // holds (ADR-010 decision 7/8) — the same "give back what was held"
+    // symmetry inventory reservations already follow.
+    await this.couponRedemption.release(detail.session.id).catch(() => undefined);
     await this.sessions.updateStatus(detail.session.id, 'CANCELLED', { cancelledAt: new Date() });
     return this.get(checkoutId, actor);
   }
@@ -399,6 +401,7 @@ export class CheckoutService {
     for (const reservation of detail.reservations) {
       await this.reservations.release(reservation.inventoryReservationId).catch(() => undefined);
     }
+    await this.couponRedemption.release(detail.session.id).catch(() => undefined);
     await this.sessions.updateStatus(detail.session.id, 'EXPIRED');
     const updated = await this.sessions.findById(checkoutId);
     if (!updated) throw new NotFoundException('Checkout session not found');
@@ -437,16 +440,27 @@ export class CheckoutService {
       );
     }
 
-    const pricingSnapshot = detail.latestTotals
-      ? {
-          currency: detail.latestTotals.currency,
-          subtotal: detail.latestTotals.subtotal.toString(),
-          discountTotal: detail.latestTotals.discountTotal.toString(),
-          taxTotal: detail.latestTotals.taxTotal.toString(),
-          shippingTotal: detail.latestTotals.shippingTotal.toString(),
-          grandTotal: detail.latestTotals.grandTotal.toString(),
-        }
-      : { currency: detail.session.currency, grandTotal: detail.session.grandTotal.toString() };
+    // Re-resolve promotions/coupons one last time, right before freezing
+    // (ADR-010 decision 7/8) — this is the exact resolution that gets
+    // frozen into `pricingSnapshot` and reserved below; it is never
+    // recalculated again after this point, even if the promotion changes
+    // or expires moments later (§8).
+    const shippingCostForFreeze = cart.shippingSelection?.estimatedCost ?? 0n;
+    const freshResolution = await this.pricing.resolve(
+      cart.items,
+      { customerId: detail.session.customerId, couponCode: cart.coupon?.code ?? null },
+      shippingCostForFreeze,
+    );
+
+    const pricingSnapshot = {
+      currency: cart.cart.currency,
+      subtotal: freshResolution.subtotal.toString(),
+      discountTotal: freshResolution.discountTotal.toString(),
+      taxTotal: freshResolution.taxTotal.toString(),
+      shippingTotal: freshResolution.shippingTotal.toString(),
+      grandTotal: freshResolution.grandTotal.toString(),
+      appliedPromotions: freshResolution.appliedPromotions,
+    };
     const shippingSnapshot = cart.shippingSelection
       ? {
           shippingMethodId: cart.shippingSelection.shippingMethodId,
@@ -468,6 +482,25 @@ export class CheckoutService {
       shippingSnapshot,
       addressSnapshot,
     });
+
+    // Claim capacity for every accepted promotion/coupon at the exact
+    // moment pricing freezes (ADR-010 decision 7/8) — each reservation is
+    // row-locked and database-CHECK-backstopped
+    // (`CouponRepositoryPort.reserve()`), so a usage limit can never be
+    // exceeded by a racing checkout. Re-running `readyForPayment()` on an
+    // already-frozen checkout is a no-op above (`isNoOp` early return),
+    // so this never double-reserves.
+    await this.couponRedemption.reserveAll({
+      checkoutSessionId: detail.session.id,
+      customerId: detail.session.customerId,
+      guestToken: detail.session.guestToken,
+      accepted: freshResolution.appliedPromotions.map((promotion) => ({
+        promotionId: promotion.promotionId,
+        couponId: promotion.couponId,
+        discountAmount: BigInt(promotion.discountAmount),
+      })),
+    });
+
     await this.sessions.updateStatus(detail.session.id, 'READY_FOR_PAYMENT');
     return this.get(checkoutId, actor);
   }

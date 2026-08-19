@@ -1,12 +1,13 @@
 import { NegativeTotalError, PricingResolver } from './pricing-resolver';
 
 describe('PricingResolver', () => {
-  it('resolves a single line with no coupon, no tax, no shipping', () => {
+  it('resolves a single line with no adjustments, no tax, no shipping', () => {
     const result = PricingResolver.resolve({
       lines: [
         { productSkuId: 'sku-1', quantity: 2, basePrice: 100_000n, taxRateBasisPoints: null },
       ],
-      coupon: null,
+      adjustments: [],
+      freeShipping: false,
       defaultTaxRateBasisPoints: 0,
       shippingCost: 0n,
     });
@@ -17,12 +18,16 @@ describe('PricingResolver', () => {
     expect(result.lines[0]?.resolvedUnitPrice).toBe(100_000n);
   });
 
-  it('applies a percentage coupon and computes tax on the post-discount amount', () => {
+  it('applies a CART-scoped adjustment and computes tax on the post-discount amount', () => {
     const result = PricingResolver.resolve({
       lines: [
         { productSkuId: 'sku-1', quantity: 1, basePrice: 1_000_000n, taxRateBasisPoints: 900 },
       ],
-      coupon: { type: 'PERCENTAGE', value: 1000n, minOrderAmount: null, maxDiscountAmount: null }, // 10%
+      // 10% of 1,000,000 — already resolved by the promotion module's
+      // DiscountEngine (ADR-010 decision 7); PricingResolver only
+      // allocates and applies an already-decided amount.
+      adjustments: [{ scope: 'CART', amount: 100_000n }],
+      freeShipping: false,
       defaultTaxRateBasisPoints: 0,
       shippingCost: 0n,
     });
@@ -37,7 +42,8 @@ describe('PricingResolver', () => {
       lines: [
         { productSkuId: 'sku-1', quantity: 1, basePrice: 1_000_000n, taxRateBasisPoints: null },
       ],
-      coupon: null,
+      adjustments: [],
+      freeShipping: false,
       defaultTaxRateBasisPoints: 500, // 5%
       shippingCost: 0n,
     });
@@ -50,7 +56,8 @@ describe('PricingResolver', () => {
       lines: [
         { productSkuId: 'sku-1', quantity: 1, basePrice: 100_000n, taxRateBasisPoints: null },
       ],
-      coupon: null,
+      adjustments: [],
+      freeShipping: false,
       defaultTaxRateBasisPoints: 0,
       shippingCost: 30_000n,
     });
@@ -58,18 +65,28 @@ describe('PricingResolver', () => {
     expect(result.grandTotal).toBe(130_000n);
   });
 
-  it('splits discount proportionally across multiple lines and sums exactly', () => {
+  it('zeroes shipping when freeShipping is true', () => {
+    const result = PricingResolver.resolve({
+      lines: [
+        { productSkuId: 'sku-1', quantity: 1, basePrice: 100_000n, taxRateBasisPoints: null },
+      ],
+      adjustments: [],
+      freeShipping: true,
+      defaultTaxRateBasisPoints: 0,
+      shippingCost: 30_000n,
+    });
+    expect(result.shippingTotal).toBe(0n);
+    expect(result.grandTotal).toBe(100_000n);
+  });
+
+  it('splits a CART-scoped adjustment proportionally across multiple lines and sums exactly', () => {
     const result = PricingResolver.resolve({
       lines: [
         { productSkuId: 'sku-1', quantity: 1, basePrice: 300_000n, taxRateBasisPoints: null },
         { productSkuId: 'sku-2', quantity: 1, basePrice: 700_000n, taxRateBasisPoints: null },
       ],
-      coupon: {
-        type: 'FIXED_AMOUNT',
-        value: 100_000n,
-        minOrderAmount: null,
-        maxDiscountAmount: null,
-      },
+      adjustments: [{ scope: 'CART', amount: 100_000n }],
+      freeShipping: false,
       defaultTaxRateBasisPoints: 0,
       shippingCost: 0n,
     });
@@ -78,18 +95,36 @@ describe('PricingResolver', () => {
     expect(result.grandTotal).toBe(900_000n);
   });
 
-  it('never produces a negative grand total for a well-formed input', () => {
+  it('sums two stacked adjustments on the same cart', () => {
     const result = PricingResolver.resolve({
-      lines: [{ productSkuId: 'sku-1', quantity: 1, basePrice: 10_000n, taxRateBasisPoints: null }],
-      coupon: {
-        type: 'FIXED_AMOUNT',
-        value: 999_999n,
-        minOrderAmount: null,
-        maxDiscountAmount: null,
-      },
+      lines: [
+        { productSkuId: 'sku-1', quantity: 1, basePrice: 1_000_000n, taxRateBasisPoints: null },
+      ],
+      adjustments: [
+        { scope: 'CART', amount: 100_000n },
+        { scope: { productSkuIds: ['sku-1'] }, amount: 50_000n },
+      ],
+      freeShipping: false,
       defaultTaxRateBasisPoints: 0,
       shippingCost: 0n,
     });
+    expect(result.discountTotal).toBe(150_000n);
+    expect(result.grandTotal).toBe(850_000n);
+  });
+
+  it('never produces a negative grand total for a well-formed, already-capped discount', () => {
+    const result = PricingResolver.resolve({
+      lines: [{ productSkuId: 'sku-1', quantity: 1, basePrice: 10_000n, taxRateBasisPoints: null }],
+      // A caller (the promotion module's DiscountEngine) is responsible
+      // for capping a discount at the targeted subtotal before it ever
+      // reaches PricingResolver — that capping is exercised in
+      // `modules/promotion/domain/services/discount-engine.spec.ts`.
+      adjustments: [{ scope: 'CART', amount: 10_000n }],
+      freeShipping: false,
+      defaultTaxRateBasisPoints: 0,
+      shippingCost: 0n,
+    });
+    expect(result.grandTotal).toBe(0n);
     expect(result.grandTotal >= 0n).toBe(true);
   });
 
@@ -100,7 +135,8 @@ describe('PricingResolver', () => {
     expect(() =>
       PricingResolver.resolve({
         lines: [],
-        coupon: null,
+        adjustments: [],
+        freeShipping: false,
         defaultTaxRateBasisPoints: 0,
         shippingCost: -1n,
       }),

@@ -5,17 +5,16 @@ import { ConfigService } from '@nestjs/config';
 import type { Env } from '../../../../config/env';
 import { CatalogModule } from '../../../catalog/catalog.module';
 import { InventoryModule } from '../../../inventory/inventory.module';
+import { PromotionModule } from '../../../promotion/promotion.module';
 import { CartPricingService } from '../../application/cart-pricing.service';
 import { CartService } from '../../application/cart.service';
 import { CheckoutService } from '../../application/checkout.service';
 import { CART_REPOSITORY } from '../../domain/ports/cart.repository.port';
 import { CHECKOUT_SESSION_REPOSITORY } from '../../domain/ports/checkout-session.repository.port';
-import { COUPON_LOOKUP_PORT } from '../../domain/ports/coupon-lookup.port';
 import { CUSTOMER_LOOKUP_PORT } from '../../domain/ports/customer-lookup.port';
 import { SHIPPING_METHOD_REPOSITORY } from '../../domain/ports/shipping-method.repository.port';
 import { PrismaCartRepository } from '../repositories/prisma-cart.repository';
 import { PrismaCheckoutSessionRepository } from '../repositories/prisma-checkout-session.repository';
-import { PrismaCouponLookupRepository } from '../repositories/prisma-coupon-lookup.repository';
 import { PrismaCustomerLookupRepository } from '../repositories/prisma-customer-lookup.repository';
 import { PrismaShippingMethodRepository } from '../repositories/prisma-shipping-method.repository';
 
@@ -56,6 +55,7 @@ import { CART_ABANDONMENT_QUEUE, CHECKOUT_EXPIRATION_QUEUE } from './queue-names
   imports: [
     CatalogModule,
     InventoryModule,
+    PromotionModule,
     BullModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService<Env, true>) => ({
@@ -69,7 +69,6 @@ import { CART_ABANDONMENT_QUEUE, CHECKOUT_EXPIRATION_QUEUE } from './queue-names
     { provide: SHIPPING_METHOD_REPOSITORY, useClass: PrismaShippingMethodRepository },
     { provide: CHECKOUT_SESSION_REPOSITORY, useClass: PrismaCheckoutSessionRepository },
     { provide: CUSTOMER_LOOKUP_PORT, useClass: PrismaCustomerLookupRepository },
-    { provide: COUPON_LOOKUP_PORT, useClass: PrismaCouponLookupRepository },
     CartPricingService,
     CartService,
     CheckoutService,
