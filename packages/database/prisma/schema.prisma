@@ -1836,6 +1836,7 @@ model Order {
   items           OrderItem[]
   statusHistory   OrderStatusHistory[]
   fulfillments    Fulfillment[]
+  promotions      OrderPromotion[]
 
   @@index([customerId])
   @@index([guestToken])
@@ -1867,6 +1868,40 @@ model OrderItem {
 
   @@index([orderId])
   @@map("order_items")
+  @@schema("commerce")
+}
+
+/// Phase 010 (ADR-010 decision 7/11) — an immutable snapshot of every
+/// promotion/coupon that was accepted into this order's frozen checkout
+/// pricing, copied verbatim from `CheckoutSession.pricingSnapshot` at
+/// order-creation time and never recomputed against today's promotion
+/// rules, even if the promotion later changes, expires, or is archived. A
+/// refund/cancellation never rewrites these rows — historical record
+/// only. `promotionId`/`couponId` are unenforced cross-schema pointers
+/// into `marketing` (same convention `CartCoupon.couponId` already uses);
+/// `discountType`/`promotionName`/`couponCode` are copied as plain
+/// strings rather than a live enum/FK precisely so a later change to the
+/// live `marketing` rows (or even the `PromotionActionType` enum itself)
+/// can never retroactively alter what this order's snapshot says applied.
+model OrderPromotion {
+  id              String   @id @default(uuid()) @db.Uuid
+  orderId         String   @map("order_id") @db.Uuid
+  promotionId     String   @map("promotion_id") @db.Uuid
+  promotionName   String   @map("promotion_name")
+  couponId        String?  @map("coupon_id") @db.Uuid
+  couponCode      String?  @map("coupon_code")
+  discountType    String   @map("discount_type")
+  discountAmount  BigInt   @map("discount_amount")
+  affectedItemIds Json     @map("affected_item_ids") // snapshot array of orderItemId strings this promotion discounted
+  metadata        Json? // calculation metadata (e.g. per-line breakdown at resolution time), immutable
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([promotionId])
+  @@index([couponId])
+  @@map("order_promotions")
   @@schema("commerce")
 }
 
@@ -2247,13 +2282,6 @@ model ReconciliationRecord {
 // marketing — coupons, promotions, campaigns (blueprint §33-§37, §69)
 // =============================================================================
 
-enum CouponType {
-  PERCENTAGE
-  FIXED_AMOUNT
-
-  @@schema("marketing")
-}
-
 enum CampaignChannel {
   SMS
   EMAIL
@@ -2273,76 +2301,225 @@ enum CampaignStatus {
   @@schema("marketing")
 }
 
-model Coupon {
-  id                String     @id @default(uuid()) @db.Uuid
-  code              String     @unique
-  type              CouponType
-  value             BigInt // percentage (0-10000 basis points) or a Rial amount, per `type`
-  minOrderAmount    BigInt?    @map("min_order_amount")
-  maxDiscountAmount BigInt?    @map("max_discount_amount")
-  usageLimit        Int?       @map("usage_limit")
-  perUserLimit      Int?       @map("per_user_limit")
-  startsAt          DateTime?  @map("starts_at")
-  endsAt            DateTime?  @map("ends_at")
-  isActive          Boolean    @default(true) @map("is_active")
-  createdAt         DateTime   @default(now()) @map("created_at")
-  updatedAt         DateTime   @updatedAt @map("updated_at")
-  deletedAt         DateTime?  @map("deleted_at")
+// -----------------------------------------------------------------------
+// Phase 010 (see docs/adr/ADR-010-promotion-engine.md) — replaces the
+// Phase 003 placeholder promotion subtree above (a ruleless, all-or-
+// nothing coupon/promotion pair with no eligibility engine, no stacking,
+// no coupon lifecycle, no concurrency-safe redemption ledger) with the
+// real thing, same "placeholder identified, replaced in its dedicated
+// phase" precedent every prior phase's schema extension followed.
+// -----------------------------------------------------------------------
 
+enum PromotionStatus {
+  DRAFT
+  SCHEDULED
+  ACTIVE
+  PAUSED
+  EXPIRED
+  ARCHIVED
+
+  @@schema("marketing")
+}
+
+/// ADR-010 decision 3 — the minimum discount-type set this phase
+/// implements; no type beyond this list exists.
+enum PromotionActionType {
+  PERCENTAGE
+  FIXED_AMOUNT
+  FIXED_PRICE
+  FREE_SHIPPING
+  BUY_X_GET_Y
+  BUNDLE_PRICE
+
+  @@schema("marketing")
+}
+
+/// ADR-010 decision 4 — composable, OR'd targeting axes. No `ALL` value:
+/// zero `PromotionTarget` rows already means "whole cart" unambiguously.
+enum PromotionTargetType {
+  PRODUCT
+  SKU
+  CATEGORY
+  BRAND
+  COLLECTION
+
+  @@schema("marketing")
+}
+
+/// ADR-010 decision 6 — eligibility conditions, structurally separate
+/// from discount calculation. `config` shape depends on `type`, validated
+/// by the domain layer (`PromotionRuleConfig`), never trusted raw.
+enum PromotionRuleType {
+  MINIMUM_QUANTITY
+  CUSTOMER_SEGMENT
+  FIRST_PURCHASE_ONLY
+
+  @@schema("marketing")
+}
+
+enum CouponStatus {
+  ACTIVE
+  PAUSED
+  EXPIRED
+  DISABLED
+
+  @@schema("marketing")
+}
+
+/// ADR-010 decision 8 — one ledger for both coupon-gated and automatic
+/// promotion usage, `RESERVED` (checkout freeze) -> `REDEEMED` (order
+/// paid) or `RELEASED` (checkout cancelled/expired/swept). Never deleted.
+enum RedemptionStatus {
+  RESERVED
+  REDEEMED
+  RELEASED
+
+  @@schema("marketing")
+}
+
+/// Aggregate root (ADR-010 decision 1). Discount-action fields
+/// (`discountType`.. `bundlePrice`) live directly on the promotion rather
+/// than a separate `PromotionAction` table — no requirement this phase
+/// needs more than one action per promotion.
+model Promotion {
+  id               String              @id @default(uuid()) @db.Uuid
+  name             String
+  description      String?
+  status           PromotionStatus     @default(DRAFT)
+  priority         Int                 @default(100) // lower resolves first; tiebreak is `id` — DB row order is never relied on
+  startsAt         DateTime?           @map("starts_at")
+  endsAt           DateTime?           @map("ends_at")
+  usageLimit       Int?                @map("usage_limit")
+  perCustomerLimit Int?                @map("per_customer_limit")
+  usageCount       Int                 @default(0) @map("usage_count") // cached; authoritative source is CouponRedemption
+  stackable        Boolean             @default(false)
+  exclusive        Boolean             @default(false)
+  minimumCartValue BigInt?             @map("minimum_cart_value")
+  maximumDiscount  BigInt?             @map("maximum_discount")
+  currency         String              @default("IRR")
+  requiresCoupon   Boolean             @default(true) @map("requires_coupon") // false = automatic, no code needed
+  discountType     PromotionActionType @map("discount_type")
+  discountValue    BigInt?             @map("discount_value") // basis points (PERCENTAGE) or a Rial amount (FIXED_AMOUNT/FIXED_PRICE); null for FREE_SHIPPING
+  buyQuantity      Int?                @map("buy_quantity") // BUY_X_GET_Y
+  getQuantity      Int?                @map("get_quantity") // BUY_X_GET_Y
+  getDiscountBasisPoints Int?          @map("get_discount_basis_points") // BUY_X_GET_Y; 10000 = free
+  bundlePrice      BigInt?             @map("bundle_price") // BUNDLE_PRICE — forced total price for every targeted unit
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+  archivedAt        DateTime?          @map("archived_at")
+
+  rules       PromotionRule[]
+  targets     PromotionTarget[]
+  coupons     Coupon[]
   redemptions CouponRedemption[]
 
-  @@map("coupons")
-  @@schema("marketing")
-}
-
-model CouponRedemption {
-  id             String   @id @default(uuid()) @db.Uuid
-  couponId       String   @map("coupon_id") @db.Uuid
-  orderId        String   @map("order_id") @db.Uuid
-  customerId     String   @map("customer_id") @db.Uuid
-  discountAmount BigInt   @map("discount_amount")
-  redeemedAt     DateTime @default(now()) @map("redeemed_at")
-
-  coupon Coupon @relation(fields: [couponId], references: [id])
-
-  @@index([couponId])
-  @@index([orderId])
-  @@index([customerId])
-  @@map("coupon_redemptions")
-  @@schema("marketing")
-}
-
-/// blueprint §14 — a basic, ruleless promotion (all-or-nothing % or fixed
-/// off, scoped to specific products). The full condition/rule engine
-/// (customer segment + category + cart-total conditions) is future work.
-model Promotion {
-  id            String     @id @default(uuid()) @db.Uuid
-  name          String
-  description   String?
-  discountType  CouponType @map("discount_type")
-  discountValue BigInt     @map("discount_value")
-  startsAt      DateTime   @map("starts_at")
-  endsAt        DateTime   @map("ends_at")
-  isActive      Boolean    @default(true) @map("is_active")
-  createdAt     DateTime   @default(now()) @map("created_at")
-  updatedAt     DateTime   @updatedAt @map("updated_at")
-  deletedAt     DateTime?  @map("deleted_at")
-
-  products PromotionProduct[]
-
+  // A real Postgres CHECK constraint (`promotion_usage_within_limit`,
+  // added by this phase's migration.sql — Prisma's schema DSL has no
+  // stable way to declare one, same reason no other model in this schema
+  // declares its invariants here either) backstops `usageCount` never
+  // exceeding `usageLimit`, even past an application-layer locking bug
+  // (ADR-010 decision 8).
+  @@index([status])
+  @@index([startsAt, endsAt])
   @@map("promotions")
   @@schema("marketing")
 }
 
-model PromotionProduct {
-  promotionId String   @map("promotion_id") @db.Uuid
-  productId   String   @map("product_id") @db.Uuid
-  createdAt   DateTime @default(now()) @map("created_at")
+model PromotionRule {
+  id          String            @id @default(uuid()) @db.Uuid
+  promotionId String            @map("promotion_id") @db.Uuid
+  type        PromotionRuleType
+  config      Json // shape depends on `type` — see `PromotionRuleConfig` (domain layer)
+  createdAt   DateTime          @default(now()) @map("created_at")
 
   promotion Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
 
-  @@id([promotionId, productId])
-  @@map("promotion_products")
+  @@index([promotionId])
+  @@map("promotion_rules")
+  @@schema("marketing")
+}
+
+/// Unenforced cross-schema pointer into `catalog` (same convention
+/// `CartCoupon.couponId` already uses into `marketing`) — `refId` is null
+/// only when never written; every real row has one.
+model PromotionTarget {
+  id          String              @id @default(uuid()) @db.Uuid
+  promotionId String              @map("promotion_id") @db.Uuid
+  type        PromotionTargetType
+  refId       String              @map("ref_id") @db.Uuid
+  createdAt   DateTime            @default(now()) @map("created_at")
+
+  promotion Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+
+  @@unique([promotionId, type, refId])
+  @@index([promotionId])
+  @@index([type, refId])
+  @@map("promotion_targets")
+  @@schema("marketing")
+}
+
+/// A separate aggregate that unlocks a `Promotion` (ADR-010 decision 1) —
+/// its own status lifecycle and usage limits, layered on top of the
+/// promotion's own. `code` is stored normalized (trimmed, upper-cased) by
+/// the domain layer before every write and lookup.
+model Coupon {
+  id               String       @id @default(uuid()) @db.Uuid
+  promotionId      String       @map("promotion_id") @db.Uuid
+  code             String       @unique
+  status           CouponStatus @default(ACTIVE)
+  startsAt         DateTime?    @map("starts_at")
+  expiresAt        DateTime?    @map("expires_at")
+  usageLimit       Int?         @map("usage_limit")
+  usageCount       Int          @default(0) @map("usage_count") // cached; authoritative source is CouponRedemption
+  perCustomerLimit Int?         @map("per_customer_limit")
+  metadata         Json?
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+
+  promotion   Promotion          @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  redemptions CouponRedemption[]
+
+  // Same CHECK-constraint backstop as `Promotion.usageCount` above
+  // (`coupon_usage_within_limit`, added in this phase's migration.sql).
+  @@index([promotionId])
+  @@index([status])
+  @@map("coupons")
+  @@schema("marketing")
+}
+
+/// ADR-010 decision 8 — the one redemption ledger for both coupon-gated
+/// and automatic promotion usage. `couponId` null = an automatic
+/// promotion was accepted with no coupon involved. Concurrency-critical:
+/// see `PrismaCouponRepository.reserve()`'s row-lock + re-sum + insert,
+/// all inside one transaction, backstopped by the `CHECK` constraints
+/// above. Rows are never deleted — `RELEASED` is terminal, not a delete.
+model CouponRedemption {
+  id                String           @id @default(uuid()) @db.Uuid
+  promotionId       String           @map("promotion_id") @db.Uuid
+  couponId          String?          @map("coupon_id") @db.Uuid
+  customerId        String?          @map("customer_id") @db.Uuid // nullable — guest checkout supported
+  guestToken        String?          @map("guest_token")
+  checkoutSessionId String           @map("checkout_session_id") @db.Uuid
+  orderId           String?          @map("order_id") @db.Uuid
+  status            RedemptionStatus @default(RESERVED)
+  discountAmount    BigInt           @map("discount_amount")
+  reservedAt        DateTime         @default(now()) @map("reserved_at")
+  redeemedAt        DateTime?        @map("redeemed_at")
+  releasedAt        DateTime?        @map("released_at")
+
+  promotion Promotion @relation(fields: [promotionId], references: [id])
+  coupon    Coupon?   @relation(fields: [couponId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  // Re-pricing/re-freezing the same checkout upserts its existing
+  // reservation for this promotion — never a duplicate (same idempotent-
+  // by-construction shape `CheckoutReservation` already established).
+  @@unique([checkoutSessionId, promotionId])
+  @@index([promotionId])
+  @@index([couponId])
+  @@index([customerId])
+  @@index([orderId])
+  @@index([status])
+  @@map("coupon_redemptions")
   @@schema("marketing")
 }
 
