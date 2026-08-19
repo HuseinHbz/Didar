@@ -9,6 +9,12 @@ overrides:
   # the `security` CI job's `pnpm audit --audit-level high`; remove this once
   # that job passes without it.
   js-yaml@>=5.0.0 <5.2.2: '>=5.2.2'
+  # prisma@6.19.3's own @prisma/config depends on deepmerge-ts@7.1.5, which
+  # has a stack-exhaustion DoS on recursive object graphs
+  # (GHSA-ggr8-5vv4-36mx) — force the patched >=8.0.0 line. Found by Phase
+  # 009's own `pnpm audit --audit-level high` run; remove this once Prisma
+  # bumps its own dependency.
+  deepmerge-ts@<8.0.0: '>=8.0.0'
 allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true
