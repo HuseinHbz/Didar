@@ -512,12 +512,18 @@ then dropped the last Phase 003 placeholder in this schema —
 `orders`/`order_items`/`order_status_history` — and replaced it with the
 real subtree: `orders`/`order_items`/`order_status_history` (now keyed
 off `checkout_sessions`/`payment_intents`, both real FKs) plus
-`fulfillments`/`fulfillment_items`/`shipments`/`shipment_events`. The
-diagram below is intentionally minimal — only `carts`/`cart_items`, the
-one part of this schema simple enough to still show inline — see
-`cart-checkout-erd.md`/`payment-erd.md`/`order-erd.md` for everything
-else; all three are the source of truth for their share of this schema
-going forward, same convention `inventory-erd.md` set above.
+`fulfillments`/`fulfillment_items`/`shipments`/`shipment_events`. Phase
+010 (see [`promotion-erd.md`](./promotion-erd.md)) added one more table
+here — `order_promotions`, an immutable per-order snapshot of every
+promotion/coupon that discounted it, `order_id`-FK'd to `orders` with
+unenforced pointers back into `marketing` for the promotion/coupon
+identity (the same "order ≠ live product" principle `order_items`
+already established). The diagram below is intentionally minimal — only
+`carts`/`cart_items`, the one part of this schema simple enough to still
+show inline — see
+`cart-checkout-erd.md`/`payment-erd.md`/`order-erd.md`/`promotion-erd.md`
+for everything else; all four are the source of truth for their share of
+this schema going forward, same convention `inventory-erd.md` set above.
 
 ```mermaid
 erDiagram
@@ -547,38 +553,42 @@ the live product changed later ("order ≠ live product", see
 
 ## marketing
 
+No Phase 003 placeholder remains in this schema as of Phase 010 — the
+old ruleless, all-or-nothing `Coupon`/`Promotion`/`CouponRedemption`/
+`PromotionProduct` subtree was dropped and replaced with the real
+promotion/discount/coupon engine. See
+[`promotion-erd.md`](./promotion-erd.md) for the full diagram with every
+column, enum, and design rationale; this section is only the abbreviated
+cross-phase summary, same convention `commerce`'s own section below
+uses.
+
 ```mermaid
 erDiagram
+    promotions ||--o{ promotion_rules : has
+    promotions ||--o{ promotion_targets : has
+    promotions ||--o{ coupons : gates
     coupons ||--o{ coupon_redemptions : has
-    promotions ||--o{ promotion_products : scopes
 
-    coupons {
-        uuid id PK
-        string code UK
-        enum type "PERCENTAGE|FIXED_AMOUNT"
-        bigint value "basis points or Rial, per type"
-        int usage_limit "nullable"
-        int per_user_limit "nullable"
-        boolean is_active
-    }
-    coupon_redemptions {
-        uuid id PK
-        uuid coupon_id FK
-        uuid order_id "-> commerce.orders.id, unenforced"
-        uuid customer_id "-> customer.customers.id, unenforced"
-        bigint discount_amount
-    }
     promotions {
         uuid id PK
         string name
-        enum discount_type "PERCENTAGE|FIXED_AMOUNT"
-        bigint discount_value
-        timestamp starts_at
-        timestamp ends_at
+        enum status "DRAFT|SCHEDULED|ACTIVE|PAUSED|EXPIRED|ARCHIVED"
+        enum discount_type "PERCENTAGE|FIXED_AMOUNT|FIXED_PRICE|FREE_SHIPPING|BUY_X_GET_Y|BUNDLE_PRICE"
+        boolean requires_coupon "false = automatic, no code needed"
     }
-    promotion_products {
-        uuid promotion_id "PK, FK"
-        uuid product_id PK "-> catalog.products.id, unenforced"
+    coupons {
+        uuid id PK
+        uuid promotion_id FK
+        string code UK "normalized: trim+uppercase"
+        enum status "ACTIVE|PAUSED|EXPIRED|DISABLED"
+    }
+    coupon_redemptions {
+        uuid id PK
+        uuid promotion_id FK
+        uuid coupon_id "FK, nullable — null for automatic promotions"
+        uuid checkout_session_id "-> commerce.checkout_sessions.id, unenforced"
+        enum status "RESERVED|REDEEMED|RELEASED"
+        bigint discount_amount
     }
     campaigns {
         uuid id PK
@@ -588,10 +598,8 @@ erDiagram
     }
 ```
 
-`promotions` is a basic all-or-nothing discount scoped to specific products —
-the full condition/rule engine (segment + category + cart-total conditions)
-is deliberately out of scope for this pass. `campaigns` has no child tables
-yet (no send-log — that's `notification.notification_logs`, correlated by
+`campaigns` is untouched by Phase 010 — no child tables yet (no
+send-log — that's `notification.notification_logs`, correlated by
 convention, not FK).
 
 ## cms

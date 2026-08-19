@@ -7,7 +7,7 @@ what's real this phase versus deliberately deferred.
 ## What's real
 
 - **Promotions** — admin-created, `DRAFT -> SCHEDULED -> ACTIVE ->
-  {PAUSED, EXPIRED, ARCHIVED}`. Automatic (apply without a code) or
+{PAUSED, EXPIRED, ARCHIVED}`. Automatic (apply without a code) or
   coupon-gated (require a valid `Coupon.code`).
 - **Six discount types** — `PERCENTAGE`, `FIXED_AMOUNT`, `FIXED_PRICE`,
   `FREE_SHIPPING`, `BUY_X_GET_Y`, `BUNDLE_PRICE`. No other type exists.
@@ -22,7 +22,7 @@ what's real this phase versus deliberately deferred.
   else, non-stackable promotions block later non-stackable ones. Full
   rule in ADR-010 decision 5.
 - **Coupons** — normalized, unique codes; `ACTIVE/PAUSED/EXPIRED/
-  DISABLED` lifecycle; concurrency-safe redemption (reserve at checkout,
+DISABLED` lifecycle; concurrency-safe redemption (reserve at checkout,
   redeem at order, release on cancel/expire), database-enforced usage
   caps (a real `CHECK` constraint, not just application locking).
 - **Cart/checkout/order integration** — `POST /cart/coupon` /
@@ -34,9 +34,10 @@ what's real this phase versus deliberately deferred.
   immutable copy.
 - **Admin API** — full CRUD + lifecycle transitions for promotions and
   coupons, RBAC-gated, audited.
-- **Concurrency, proven** — `usageLimit = 1` against 50 concurrent
-  redemption attempts yields exactly one success, proven against real
-  PostgreSQL, twice.
+- **Concurrency, proven** — `usageLimit = 1` against 15 concurrent
+  redemption attempts (full HTTP checkout flow) and, independently, 20
+  concurrent attempts directly at the repository layer, both yield
+  exactly one success, proven against real PostgreSQL.
 
 ## Deliberately deferred (see ADR-010 decision 11 for why)
 

@@ -95,6 +95,25 @@ locationId)` with a full 7-bucket quantity model, `InventoryLedger`
   placeholder `orders`/`invoices` tables at authoring time (confirmed
   directly) — `down.sql` restores that exact placeholder shape; see its
   own header comment.
+- `20260819000000_promotion_pricing_foundation` (Phase 010) — drops
+  Phase 003's placeholder `marketing.Coupon`/`Promotion`/
+  `CouponRedemption`/`PromotionProduct` (a ruleless, all-or-nothing
+  discount with no eligibility engine, no coupon lifecycle, no
+  concurrency-safe redemption ledger) and replaces them with the real
+  subtree: 6 new enums, `Promotion`/`PromotionRule`/`PromotionTarget`/
+  `Coupon`/`CouponRedemption` in `marketing`, plus a new
+  `commerce.order_promotions` immutable-snapshot table. Two hand-added
+  Postgres `CHECK` constraints (`promotion_usage_within_limit`,
+  `coupon_usage_within_limit`) back a real database-enforced usage-limit
+  invariant — Prisma's schema DSL has no stable `@@check` support, same
+  limitation item 8 above already documents for inventory. Full detail:
+  [`promotion-erd.md`](./promotion-erd.md) and
+  [`docs/adr/ADR-010-promotion-engine.md`](../adr/ADR-010-promotion-engine.md).
+  Not data-preserving in the Phase 009 sense — 0 rows existed in the
+  placeholder `coupons`/`promotions`/`coupon_redemptions`/
+  `promotion_products` tables at authoring time (confirmed directly) —
+  `down.sql` restores that exact placeholder shape; see its own header
+  comment.
 
 This is **not** full coverage of blueprint §57's eventual table list. See
 ["Deliberately out of scope"](#deliberately-out-of-scope) below for exactly
@@ -307,6 +326,19 @@ real local PostgreSQL:
   placeholder `orders`/`invoices` shape (0 rows either way), so the
   round trip is reproducible regardless of how many times it repeats.
   See [`order-erd.md`](./order-erd.md)'s own "Migration" section.
+- Phase 010: the promotion/coupon engine addition to `marketing` plus
+  the `order_promotions` snapshot addition to `commerce` (6 new enums,
+  5 new tables, replacing Phase 003's placeholder `Coupon`/`Promotion`/
+  `CouponRedemption`/`PromotionProduct`), round-tripped **twice** — up →
+  down → up, repeated a second time after an unrelated environment
+  rebuild — with `prisma migrate diff` confirming zero drift at every
+  step and `catalog.products`/`inventory.warehouses`/`commerce.carts`/
+  `commerce.checkout_sessions`/`commerce.orders`/payment intent/
+  transaction row counts confirmed intact throughout both rounds. The
+  rollback restores the exact Phase 003 placeholder `coupons`/
+  `promotions`/`coupon_redemptions`/`promotion_products` shape (0 rows
+  either way). See [`promotion-erd.md`](./promotion-erd.md)'s own
+  "Migration" section.
 
 ## Seeding
 
@@ -328,14 +360,18 @@ payment-intent chains covering a verified success with a partial refund, a
 verified-but-mismatched failure, and an unresolved reconciliation finding
 (commerce, Phase 008), four order fixtures covering paid/unpaid/cancelled/
 fulfilled — including a real DELIVERED fulfillment + shipment + tracking
-history and three issued invoices (commerce/finance, Phase 009), a home
-page/menu/FAQ (cms), notification templates + the demo customer's channel
-preferences (notification), and a feature flag + two settings (system).
-Idempotent throughout (`upsert`, keyed on each model's real unique
-constraint, or a `findUnique`-then-create guard where no natural unique
-key exists) — safe to run against a freshly-migrated database or one that
-already has this data. Verified idempotent (ran repeatedly across Phases
-006-009, row counts unchanged) and verified runnable under `iecp_app`
+history and three issued invoices (commerce/finance, Phase 009), three
+promotions (percentage/fixed-amount/automatic-free-shipping) and five
+coupons covering active/expired/future/single-use fixtures, two new
+RBAC roles (`promotion_manager`/`promotion_editor`) (marketing, Phase
+010), a home page/menu/FAQ (cms), notification templates + the demo
+customer's channel preferences (notification), and a feature flag + two
+settings (system). Idempotent throughout (`upsert`, keyed on each
+model's real unique constraint, or a `findUnique`-then-create guard
+where no natural unique key exists) — safe to run against a
+freshly-migrated database or one that already has this data. Verified
+idempotent (ran repeatedly across Phases 006-010, row counts unchanged)
+and verified runnable under `iecp_app`
 alone — the seed only needs DML, confirming the least-privilege role is
 sufficient for real application-style writes, not just raw `psql`.
 

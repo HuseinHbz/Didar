@@ -14,7 +14,7 @@ Two real pricing surfaces already exist before this phase:
   transactional adjustment applied at pricing time, not a price change.
 - **`cart-checkout`'s `PricingResolver`/`DiscountCalculator`** (Phase 007)
   — the one real place `subtotal -> discount -> tax -> shipping ->
-  grandTotal` happens, pure and deterministic. Today it accepts exactly
+grandTotal` happens, pure and deterministic. Today it accepts exactly
   one `CouponRule | null`, resolved from a Phase-003 placeholder
   `marketing.Coupon` row via `CartCoupon` (one coupon slot per cart,
   `commerce.cart_coupons.cart_id @unique`) and `CouponLookupPort`.
@@ -49,7 +49,7 @@ established. A `Promotion` can be:
 `Coupon` is **not** a child row of `Promotion` in the "owned, no
 independent lifecycle" sense — it has its own status lifecycle
 (`ACTIVE -> PAUSED -> ...`), own validity window, own usage limits,
-layered *on top of* the promotion's own limits (both are checked; the
+layered _on top of_ the promotion's own limits (both are checked; the
 tighter one wins). A promotion can have zero coupons (automatic), one
 (the common case), or several (e.g. distinct one-time codes reusing one
 discount definition) — modeled as a plain FK (`Coupon.promotionId`), not
@@ -61,7 +61,7 @@ Every code-gated activation goes through a `Coupon` row instead (§ below
 — "Decision 2"). Duplicating a `code` string on both `Promotion` and
 `Coupon` would create two sources of truth for the same lookup and two
 enumeration surfaces to defend (§21) for the same concept; an automatic
-promotion (Promotion C) also has *no* code at all, which a mandatory
+promotion (Promotion C) also has _no_ code at all, which a mandatory
 column can't represent as cleanly as omitting it. Every other §3 field
 (`name`, `description`, `status`, `priority`, `startsAt`, `endsAt`,
 `usageLimit`, `perCustomerLimit`, `usageCount`, `stackable`, `exclusive`,
@@ -82,7 +82,7 @@ schema change, not a workaround.
 
 `Coupon.code` is stored **normalized**: trimmed and upper-cased at write
 time (`CouponCode.normalize()`, domain value object) and looked up the
-same way, so `didar20`/`DIDAR20`/` DiDaR20 ` all resolve to one row — a
+same way, so `didar20`/`DIDAR20`/`DiDaR20` all resolve to one row — a
 real unique DB constraint (`@unique` on the normalized column), not an
 app-level convention someone can bypass with a raw insert.
 
@@ -94,7 +94,7 @@ sweep to flip the enum for correctness, though the `coupon_expiration`
 queue — Decision 9 — does flip it for admin-list readability). A
 `DISABLED` coupon never reactivates automatically.
 
-**No enumeration leakage**: `POST /cart/coupon` returns the *same* 422
+**No enumeration leakage**: `POST /cart/coupon` returns the _same_ 422
 shape (`COUPON_NOT_APPLICABLE`, a generic message) whether the code
 doesn't exist, is disabled, is expired, is not yet valid, or the cart
 just doesn't qualify for its minimum — a caller brute-forcing codes gets
@@ -115,7 +115,7 @@ BigInt`, computed by `domain/services/discount-engine.ts`:
   `DiscountCalculator` already use.
 - `FIXED_AMOUNT` — a flat Rial amount off the targeted subtotal, capped
   at the targeted subtotal (never negative).
-- `FIXED_PRICE` — targeted lines' *total* is forced down to
+- `FIXED_PRICE` — targeted lines' _total_ is forced down to
   `discountValue` (the discount is `targetedSubtotal - discountValue`,
   floored at 0 — a `FIXED_PRICE` above the current subtotal is a no-op
   discount, not a markup).
@@ -142,7 +142,7 @@ just one coupon.
 `PromotionTarget` rows (`PRODUCT`/`SKU`/`CATEGORY`/`BRAND`/`COLLECTION`,
 each an unenforced cross-schema pointer into `catalog`, same convention
 `CartCoupon.couponId` already uses into `marketing`) are **OR'd**: a cart
-line is "targeted" by a promotion if it matches *any* target row.
+line is "targeted" by a promotion if it matches _any_ target row.
 **Zero target rows means the promotion targets the whole cart** — there
 is no separate `ALL` target type, since "no rows" already means that
 unambiguously and a redundant explicit-`ALL` row would be a second way to
@@ -152,8 +152,8 @@ here, not left to the resolver to infer per-call.
 
 Customer-segment/first-purchase-only conditions are **not** targeting —
 they are `PromotionRule` eligibility conditions (Decision 6), a different
-axis: targeting decides *which cart lines* a promotion's discount can
-touch; rules decide *whether the promotion is eligible at all* for this
+axis: targeting decides _which cart lines_ a promotion's discount can
+touch; rules decide _whether the promotion is eligible at all_ for this
 cart/customer/time. Keeping them separate is what §26 requires
 structurally, not just by convention.
 
@@ -172,7 +172,7 @@ Resolution walks the ordered list and, for each promotion:
 2. If an **exclusive** promotion has already been accepted this
    resolution, skip every remaining promotion — an exclusive promotion
    that wins locks out everything else, coupon or automatic alike.
-3. If this promotion is **exclusive** and any promotion has *already*
+3. If this promotion is **exclusive** and any promotion has _already_
    been accepted, skip it (an exclusive promotion never joins a stack
    already in progress — symmetric with 2, not just one direction).
 4. Otherwise, if this promotion is **stackable**, or the stack is still
@@ -188,7 +188,7 @@ This is intentionally simple and total — every combination of
 `stackable`/`exclusive` on every promotion in the list resolves to one
 answer, never a state the resolver has to guess at. Coupon-gated
 promotions are ordered into the exact same list as automatic ones (a
-`Coupon` only decides *whether* its promotion is eligible, not where it
+`Coupon` only decides _whether_ its promotion is eligible, not where it
 sits in the order) — one coupon (Phase 007's existing one-slot-per-cart
 `CartCoupon`) plus any number of automatic promotions can combine in one
 resolution, capped by the stacking rules above.
@@ -196,14 +196,14 @@ resolution, capped by the stacking rules above.
 Within the accepted set, **calculation order** follows the proposed
 default from the spec, confirmed as the real order after inspecting the
 existing pipeline (`FIXED_PRICE`/`BUNDLE_PRICE` first, since they replace
-a base amount other percentage math must apply *after*):
+a base amount other percentage math must apply _after_):
 
 ```
 FIXED_PRICE / BUNDLE_PRICE -> item-level FIXED_AMOUNT -> BUY_X_GET_Y
   -> PERCENTAGE -> cart-level FIXED_AMOUNT -> FREE_SHIPPING
 ```
 
-Each step operates on the *post-previous-step* per-line amount (never
+Each step operates on the _post-previous-step_ per-line amount (never
 the original base price), so two stacked percentage promotions compound
 multiplicatively (20% then 10% = 28% total off, not 30%) — the
 conventional, unambiguous interpretation, stated here so it's never
@@ -215,9 +215,9 @@ functions (the caller resolves "now" once and passes it in).
 
 ## Decision 6 — Eligibility engine, structurally separated from discount calculation
 
-`domain/services/eligibility-engine.ts` is the *only* place that decides
+`domain/services/eligibility-engine.ts` is the _only_ place that decides
 whether a promotion applies; `discount-engine.ts` (Decision 3) is the
-*only* place that decides how much. Neither calls the other. Checks,
+_only_ place that decides how much. Neither calls the other. Checks,
 all pure functions of already-fetched data:
 
 - **Time window** — `now` between `startsAt`/`endsAt` (either may be
@@ -261,9 +261,8 @@ all pure functions of already-fetched data:
   line-scoped (allocated only to the targeted line indices, a new sibling
   allocator using the same floor-then-remainder-to-last-line rule so the
   per-line sum always equals the adjustment's total, to the Rial). The
-  promotion module's pure resolver is the *only* producer of
-  `PricingAdjustment[]`; `DiscountCalculator`'s per-type math (Decision
-  3) is reused by that resolver rather than reimplemented — the module
+  promotion module's pure resolver is the _only_ producer of
+  `PricingAdjustment[]`; `DiscountCalculator`'s per-type math (Decision 3) is reused by that resolver rather than reimplemented — the module
   imports `@iecp/types`' `Money` the same way `DiscountCalculator`
   already does, never floating point, matching §14 exactly. Existing
   single-coupon behavior is a strict subset of the new shape (one
@@ -295,7 +294,7 @@ all pure functions of already-fetched data:
 ## Decision 8 — Redemption ledger: one table for both coupon-gated and automatic usage limits
 
 A single `marketing.CouponRedemption` ledger (not two near-duplicate
-tables) rows track *every* accepted promotion, whether or not a coupon
+tables) rows track _every_ accepted promotion, whether or not a coupon
 was involved — `couponId` is nullable, `promotionId` is always set. This
 is the same "don't duplicate a concept just because the spec names it
 twice" reasoning as Decision 1: automatic promotions need the exact same
@@ -360,7 +359,7 @@ No job is added for "recalculate active carts when a promotion changes"
 Inspection of `pricing-resolver.ts` confirms the pipeline is already
 `subtotal -> discount -> tax (on the post-discount amount) -> shipping ->
 grandTotal`. This phase does not change that order — every stacked
-promotion discount is summed and allocated *before* `TaxCalculator` ever
+promotion discount is summed and allocated _before_ `TaxCalculator` ever
 runs, so tax is always computed on the post-discount taxable amount, per
 line. Rounding is the same floor-then-remainder-to-the-last-line
 convention `DiscountCalculator.allocateByLineShare` already uses,

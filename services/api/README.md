@@ -43,8 +43,9 @@ pnpm --filter @iecp/api dev                   # http://localhost:4000/api/v1
 Or via Docker Compose — see `infrastructure/docker/docker-compose.yml` — which
 brings up Postgres/Redis/OpenSearch for the whole monorepo at once. A local
 Redis is required to boot this service since Phase 006 — `modules/inventory`,
-(Phase 007) `modules/cart-checkout`, (Phase 008) `modules/payment`, and
-(Phase 009) `modules/order` each register their own BullMQ queues at startup.
+(Phase 007) `modules/cart-checkout`, (Phase 008) `modules/payment`,
+(Phase 009) `modules/order`, and (Phase 010) `modules/promotion` each
+register their own BullMQ queues at startup.
 
 ## Tests
 

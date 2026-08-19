@@ -128,11 +128,11 @@ Phase 002 added the enterprise git workflow + CI quality gate: `main`
 by a `quality-gate` job. Branch protection requiring that check is still a
 manual GitHub-admin step (not configurable from inside the repo) — see that
 doc. Every phase's `feature/*` branch is merged to `main` once its PR lands
-(all of Phase 001-008's PRs are merged as of Phase 008; `develop` tracks the
-same tip, with Phase 009's own branch pushed and pending) — see
+(all of Phase 001-009's PRs are merged as of Phase 009; `develop` tracks the
+same tip, with Phase 010's own branch pushed and pending) — see
 `docs/deployment/ci-pipeline.md`'s "Numbered branch naming" section for the
 two-digit prefix (`01-feature-foundation-monorepo`, …,
-`09-feature-order-fulfillment`) every phase branch carries from Phase 001
+`10-feature-promotion-pricing`) every phase branch carries from Phase 001
 onward, and for the naming rule to keep following on every future branch.
 
 Phase 003 built the real PostgreSQL foundation (blueprint's "settle the
@@ -312,14 +312,56 @@ see `docs/architecture/order.md`. **Backend-only, same precedent**:
 `apps/admin`/`apps/storefront` are still untouched — see
 `docs/product/order-fulfillment.md`.
 
+Phase 010 built the real promotion/discount/coupon engine and extended
+(never duplicated) `cart-checkout`'s own single-coupon pricing pipeline
+to support any number of simultaneous promotions —
+`services/api/src/modules/promotion` (see its own `README.md`) covers 6
+discount types (`PERCENTAGE`/`FIXED_AMOUNT`/`FIXED_PRICE`/
+`FREE_SHIPPING`/`BUY_X_GET_Y`/`BUNDLE_PRICE`), composable OR'd targeting
+(product/SKU/category/brand/collection, zero rows = whole cart),
+deterministic stacking/exclusivity resolution (`priority ASC, id ASC`,
+never DB row order), and a coupon lifecycle with no enumeration leakage
+(the same code returns the same generic rejection whether it doesn't
+exist, is expired, or the cart just doesn't qualify). It generalizes
+"usage limit" into one redemption ledger
+(`marketing.CouponRedemption`, `RESERVED → REDEEMED`/`RELEASED`) shared
+by coupon-gated and automatic promotions alike, row-locked
+(`SELECT ... FOR UPDATE`) the same way `mutateInventoryItem`/
+`lockAndSumFulfilled` already proved safe, backstopped by a real
+Postgres `CHECK` constraint Prisma's schema DSL can't express — proven
+under real concurrency twice, once through the full HTTP checkout flow
+(15 concurrent confirmations against a `usageLimit: 1` coupon) and once
+directly at the repository layer (20 concurrent `reserve()` calls, no
+HTTP), both converging to exactly one success. `cart-checkout`'s
+`PricingResolver` traded its single `coupon: CouponRule | null` input
+for `adjustments: readonly PricingAdjustmentInput[]` — a strict
+superset, not a rewrite, so every pre-existing cart-checkout pricing
+test kept its exact expected numbers. `cart-checkout` and `order` each
+import `PromotionModule` directly and consume its exported
+`PromotionResolutionService`/`CouponRedemptionService` — this module
+depends on neither of them, the composition runs the other direction
+than Phase 009's four-module `order` did. It's the seventh full
+clean-architecture module in this repo and adds two more in-process
+BullMQ queues (`promotion_expiration`, `coupon_reservation_cleanup`).
+Explicit security coverage beyond RBAC/enumeration: a client cannot
+inject a discount amount (`forbidNonWhitelisted` rejects it) or forge a
+total (`/cart/price` binds no request body at all), a negative
+`discountValue` from bad/malicious admin input can never inflate a
+price (`DiscountEngine`'s own floor-at-zero), and replaying
+`ready-for-payment` never double-reserves — see
+`docs/security/promotion-security.md`. **Backend-only, same precedent**:
+`apps/admin`/`apps/storefront` are still untouched — see
+`docs/product/promotions.md`.
+
 **Next up** is the rest of Phase 1 (see end of blueprint doc "وضعیت
 فعلی"): the remaining real domain modules beyond
-`identity`/`catalog`/`inventory`/`cart-checkout`/`payment`/`order`, each
-landing once its slice of the ERD/API contract/permission matrix/event
-map is designed — _before_ further UI/design-system work. The stated
+`identity`/`catalog`/`inventory`/`cart-checkout`/`payment`/`order`/
+`promotion`, each landing once its slice of the ERD/API contract/
+permission matrix/event map is designed — _before_ further UI/design-
+system work. The stated
 ordering principle: settle the database/domain skeleton first (done for
-identity, catalog, inventory, cart-checkout, payment, and order; the
-rest still pending), then design system + admin panel structure + web/PWA
-sitemap + Android structure.
+identity, catalog, inventory, cart-checkout, payment, order, and
+promotion; the rest still pending), then design system + admin panel
+structure + web/PWA sitemap + Android structure.
 
 Treat any new architectural decision as needing to stay consistent with this document, or update it explicitly.
