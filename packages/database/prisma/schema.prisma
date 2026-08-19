@@ -39,28 +39,6 @@ datasource db {
 // @@schema since Postgres enum types are schema-scoped)
 // =============================================================================
 
-enum OrderStatus {
-  CREATED
-  PAYMENT_PENDING
-  PAID
-  CONFIRMED
-  PROCESSING
-  PRESCRIPTION_REVIEW
-  LENS_PRODUCTION
-  QUALITY_CONTROL
-  PACKED
-  SHIPPED
-  DELIVERED
-  CANCELLED
-  RETURN_REQUESTED
-  RETURN_APPROVED
-  RETURNED
-  REFUND_PENDING
-  REFUNDED
-
-  @@schema("commerce")
-}
-
 enum NotificationChannel {
   SMS
   TELEGRAM
@@ -1652,6 +1630,7 @@ model CheckoutSession {
   totalsHistory CheckoutTotals[]
   validations   CheckoutValidationResult[]
   reservations  CheckoutReservation[]
+  order         Order? // Phase 009 — at most one Order per checkout session (Order.checkoutSessionId is @unique)
 
   @@index([cartId])
   @@index([customerId])
@@ -1756,62 +1735,151 @@ model CheckoutReservation {
   @@schema("commerce")
 }
 
+// =============================================================================
+// order — Phase 009 (see docs/adr/ADR-009-order-fulfillment.md). Replaces
+// the Phase 003 placeholder Order/OrderItem/OrderStatusHistory (confirmed
+// 0 rows, unreferenced by any application code before this migration) and
+// the finance-schema placeholder Invoice/InvoiceLine below. Anchored on
+// CheckoutSession + PaymentIntent (both real, enforced, same-schema FKs,
+// both @unique — the idempotency guarantee ADR-009 decision 4 relies on),
+// never on nothing. Fulfillment/Shipment live in this same `commerce`
+// schema rather than a new schema of their own — they are an extension of
+// "what happens to an order," not a distinct business domain.
+// =============================================================================
+
+enum OrderSource {
+  STOREFRONT
+  ADMIN
+  POS
+
+  @@schema("commerce")
+}
+
+/// The 8-state lifecycle ADR-009 decision 5 defines. CANCELLED/COMPLETED
+/// are strictly terminal; CANCELLED is unreachable once PARTIALLY_FULFILLED
+/// or later. Enforced only by `OrderStateMachine` (domain layer) — no
+/// column-level CHECK constraint (Prisma has none).
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAID
+  PROCESSING
+  READY_TO_FULFILL
+  PARTIALLY_FULFILLED
+  FULFILLED
+  CANCELLED
+  COMPLETED
+
+  @@schema("commerce")
+}
+
+/// Cached read alongside `status` (ADR-009 decision 3) — never the source
+/// of truth; always derived from Payment's own `PaymentTransaction`/
+/// `Refund` rows the moment `OrderService` learns of them.
+enum OrderPaymentStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  PARTIALLY_REFUNDED
+  REFUNDED
+
+  @@schema("commerce")
+}
+
+/// Cached read alongside `status` (ADR-009 decision 3) — always derived
+/// from this order's own `FulfillmentItem` sums, never independently
+/// tracked.
+enum OrderFulfillmentStatus {
+  UNFULFILLED
+  PARTIALLY_FULFILLED
+  FULFILLED
+
+  @@schema("commerce")
+}
+
 /// blueprint §17/§25 — Order ≠ live Product: every price/name/sku field an
 /// order needs is snapshotted at creation (on OrderItem), never re-read from
 /// the live catalog. Status transitions are recorded in OrderStatusHistory,
-/// never silently overwritten.
+/// never silently overwritten. `checkoutSessionId`/`paymentIntentId` are
+/// both real, enforced, `@unique` FKs into this same schema — the
+/// idempotency anchor for `OrderConversionService` (ADR-009 decision 4):
+/// a duplicate/concurrent conversion attempt collapses to this same row via
+/// a `P2002` catch-and-reread, never a second `Order`.
 model Order {
-  id                      String      @id @default(uuid()) @db.Uuid
-  orderNumber             String      @unique @map("order_number")
-  customerId              String      @map("customer_id") @db.Uuid
-  status                  OrderStatus @default(CREATED)
-  currency                String      @default("IRR")
+  id                      String                 @id @default(uuid()) @db.Uuid
+  orderNumber             String                 @unique @map("order_number")
+  checkoutSessionId       String                 @unique @map("checkout_session_id") @db.Uuid
+  paymentIntentId         String                 @unique @map("payment_intent_id") @db.Uuid
+  customerId              String?                @map("customer_id") @db.Uuid // nullable — guest order; -> customer.customers.id, unenforced
+  guestToken              String?                @map("guest_token")
+  source                  OrderSource            @default(STOREFRONT)
+  status                  OrderStatus            @default(PENDING_PAYMENT)
+  paymentStatus           OrderPaymentStatus     @default(UNPAID) @map("payment_status")
+  fulfillmentStatus       OrderFulfillmentStatus @default(UNFULFILLED) @map("fulfillment_status")
+  currency                String                 @default("IRR")
   subtotal                BigInt
-  discountTotal           BigInt      @default(0) @map("discount_total")
-  taxTotal                BigInt      @default(0) @map("tax_total")
-  shippingTotal           BigInt      @default(0) @map("shipping_total")
-  grandTotal              BigInt      @map("grand_total")
-  shippingAddressSnapshot Json        @map("shipping_address_snapshot")
-  billingAddressSnapshot  Json?       @map("billing_address_snapshot")
-  placedAt                DateTime    @default(now()) @map("placed_at")
-  createdAt               DateTime    @default(now()) @map("created_at")
-  updatedAt               DateTime    @updatedAt @map("updated_at")
-  deletedAt               DateTime?   @map("deleted_at")
+  discountTotal           BigInt                 @default(0) @map("discount_total")
+  taxTotal                BigInt                 @default(0) @map("tax_total")
+  shippingTotal           BigInt                 @default(0) @map("shipping_total")
+  grandTotal              BigInt                 @map("grand_total")
+  paidTotal               BigInt                 @default(0) @map("paid_total")
+  refundedTotal           BigInt                 @default(0) @map("refunded_total")
+  shippingAddressSnapshot Json                   @map("shipping_address_snapshot")
+  billingAddressSnapshot  Json?                  @map("billing_address_snapshot")
+  placedAt                DateTime               @default(now()) @map("placed_at")
+  createdAt               DateTime               @default(now()) @map("created_at")
+  updatedAt               DateTime               @updatedAt @map("updated_at")
+  cancelledAt             DateTime?              @map("cancelled_at")
+  completedAt             DateTime?              @map("completed_at")
 
-  items         OrderItem[]
-  statusHistory OrderStatusHistory[]
+  checkoutSession CheckoutSession      @relation(fields: [checkoutSessionId], references: [id])
+  paymentIntent   PaymentIntent        @relation(fields: [paymentIntentId], references: [id])
+  items           OrderItem[]
+  statusHistory   OrderStatusHistory[]
+  fulfillments    Fulfillment[]
 
   @@index([customerId])
+  @@index([guestToken])
   @@index([status])
   @@map("orders")
   @@schema("commerce")
 }
 
-/// `productSkuId` (Phase 005 — was `productVariantId`; see ADR-005 decision 1).
+/// `productSkuId` (Phase 005 — was `productVariantId`; see ADR-005 decision 1),
+/// nullable since the live SKU may later be deleted — `skuSnapshot`/
+/// `nameSnapshot`/`unitPriceSnapshot` carry the historical truth regardless
+/// (ADR-009 decision 1). `discountAmount`/`taxAmount` copied from the
+/// checkout's own `CheckoutTotals.breakdown` line, never recomputed here.
 model OrderItem {
   id                String   @id @default(uuid()) @db.Uuid
   orderId           String   @map("order_id") @db.Uuid
-  productSkuId      String?  @map("product_sku_id") @db.Uuid // nullable: the SKU may later be deleted; snapshot fields below carry the truth regardless
+  productSkuId      String?  @map("product_sku_id") @db.Uuid
   skuSnapshot       String   @map("sku_snapshot")
   nameSnapshot      String   @map("name_snapshot")
   unitPriceSnapshot BigInt   @map("unit_price_snapshot")
   quantity          Int
+  discountAmount    BigInt   @default(0) @map("discount_amount")
+  taxAmount         BigInt   @default(0) @map("tax_amount")
   lineTotal         BigInt   @map("line_total")
   createdAt         DateTime @default(now()) @map("created_at")
 
-  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order            Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  fulfillmentItems FulfillmentItem[]
 
   @@index([orderId])
   @@map("order_items")
   @@schema("commerce")
 }
 
+/// Append-only — `changedBy = null` represents a system-generated
+/// transition (e.g. the `order_conversion`/`order_expiration` sweeps),
+/// same convention `system.AuditLog.actorId` already uses; never a
+/// fabricated actor row.
 model OrderStatusHistory {
   id         String       @id @default(uuid()) @db.Uuid
   orderId    String       @map("order_id") @db.Uuid
   fromStatus OrderStatus? @map("from_status")
   toStatus   OrderStatus  @map("to_status")
-  changedBy  String?      @map("changed_by") @db.Uuid
+  changedBy  String?      @map("changed_by") @db.Uuid // nullable — null means system-generated; -> identity.users.id, unenforced
   note       String?
   createdAt  DateTime     @default(now()) @map("created_at")
 
@@ -1819,6 +1887,118 @@ model OrderStatusHistory {
 
   @@index([orderId])
   @@map("order_status_history")
+  @@schema("commerce")
+}
+
+/// The 8-state fulfillment lifecycle (ADR-009 decision 8). An `Order` may
+/// have many `Fulfillment` rows (partial fulfillment). `warehouseId` is an
+/// unenforced cross-schema pointer, same convention every other
+/// commerce->inventory reference in this schema already uses.
+enum FulfillmentStatus {
+  PENDING
+  ALLOCATED
+  PROCESSING
+  PACKED
+  READY
+  SHIPPED
+  DELIVERED
+  CANCELLED
+
+  @@schema("commerce")
+}
+
+model Fulfillment {
+  id          String            @id @default(uuid()) @db.Uuid
+  orderId     String            @map("order_id") @db.Uuid
+  status      FulfillmentStatus @default(PENDING)
+  warehouseId String?           @map("warehouse_id") @db.Uuid // -> inventory.warehouses.id, unenforced
+  packedAt    DateTime?         @map("packed_at")
+  shippedAt   DateTime?         @map("shipped_at")
+  deliveredAt DateTime?         @map("delivered_at")
+  cancelledAt DateTime?         @map("cancelled_at")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  order    Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  items    FulfillmentItem[]
+  shipment Shipment?
+
+  @@index([orderId])
+  @@index([status])
+  @@map("fulfillments")
+  @@schema("commerce")
+}
+
+/// References a concrete `OrderItem`, never a bare SKU string (ADR-009
+/// decision 8) — `quantity` here plus every sibling `FulfillmentItem`
+/// across every non-CANCELLED `Fulfillment` for the same `orderItemId` can
+/// never exceed `OrderItem.quantity`; enforced in the domain layer via a
+/// row-locked re-sum at write time (`mutateInventoryItem`'s own
+/// `SELECT ... FOR UPDATE` technique, reused), not a database constraint.
+model FulfillmentItem {
+  id            String   @id @default(uuid()) @db.Uuid
+  fulfillmentId String   @map("fulfillment_id") @db.Uuid
+  orderItemId   String   @map("order_item_id") @db.Uuid
+  quantity      Int
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  fulfillment Fulfillment @relation(fields: [fulfillmentId], references: [id], onDelete: Cascade)
+  orderItem   OrderItem   @relation(fields: [orderItemId], references: [id])
+
+  @@index([fulfillmentId])
+  @@index([orderItemId])
+  @@map("fulfillment_items")
+  @@schema("commerce")
+}
+
+/// ADR-009 decision 12 — one `Shipment` per `Fulfillment` (1:0..1). No live
+/// courier integration; `carrier`/`trackingNumber` are admin-entered via
+/// `ManualShippingProvider`.
+enum ShipmentStatus {
+  PENDING
+  IN_TRANSIT
+  DELIVERED
+  FAILED
+  CANCELLED
+
+  @@schema("commerce")
+}
+
+model Shipment {
+  id             String         @id @default(uuid()) @db.Uuid
+  fulfillmentId  String         @unique @map("fulfillment_id") @db.Uuid
+  carrier        String?
+  trackingNumber String?        @map("tracking_number")
+  status         ShipmentStatus @default(PENDING)
+  shippedAt      DateTime?      @map("shipped_at")
+  deliveredAt    DateTime?      @map("delivered_at")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  fulfillment Fulfillment     @relation(fields: [fulfillmentId], references: [id], onDelete: Cascade)
+  events      ShipmentEvent[]
+
+  @@map("shipments")
+  @@schema("commerce")
+}
+
+/// Append-only tracking history. `source` is a plain string (not an enum)
+/// since no live courier webhook exists yet to give it a real closed
+/// vocabulary — always `"MANUAL_ADMIN"` or `"SYSTEM"` in this phase,
+/// deliberately not over-modeled ahead of a real integration.
+model ShipmentEvent {
+  id         String         @id @default(uuid()) @db.Uuid
+  shipmentId String         @map("shipment_id") @db.Uuid
+  status     ShipmentStatus
+  location   String?
+  details    Json?
+  source     String         @default("MANUAL_ADMIN")
+  occurredAt DateTime       @default(now()) @map("occurred_at")
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId])
+  @@map("shipment_events")
   @@schema("commerce")
 }
 
@@ -1932,6 +2112,7 @@ model PaymentIntent {
   attempts     PaymentAttempt[]
   transactions PaymentTransaction[]
   callbacks    PaymentCallback[]
+  order        Order? // Phase 009 — at most one Order per intent (Order.paymentIntentId is @unique)
 
   @@index([customerId])
   @@index([status])
@@ -2360,24 +2541,49 @@ model PriceHistory {
   @@schema("finance")
 }
 
+/// ADR-009 decision 7. `orderId` is `@unique` (one invoice per order, this
+/// phase never issues more than one) and, same convention as every other
+/// cross-schema pointer in this repo, unenforced (`finance` -> `commerce`).
+/// `invoiceNumber` is server-generated from `finance.invoice_number_seq`
+/// (never client input) at issuance. Immutable once ISSUED — no repository
+/// method exposes an update path for `subtotal`/`taxTotal`/`grandTotal`/
+/// `items`; a correction is `VOID` plus manual admin follow-up.
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  VOID
+  CANCELLED
+
+  @@schema("finance")
+}
+
 model Invoice {
-  id            String   @id @default(uuid()) @db.Uuid
-  orderId       String   @unique @map("order_id") @db.Uuid
-  invoiceNumber String   @unique @map("invoice_number")
-  issuedAt      DateTime @default(now()) @map("issued_at")
+  id            String        @id @default(uuid()) @db.Uuid
+  invoiceNumber String        @unique @map("invoice_number")
+  orderId       String        @unique @map("order_id") @db.Uuid // -> commerce.orders.id, unenforced
+  customerId    String?       @map("customer_id") @db.Uuid // -> customer.customers.id, unenforced
+  status        InvoiceStatus @default(DRAFT)
+  currency      String        @default("IRR")
   subtotal      BigInt
-  taxTotal      BigInt   @default(0) @map("tax_total")
-  grandTotal    BigInt   @map("grand_total")
-  pdfUrl        String?  @map("pdf_url")
-  createdAt     DateTime @default(now()) @map("created_at")
+  discountTotal BigInt        @default(0) @map("discount_total")
+  taxTotal      BigInt        @default(0) @map("tax_total")
+  shippingTotal BigInt        @default(0) @map("shipping_total")
+  grandTotal    BigInt        @map("grand_total")
+  issuedAt      DateTime?     @map("issued_at")
+  voidedAt      DateTime?     @map("voided_at")
+  pdfUrl        String?       @map("pdf_url")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
 
-  lines InvoiceLine[]
+  items InvoiceItem[]
 
+  @@index([orderId])
   @@map("invoices")
   @@schema("finance")
 }
 
-model InvoiceLine {
+model InvoiceItem {
   id          String @id @default(uuid()) @db.Uuid
   invoiceId   String @map("invoice_id") @db.Uuid
   description String
@@ -2388,7 +2594,7 @@ model InvoiceLine {
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@index([invoiceId])
-  @@map("invoice_lines")
+  @@map("invoice_items")
   @@schema("finance")
 }
 
