@@ -439,7 +439,7 @@ describe('Order (e2e)', () => {
       const shipmentRes = await request(server)
         .post(`/admin/orders/${order.id}/fulfillments/${fulfillment.id}/shipments`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ carrier: 'Tipax', trackingNumber: 'E2E-TRACK-1' })
+        .send({ carrier: 'Tipax', trackingNumber: `E2E-TRACK-${randomUUID()}` })
         .expect(201);
       const shipment = body<ShipmentBody>(shipmentRes);
       expect(shipment.status).toBe('PENDING');
