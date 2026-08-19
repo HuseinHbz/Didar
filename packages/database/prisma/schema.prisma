@@ -2382,31 +2382,31 @@ enum RedemptionStatus {
 /// than a separate `PromotionAction` table — no requirement this phase
 /// needs more than one action per promotion.
 model Promotion {
-  id               String              @id @default(uuid()) @db.Uuid
-  name             String
-  description      String?
-  status           PromotionStatus     @default(DRAFT)
-  priority         Int                 @default(100) // lower resolves first; tiebreak is `id` — DB row order is never relied on
-  startsAt         DateTime?           @map("starts_at")
-  endsAt           DateTime?           @map("ends_at")
-  usageLimit       Int?                @map("usage_limit")
-  perCustomerLimit Int?                @map("per_customer_limit")
-  usageCount       Int                 @default(0) @map("usage_count") // cached; authoritative source is CouponRedemption
-  stackable        Boolean             @default(false)
-  exclusive        Boolean             @default(false)
-  minimumCartValue BigInt?             @map("minimum_cart_value")
-  maximumDiscount  BigInt?             @map("maximum_discount")
-  currency         String              @default("IRR")
-  requiresCoupon   Boolean             @default(true) @map("requires_coupon") // false = automatic, no code needed
-  discountType     PromotionActionType @map("discount_type")
-  discountValue    BigInt?             @map("discount_value") // basis points (PERCENTAGE) or a Rial amount (FIXED_AMOUNT/FIXED_PRICE); null for FREE_SHIPPING
-  buyQuantity      Int?                @map("buy_quantity") // BUY_X_GET_Y
-  getQuantity      Int?                @map("get_quantity") // BUY_X_GET_Y
-  getDiscountBasisPoints Int?          @map("get_discount_basis_points") // BUY_X_GET_Y; 10000 = free
-  bundlePrice      BigInt?             @map("bundle_price") // BUNDLE_PRICE — forced total price for every targeted unit
-  createdAt        DateTime            @default(now()) @map("created_at")
-  updatedAt        DateTime            @updatedAt @map("updated_at")
-  archivedAt        DateTime?          @map("archived_at")
+  id                     String              @id @default(uuid()) @db.Uuid
+  name                   String
+  description            String?
+  status                 PromotionStatus     @default(DRAFT)
+  priority               Int                 @default(100) // lower resolves first; tiebreak is `id` — DB row order is never relied on
+  startsAt               DateTime?           @map("starts_at")
+  endsAt                 DateTime?           @map("ends_at")
+  usageLimit             Int?                @map("usage_limit")
+  perCustomerLimit       Int?                @map("per_customer_limit")
+  usageCount             Int                 @default(0) @map("usage_count") // cached; authoritative source is CouponRedemption
+  stackable              Boolean             @default(false)
+  exclusive              Boolean             @default(false)
+  minimumCartValue       BigInt?             @map("minimum_cart_value")
+  maximumDiscount        BigInt?             @map("maximum_discount")
+  currency               String              @default("IRR")
+  requiresCoupon         Boolean             @default(true) @map("requires_coupon") // false = automatic, no code needed
+  discountType           PromotionActionType @map("discount_type")
+  discountValue          BigInt?             @map("discount_value") // basis points (PERCENTAGE) or a Rial amount (FIXED_AMOUNT/FIXED_PRICE); null for FREE_SHIPPING
+  buyQuantity            Int?                @map("buy_quantity") // BUY_X_GET_Y
+  getQuantity            Int?                @map("get_quantity") // BUY_X_GET_Y
+  getDiscountBasisPoints Int?                @map("get_discount_basis_points") // BUY_X_GET_Y; 10000 = free
+  bundlePrice            BigInt?             @map("bundle_price") // BUNDLE_PRICE — forced total price for every targeted unit
+  createdAt              DateTime            @default(now()) @map("created_at")
+  updatedAt              DateTime            @updatedAt @map("updated_at")
+  archivedAt             DateTime?           @map("archived_at")
 
   rules       PromotionRule[]
   targets     PromotionTarget[]
