@@ -8,31 +8,83 @@ export const LOCALES = ['fa-IR', 'en-US'] as const;
 export type Locale = (typeof LOCALES)[number];
 
 /**
- * Order status machine (blueprint §19 / §25). Linear happy path plus the
- * cancellation/return/refund side paths. Every transition is expected to be an
- * explicit, validated state-machine transition in `services/api`, never a bare
- * `order.status = X` — and every change is recorded in `order_status_history`.
+ * Order lifecycle (Phase 009 — see docs/adr/ADR-009-order-fulfillment.md
+ * decision 5). Replaces the Phase 003 placeholder's 17-value
+ * lens-manufacturing/return vocabulary with the real 8-state machine
+ * nothing in this codebase drove honestly. CANCELLED/COMPLETED are
+ * strictly terminal; CANCELLED is unreachable once PARTIALLY_FULFILLED or
+ * later. Every transition is an explicit, validated `OrderStateMachine`
+ * call in `services/api`, never a bare `order.status = X` — and every
+ * change is recorded in `order_status_history`.
  */
 export const ORDER_STATUSES = [
-  'CREATED',
-  'PAYMENT_PENDING',
+  'PENDING_PAYMENT',
   'PAID',
-  'CONFIRMED',
   'PROCESSING',
-  'PRESCRIPTION_REVIEW',
-  'LENS_PRODUCTION',
-  'QUALITY_CONTROL',
+  'READY_TO_FULFILL',
+  'PARTIALLY_FULFILLED',
+  'FULFILLED',
+  'CANCELLED',
+  'COMPLETED',
+] as const;
+export type OrderStatus = (typeof ORDER_STATUSES)[number];
+
+/** Cached alongside `status` (ADR-009 decision 3) — always derived from
+ * Payment's own `PaymentTransaction`/`Refund` rows, never independently
+ * tracked. */
+export const ORDER_PAYMENT_STATUSES = [
+  'UNPAID',
+  'PARTIALLY_PAID',
+  'PAID',
+  'PARTIALLY_REFUNDED',
+  'REFUNDED',
+] as const;
+export type OrderPaymentStatus = (typeof ORDER_PAYMENT_STATUSES)[number];
+
+/** Cached alongside `status` (ADR-009 decision 3) — always derived from
+ * this order's own `FulfillmentItem` sums, never independently tracked. */
+export const ORDER_FULFILLMENT_STATUSES = [
+  'UNFULFILLED',
+  'PARTIALLY_FULFILLED',
+  'FULFILLED',
+] as const;
+export type OrderFulfillmentStatus = (typeof ORDER_FULFILLMENT_STATUSES)[number];
+
+/** How an order came to exist (ADR-009 decision 11) — every value still
+ * requires a real checkout/payment chain; `ADMIN`/`POS` never bypass it. */
+export const ORDER_SOURCES = ['STOREFRONT', 'ADMIN', 'POS'] as const;
+export type OrderSource = (typeof ORDER_SOURCES)[number];
+
+/** Invoice lifecycle (ADR-009 decision 7) — immutable once ISSUED except
+ * through an explicit VOID. */
+export const INVOICE_STATUSES = ['DRAFT', 'ISSUED', 'PAID', 'VOID', 'CANCELLED'] as const;
+export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
+
+/** Fulfillment lifecycle (ADR-009 decision 8) — CANCELLED is unreachable
+ * once SHIPPED or later, same "physical reality" rule `OrderStatus`
+ * applies. */
+export const FULFILLMENT_STATUSES = [
+  'PENDING',
+  'ALLOCATED',
+  'PROCESSING',
   'PACKED',
+  'READY',
   'SHIPPED',
   'DELIVERED',
   'CANCELLED',
-  'RETURN_REQUESTED',
-  'RETURN_APPROVED',
-  'RETURNED',
-  'REFUND_PENDING',
-  'REFUNDED',
 ] as const;
-export type OrderStatus = (typeof ORDER_STATUSES)[number];
+export type FulfillmentStatus = (typeof FULFILLMENT_STATUSES)[number];
+
+/** Shipment lifecycle (ADR-009 decision 12) — driven entirely by
+ * `ManualShippingProvider` in this phase, no live courier webhook. */
+export const SHIPMENT_STATUSES = [
+  'PENDING',
+  'IN_TRANSIT',
+  'DELIVERED',
+  'FAILED',
+  'CANCELLED',
+] as const;
+export type ShipmentStatus = (typeof SHIPMENT_STATUSES)[number];
 
 /**
  * Inventory ledger movement types (blueprint §24/§27; Phase 006 — see

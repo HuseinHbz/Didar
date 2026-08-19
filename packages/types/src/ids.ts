@@ -149,3 +149,22 @@ export const asPaymentCallbackId = brandedId<'PaymentCallbackId'>('PaymentCallba
 export const asRefundId = brandedId<'RefundId'>('RefundId').as;
 export const asReconciliationRecordId =
   brandedId<'ReconciliationRecordId'>('ReconciliationRecordId').as;
+// Phase 009 — order/invoice/fulfillment/shipment (see docs/adr/ADR-009-order-fulfillment.md).
+export type OrderItemId = Brand<string, 'OrderItemId'>;
+export type OrderStatusHistoryId = Brand<string, 'OrderStatusHistoryId'>;
+export type InvoiceId = Brand<string, 'InvoiceId'>;
+export type InvoiceItemId = Brand<string, 'InvoiceItemId'>;
+export type FulfillmentId = Brand<string, 'FulfillmentId'>;
+export type FulfillmentItemId = Brand<string, 'FulfillmentItemId'>;
+export type ShipmentId = Brand<string, 'ShipmentId'>;
+export type ShipmentEventId = Brand<string, 'ShipmentEventId'>;
+
+export const asOrderItemId = brandedId<'OrderItemId'>('OrderItemId').as;
+export const asOrderStatusHistoryId =
+  brandedId<'OrderStatusHistoryId'>('OrderStatusHistoryId').as;
+export const asInvoiceId = brandedId<'InvoiceId'>('InvoiceId').as;
+export const asInvoiceItemId = brandedId<'InvoiceItemId'>('InvoiceItemId').as;
+export const asFulfillmentId = brandedId<'FulfillmentId'>('FulfillmentId').as;
+export const asFulfillmentItemId = brandedId<'FulfillmentItemId'>('FulfillmentItemId').as;
+export const asShipmentId = brandedId<'ShipmentId'>('ShipmentId').as;
+export const asShipmentEventId = brandedId<'ShipmentEventId'>('ShipmentEventId').as;
