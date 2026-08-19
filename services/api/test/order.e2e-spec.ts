@@ -449,11 +449,13 @@ describe('Order (e2e)', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .send({ status: 'IN_TRANSIT' })
         .expect(200);
+      // Delivery is its own dedicated route/permission (ADR-011 decision
+      // 4) — a generic PATCH to DELIVERED is now structurally rejected
+      // (proven in the security section below).
       await request(server)
-        .patch(`/admin/orders/${order.id}/shipments/${shipment.id}`)
+        .post(`/admin/orders/${order.id}/shipments/${shipment.id}/deliver`)
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ status: 'DELIVERED' })
-        .expect(200);
+        .expect(201);
 
       const fulfillmentsRes = await request(server)
         .get(`/admin/orders/${order.id}/fulfillments`)
