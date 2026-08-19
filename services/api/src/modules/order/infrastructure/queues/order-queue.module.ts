@@ -9,6 +9,7 @@ import { AUDIT_LOG_REPOSITORY } from '../../../identity/domain/ports/audit-log.r
 import { PrismaAuditLogRepository } from '../../../identity/infrastructure/repositories/prisma-audit-log.repository';
 import { InventoryModule } from '../../../inventory/inventory.module';
 import { PaymentModule } from '../../../payment/payment.module';
+import { PromotionModule } from '../../../promotion/promotion.module';
 import { InvoiceService } from '../../application/invoice.service';
 import { OrderConversionService } from '../../application/order-conversion.service';
 import { INVOICE_REPOSITORY } from '../../domain/ports/invoice.repository.port';
@@ -47,6 +48,7 @@ import { INVOICE_GENERATION_QUEUE, ORDER_CONVERSION_QUEUE } from './queue-names'
     CatalogModule,
     InventoryModule,
     PaymentModule,
+    PromotionModule,
     BullModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService<Env, true>) => ({

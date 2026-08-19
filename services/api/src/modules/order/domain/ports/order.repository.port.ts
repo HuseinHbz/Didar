@@ -112,4 +112,27 @@ export interface OrderRepositoryPort {
   /** Cache-column update only (ADR-009 decision 3) — derived from this
    * order's own `FulfillmentItem` sums. */
   updateFulfillmentStatus(id: string, fulfillmentStatus: OrderFulfillmentStatus): Promise<Order>;
+
+  /** Phase 010 (ADR-010 decision 7/11) — writes the immutable
+   * `OrderPromotion` snapshot rows, copied verbatim from the checkout's
+   * frozen `pricingSnapshot.appliedPromotions` at order-creation time.
+   * `OrderPromotion` has no independent lifecycle (same "child rows, no
+   * separate repository" shape `OrderItem`/`OrderStatusHistory` already
+   * use), so this is an additive method on the existing aggregate-root
+   * port rather than a new one. Idempotent by construction: called only
+   * once, immediately after a fresh `create()`, guarded by the caller
+   * (`OrderConversionService`) via the same `existingOrder` check that
+   * already protects `create()` itself from running twice. */
+  addPromotions(
+    orderId: string,
+    promotions: readonly {
+      promotionId: string;
+      promotionName: string;
+      couponId: string | null;
+      couponCode: string | null;
+      discountType: string;
+      discountAmount: bigint;
+      affectedItemIds: readonly string[];
+    }[],
+  ): Promise<void>;
 }

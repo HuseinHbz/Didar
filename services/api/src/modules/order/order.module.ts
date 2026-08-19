@@ -7,6 +7,7 @@ import { AUDIT_LOG_REPOSITORY } from '../identity/domain/ports/audit-log.reposit
 import { PrismaAuditLogRepository } from '../identity/infrastructure/repositories/prisma-audit-log.repository';
 import { InventoryModule } from '../inventory/inventory.module';
 import { PaymentModule } from '../payment/payment.module';
+import { PromotionModule } from '../promotion/promotion.module';
 
 import { FulfillmentService } from './application/fulfillment.service';
 import { InvoiceService } from './application/invoice.service';
@@ -53,7 +54,14 @@ import { OrderDomainExceptionFilter } from './presentation/filters/order-domain-
  * rather than importing `IdentityModule`'s internals.
  */
 @Module({
-  imports: [CartCheckoutModule, CatalogModule, InventoryModule, PaymentModule, OrderQueueModule],
+  imports: [
+    CartCheckoutModule,
+    CatalogModule,
+    InventoryModule,
+    PaymentModule,
+    PromotionModule,
+    OrderQueueModule,
+  ],
   controllers: [
     OrderController,
     OrderAdminController,

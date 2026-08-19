@@ -10,6 +10,7 @@ import {
 } from '../../identity/domain/ports/audit-log.repository.port';
 import { ReservationService } from '../../inventory/application/reservation.service';
 import { PaymentIntentService } from '../../payment/application/payment-intent.service';
+import { CouponRedemptionService } from '../../promotion/application/coupon-redemption.service';
 import type { Order } from '../domain/entities/order.entity';
 import { ORDER_REPOSITORY, type OrderRepositoryPort } from '../domain/ports/order.repository.port';
 
@@ -45,6 +46,7 @@ export class OrderConversionService {
     private readonly skus: SkusService,
     private readonly products: ProductsService,
     private readonly invoices: InvoiceService,
+    private readonly couponRedemption: CouponRedemptionService,
   ) {}
 
   /**
@@ -126,6 +128,47 @@ export class OrderConversionService {
         items,
       }));
 
+    // Phase 010 (ADR-010 decision 7/11) — copy the checkout's frozen
+    // promotion/coupon resolution into immutable `OrderPromotion` rows,
+    // once, at genuine order creation (never on a resumed/retried call —
+    // `existingOrder` already guards `orders.create()` itself the same
+    // way). Never recalculated against today's promotion rules.
+    if (!existingOrder) {
+      const appliedPromotions =
+        (session.pricingSnapshot?.['appliedPromotions'] as
+          | {
+              promotionId: string;
+              promotionName: string;
+              couponId: string | null;
+              couponCode: string | null;
+              discountType: string;
+              discountAmount: string;
+              affectedProductSkuIds: string[];
+            }[]
+          | undefined) ?? [];
+      if (appliedPromotions.length > 0) {
+        const detail = await this.orders.findById(order.id);
+        const orderItemIdBySku = new Map<string, string>();
+        for (const item of detail?.items ?? []) {
+          if (item.productSkuId) orderItemIdBySku.set(item.productSkuId, item.id);
+        }
+        await this.orders.addPromotions(
+          order.id,
+          appliedPromotions.map((promotion) => ({
+            promotionId: promotion.promotionId,
+            promotionName: promotion.promotionName,
+            couponId: promotion.couponId,
+            couponCode: promotion.couponCode,
+            discountType: promotion.discountType,
+            discountAmount: BigInt(promotion.discountAmount),
+            affectedItemIds: promotion.affectedProductSkuIds.map(
+              (skuId) => orderItemIdBySku.get(skuId) ?? skuId,
+            ),
+          })),
+        );
+      }
+    }
+
     // Reconcile inventory reservation -> allocation (ADR-009 decision 4
     // step 4). Skipped defensively for any reservation already CONVERTED
     // so a retried/duplicate conversion attempt never double-consumes
@@ -177,6 +220,12 @@ export class OrderConversionService {
         lineTotal: item.lineTotal,
       })),
     });
+
+    // ADR-010 decision 7/8 — every `RESERVED` coupon/promotion redemption
+    // this checkout holds becomes `REDEEMED`, `orderId` set. Idempotent
+    // (`updateMany` against `status = 'RESERVED'` only): a resumed/
+    // retried conversion attempt finds nothing left to finalize.
+    await this.couponRedemption.finalize(checkoutSessionId, order.id);
 
     await this.checkout.markConverted(checkoutSessionId);
 

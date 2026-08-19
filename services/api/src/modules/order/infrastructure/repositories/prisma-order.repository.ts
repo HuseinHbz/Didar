@@ -280,4 +280,32 @@ export class PrismaOrderRepository implements OrderRepositoryPort {
     const row = await prisma.order.update({ where: { id }, data: { fulfillmentStatus } });
     return orderToDomain(row);
   }
+
+  async addPromotions(
+    orderId: string,
+    promotions: readonly {
+      promotionId: string;
+      promotionName: string;
+      couponId: string | null;
+      couponCode: string | null;
+      discountType: string;
+      discountAmount: bigint;
+      affectedItemIds: readonly string[];
+    }[],
+  ): Promise<void> {
+    if (promotions.length === 0) return;
+    await prisma.orderPromotion.createMany({
+      data: promotions.map((promotion) => ({
+        id: randomUUID(),
+        orderId,
+        promotionId: promotion.promotionId,
+        promotionName: promotion.promotionName,
+        couponId: promotion.couponId,
+        couponCode: promotion.couponCode,
+        discountType: promotion.discountType,
+        discountAmount: promotion.discountAmount,
+        affectedItemIds: promotion.affectedItemIds,
+      })),
+    });
+  }
 }
