@@ -17,13 +17,15 @@ import { InvoiceService } from './invoice.service';
 
 /**
  * ADR-009 decision 4 — the single place an `Order` is ever created.
- * Called two ways: synchronously right after a payment callback verifies
- * (via a thin controller call — see `PaymentIntentController`'s own
- * module doesn't call this; the order presentation layer does, right
- * after re-deriving `verifyPayment()`'s already-idempotent result) and
- * from the `order_conversion` sweep as a reliability backstop for a
- * customer who never returns to trigger anything synchronously. Both
- * paths call this exact method, never two diverging implementations.
+ * Called two ways: synchronously from `OrderController.getByCheckout()`
+ * — the route a customer's post-payment redirect lands on, which calls
+ * this before reading the order back so the very first request after a
+ * successful payment already sees it, not just the next poll — and from
+ * the `order_conversion` sweep as a reliability backstop for a customer
+ * who never returns to trigger anything synchronously (`PaymentIntentController`
+ * itself never calls this — Payment has no reason to reach forward into
+ * Order). Both paths call this exact method, never two diverging
+ * implementations.
  * `convertFromCheckout` also resumes cleanly if a prior call crashed
  * between `orders.create()` and `checkout.markConverted()` — an existing
  * order still `PENDING_PAYMENT` is treated as unfinished, not done, and

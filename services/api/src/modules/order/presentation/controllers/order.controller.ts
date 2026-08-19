@@ -2,11 +2,13 @@ import { Controller, Get, NotFoundException, Param, Query, UseGuards } from '@ne
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 
 import { Public } from '../../../../common/decorators/public.decorator';
+import { CheckoutService } from '../../../cart-checkout/application/checkout.service';
 import { CurrentActor } from '../../../cart-checkout/presentation/decorators/current-actor.decorator';
 import { ActorResolverGuard } from '../../../cart-checkout/presentation/guards/actor-resolver.guard';
 import type { CartCheckoutActor } from '../../../cart-checkout/presentation/request-context';
 import { FulfillmentService } from '../../application/fulfillment.service';
 import { InvoiceService } from '../../application/invoice.service';
+import { OrderConversionService } from '../../application/order-conversion.service';
 import { OrderService } from '../../application/order.service';
 import { FulfillmentResponseDto } from '../dto/fulfillment.dto';
 import { InvoiceResponseDto } from '../dto/invoice.dto';
@@ -27,7 +29,35 @@ export class OrderController {
     private readonly orders: OrderService,
     private readonly invoices: InvoiceService,
     private readonly fulfillments: FulfillmentService,
+    private readonly conversion: OrderConversionService,
+    private readonly checkout: CheckoutService,
   ) {}
+
+  /**
+   * The route a customer's post-payment redirect lands on. Ownership is
+   * checked against the checkout itself first (`CheckoutService.get()` —
+   * the same 404/403 an authenticated customer or guest gets from every
+   * other checkout-owned read), so a caller can never use this to probe
+   * an arbitrary checkout's payment status. Then `convertFromCheckout()`
+   * runs synchronously — idempotent, the exact same method the
+   * `order_conversion` sweep calls (ADR-009 decision 4) — so the very
+   * first request right after a successful payment already sees the
+   * order, instead of waiting for that sweep's own interval.
+   */
+  @Get('by-checkout/:checkoutSessionId')
+  @ApiOkResponse({ type: OrderResponseDto })
+  async getByCheckout(
+    @CurrentActor() actor: CartCheckoutActor,
+    @Param('checkoutSessionId') checkoutSessionId: string,
+  ) {
+    await this.checkout.get(checkoutSessionId, actor);
+    const order = await this.conversion.convertFromCheckout(checkoutSessionId);
+    if (!order) {
+      return { converted: false, message: 'Payment not verified yet for this checkout' };
+    }
+    const detail = await this.orders.get(order.id, actor);
+    return OrderResponseDto.fromDomain(detail);
+  }
 
   @Get()
   @ApiOkResponse({ type: [OrderResponseDto] })
