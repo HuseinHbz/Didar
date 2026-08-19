@@ -221,8 +221,8 @@ not a rebuild — what it actually changed:
   pattern `PrismaOrderRepository.updateStatus()` already had — a real,
   previously-undetected check-then-act race on the two aggregates that
   didn't have it. Both now return `StatusUpdateResult<T> = { entity: T;
-  transitioned: boolean }` so callers can skip audit-logging on a race
-  that resolved to a no-op — a pattern deliberately *not* retrofitted
+transitioned: boolean }` so callers can skip audit-logging on a race
+  that resolved to a no-op — a pattern deliberately _not_ retrofitted
   onto `OrderRepositoryPort.updateStatus()`'s six pre-existing call
   sites (found, documented as a known deferred finding, judged too large
   a blast radius for the value; see the architecture doc).
@@ -230,7 +230,7 @@ not a rebuild — what it actually changed:
   auto-generates one if the caller doesn't supply one, and honors a
   client-supplied one via the standard P2002-catch-and-reread pattern.
 - **`OrderCompletionValidator`** (new, pure domain service) — `OrderService
-  .complete()` now calls it before asserting the state-machine edge:
+.complete()` now calls it before asserting the state-machine edge:
   every non-`CANCELLED` `Fulfillment` must be `DELIVERED`, payment must
   be settled. Throws `OrderNotReadyToCompleteError` (409) otherwise.
 - **`FulfillmentService.confirmDelivery()`** (new) — the only path to

@@ -32,22 +32,22 @@ see `docs/api/order.md`'s "Auth" section for the exact route grouping.
 addition), matching exactly what every controller checks
 (`docs/api/order.md` has the full route-to-permission mapping):
 
-| Permission              | Meaning                                                          |
-| ----------------------- | ---------------------------------------------------------------- |
-| `order.read`            | Read any order (admin/support scope)                             |
-| `order.create`          | Manually retry checkout->order conversion for a verified payment |
-| `order.update`          | Update a fulfillment record on an order                          |
-| `order.cancel`          | Cancel an order                                                  |
-| `order.approve`         | Approve an order for processing                                  |
-| `order.fulfill`         | Create a fulfillment for an order                                |
-| `order.ship`            | Create a shipment for a fulfillment                              |
-| `order.complete`        | Mark an order `COMPLETED`                                        |
-| `order.refund`          | Request a partial refund against a paid order                    |
-| `order.invoice.read`    | Read an order's invoice                                          |
-| `order.invoice.create`  | Manually (re)issue an invoice for an order                       |
-| `order.invoice.void`    | Void an issued invoice                                           |
-| `order.shipment.read`   | Read an order's shipments (Phase 011: and look one up by tracking number) |
-| `order.shipment.update` | Update a shipment status/tracking event — never `DELIVERED` (Phase 011; see below) |
+| Permission               | Meaning                                                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `order.read`             | Read any order (admin/support scope)                                                                               |
+| `order.create`           | Manually retry checkout->order conversion for a verified payment                                                   |
+| `order.update`           | Update a fulfillment record on an order                                                                            |
+| `order.cancel`           | Cancel an order                                                                                                    |
+| `order.approve`          | Approve an order for processing                                                                                    |
+| `order.fulfill`          | Create a fulfillment for an order                                                                                  |
+| `order.ship`             | Create a shipment for a fulfillment                                                                                |
+| `order.complete`         | Mark an order `COMPLETED`                                                                                          |
+| `order.refund`           | Request a partial refund against a paid order                                                                      |
+| `order.invoice.read`     | Read an order's invoice                                                                                            |
+| `order.invoice.create`   | Manually (re)issue an invoice for an order                                                                         |
+| `order.invoice.void`     | Void an issued invoice                                                                                             |
+| `order.shipment.read`    | Read an order's shipments (Phase 011: and look one up by tracking number)                                          |
+| `order.shipment.update`  | Update a shipment status/tracking event — never `DELIVERED` (Phase 011; see below)                                 |
 | `order.shipment.deliver` | Phase 011: confirm delivery of a shipment — the one permission that can move a shipment/fulfillment to `DELIVERED` |
 
 Two roles, real least-privilege boundaries, not labels:
@@ -246,8 +246,7 @@ own mandatory concurrency suite, not only sequential retries.
 - **Duplicate invoice-issue and shipment-create requests, concurrent or
   sequential, always converge to exactly one row** — proven for both
   paths.
-- **Order completion cannot be forced by a cache-column lie** (Phase
-  011) — proven via `409` on both a `SHIPPED`-but-undelivered order and
+- **Order completion cannot be forced by a cache-column lie** (Phase 011) — proven via `409` on both a `SHIPPED`-but-undelivered order and
   a zero-fulfillment order, `201` only once delivery is real.
 
 ## Deliberately not built this phase

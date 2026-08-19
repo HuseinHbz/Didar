@@ -208,7 +208,7 @@ list, found what was actually still open, and closed it:
   doesn't supply one gets the pre-existing behavior (a new fulfillment
   every call, still safely quantity-checked by `lockAndSumFulfilled`).
 - **Order completion is now a server-derived fact.** `OrderService
-  .complete()` no longer just asserts the `OrderStateMachine` edge — it
+.complete()` no longer just asserts the `OrderStateMachine` edge — it
   first calls the new `OrderCompletionValidator.assertReady()` (pure
   domain service, zero I/O) against the order's real fulfillments: every
   non-`CANCELLED` fulfillment must actually be `DELIVERED` (not merely

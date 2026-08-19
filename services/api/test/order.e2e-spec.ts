@@ -1031,7 +1031,9 @@ describe('Order (e2e)', () => {
 
         const wrongPaymentStatus = body<{ items: OrderBody[] }>(
           await request(server)
-            .get(`/admin/orders?customerId=${orderADetail.customerId}&paymentStatus=UNPAID&limit=100`)
+            .get(
+              `/admin/orders?customerId=${orderADetail.customerId}&paymentStatus=UNPAID&limit=100`,
+            )
             .set('Authorization', `Bearer ${adminToken}`)
             .expect(200),
         );

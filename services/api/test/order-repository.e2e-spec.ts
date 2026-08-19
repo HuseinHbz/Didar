@@ -8,8 +8,8 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 
 import { AppModule } from '../src/app.module';
-import { PAYMENT_PROVIDER_ADAPTER_REGISTRY } from '../src/modules/payment/domain/ports/payment-provider-adapter.port';
 import { PrismaFulfillmentRepository } from '../src/modules/order/infrastructure/repositories/prisma-fulfillment.repository';
+import { PAYMENT_PROVIDER_ADAPTER_REGISTRY } from '../src/modules/payment/domain/ports/payment-provider-adapter.port';
 
 import { FakePaymentProviderAdapterRegistry } from './support/fake-payment-provider-adapter';
 
