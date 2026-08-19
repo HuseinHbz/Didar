@@ -4,13 +4,16 @@
  * path that can be legitimately missed (a customer who never returns
  * after paying; a crash mid-`OrderConversionService` call), never a
  * queue added just because the brief's suggestion list mentioned a name.
- * `order-expiration`/`fulfillment-processing`/`shipment-sync` are
- * deliberately *not* built — `PENDING_PAYMENT` is not a durably-persisted
- * reachable state in this design (an `Order` row is only ever written
- * already `PAID`, see `OrderConversionService`), so there is nothing for
- * an order-expiration sweep to expire; fulfillment/shipment status
- * changes are synchronous admin actions with no async processing to
- * decouple, and no live courier exists to sync against. */
+ * `PENDING_PAYMENT` *is* a real, if narrow and short-lived, reachable
+ * state — a crash between `orders.create()` and the rest of
+ * `convertFromCheckout()` leaves a row there — which is exactly why
+ * `order_conversion`'s own sweep also scans for it directly (see
+ * `ORDER_STUCK_PENDING_GRACE_MS` below), not only for already-`CONVERTED`
+ * checkouts. A dedicated `order-expiration`/`fulfillment-processing`/
+ * `shipment-sync` queue is still deliberately *not* built beyond that:
+ * fulfillment/shipment status changes are synchronous admin actions with
+ * no async processing to decouple, and no live courier exists to sync
+ * against. */
 export const ORDER_CONVERSION_QUEUE = 'order_conversion';
 export const INVOICE_GENERATION_QUEUE = 'invoice_generation';
 
@@ -44,3 +47,8 @@ export const INVOICE_GENERATION_SWEEP_INTERVAL_MS = 5 * 60_000;
  * does near-zero work most runs. */
 export const ORDER_CONVERSION_LOOKBACK_MS = 24 * 60 * 60_000;
 export const INVOICE_GENERATION_LOOKBACK_MS = 24 * 60 * 60_000;
+
+/** How long an order may sit `PENDING_PAYMENT` before the sweep treats it
+ * as stuck rather than merely in-flight — same 2-minute grace window
+ * `payment_verification_retry`'s own "never returned" threshold uses. */
+export const ORDER_STUCK_PENDING_GRACE_MS = 2 * 60_000;

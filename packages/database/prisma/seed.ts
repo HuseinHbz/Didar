@@ -2111,12 +2111,19 @@ async function main(): Promise<void> {
   // `OrderConversionService.convertFromCheckout()`'s `orders.create()`
   // step succeeded but the process died before the following PAID
   // transition/invoice issuance/`checkout.markConverted()` steps ran.
-  // `OrderConversionService` now resumes cleanly from exactly this state
-  // (see that service's own inline comment) — this fixture exists so
-  // that resume path has something real to exercise. Its own guest
-  // checkout stays READY_FOR_PAYMENT (never reached `markConverted()`),
-  // even though its payment intent already SUCCEEDED/VERIFIED — a real,
-  // if unusual, mid-flight combination. ---
+  // Its own guest checkout stays READY_FOR_PAYMENT (never reached
+  // `markConverted()`), even though its payment intent already
+  // SUCCEEDED/VERIFIED — a real, if unusual, mid-flight combination.
+  //
+  // Both `OrderConversionService.convertFromCheckout()` and the
+  // `order_conversion` sweep's own second pass now resume cleanly from
+  // exactly this state (see that service's own inline comment and
+  // `OrderConversionProcessor`'s) — this fixture exists so that resume
+  // path has something real to exercise on a freshly-seeded database. If
+  // the API is actually running against this database, expect the sweep
+  // to resolve it to PAID within `ORDER_STUCK_PENDING_GRACE_MS` of
+  // starting up — that's the fix working as intended, not seed data
+  // silently rotting; re-run `pnpm seed` for a fresh one on demand. ---
   const order2GuestToken = 'seed-guest-cart-token-unpaid-000000000000000000';
   const order2Cart = await prisma.cart.upsert({
     where: { id: '00000000-0000-4000-9000-000000000009' },

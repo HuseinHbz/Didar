@@ -46,6 +46,17 @@ export interface OrderRepositoryPort {
    * `invoices.issueForOrder()` inside `OrderConversionService`). */
   listRecentlyPaid(since: Date): Promise<Order[]>;
 
+  /** Every order still `PENDING_PAYMENT` and created before `olderThan` —
+   * reserved for the `order_conversion` sweep's other reliability
+   * backstop: a crash between `orders.create()` and
+   * `checkout.markConverted()` inside `OrderConversionService.
+   * convertFromCheckout()` leaves an order stuck here *and* leaves its
+   * checkout still short of `CONVERTED`, so the sweep's own
+   * `listConvertedSince()` scan alone would never find it. `olderThan`
+   * (not "since now") is deliberate — a genuinely in-flight conversion a
+   * few milliseconds into its own transaction is not stuck, just busy. */
+  listStuckPendingConversion(olderThan: Date): Promise<Order[]>;
+
   /** Generates the next order number from `commerce.order_number_seq`
    * (ADR-009 decision 6) and creates the `Order` + its `OrderItem` rows in
    * one transaction. Idempotent on `checkoutSessionId`/`paymentIntentId`

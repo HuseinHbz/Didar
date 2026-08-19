@@ -91,6 +91,13 @@ export class PrismaOrderRepository implements OrderRepositoryPort {
     return rows.map(orderToDomain);
   }
 
+  async listStuckPendingConversion(olderThan: Date): Promise<Order[]> {
+    const rows = await prisma.order.findMany({
+      where: { status: 'PENDING_PAYMENT', createdAt: { lt: olderThan } },
+    });
+    return rows.map(orderToDomain);
+  }
+
   /**
    * Idempotent on `checkoutSessionId`/`paymentIntentId` under real
    * concurrency (ADR-009 decision 4) — same P2002-catch-and-reread
