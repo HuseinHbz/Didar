@@ -279,6 +279,12 @@ async function main(): Promise<void> {
       action: 'shipment.update',
       description: 'Update a shipment status/tracking event',
     },
+    {
+      module: 'order',
+      action: 'shipment.deliver',
+      description:
+        'Confirm delivery of a shipment (Phase 011 — a distinct, more-sensitive boundary from shipment.update, since delivery can gate order completion)',
+    },
 
     // Phase 010 — promotion/discount/coupon engine (§19, see
     // docs/adr/ADR-010-promotion-engine.md). Deletion is never given to
@@ -560,14 +566,20 @@ async function main(): Promise<void> {
     where: { name: 'fulfillment_clerk' },
     update: {
       description:
-        'Warehouse-floor fulfillment — create/update fulfillments and shipments; cannot approve, cancel, refund, or complete an order',
+        'Warehouse-floor fulfillment — create/update fulfillments and shipments; cannot approve, cancel, refund, complete an order, or confirm delivery',
     },
     create: {
       name: 'fulfillment_clerk',
       description:
-        'Warehouse-floor fulfillment — create/update fulfillments and shipments; cannot approve, cancel, refund, or complete an order',
+        'Warehouse-floor fulfillment — create/update fulfillments and shipments; cannot approve, cancel, refund, complete an order, or confirm delivery',
     },
   });
+  // Phase 011 (ADR-011 decision 4) — `shipment.deliver` is deliberately
+  // NOT granted here: delivery confirmation is the one shipment event
+  // that can gate order completion, so it gets the same "floor role
+  // can't reach its own more-sensitive action" treatment `approve`/
+  // `cancel`/`refund`/`complete` already have, not folded into the
+  // broader `shipment.update` grant this role does receive.
   for (const action of ['read', 'update', 'fulfill', 'ship', 'shipment.read', 'shipment.update']) {
     await grant(fulfillmentClerkRole.id, `order.${action}`);
   }
@@ -2976,7 +2988,7 @@ async function main(): Promise<void> {
   });
 
   console.log(
-    '[seed] done — RBAC (70 real permissions across identity/catalog/inventory/payment/order/' +
+    '[seed] done — RBAC (71 real permissions across identity/catalog/inventory/payment/order/' +
       'promotion/coupon, role inheritance, a deny-override), admin/customer/support/' +
       'catalog-editor/inventory-role/payment-role/order-role/promotion-manager/promotion-editor ' +
       'users, demo customer, catalog (3 products — two PUBLISHED with ' +
