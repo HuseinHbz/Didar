@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
 import { Prisma, prisma } from '@iecp/database';
-import type { OrderFulfillmentStatus, OrderPaymentStatus, OrderSource, OrderStatus } from '@iecp/types';
+import type {
+  OrderFulfillmentStatus,
+  OrderPaymentStatus,
+  OrderSource,
+  OrderStatus,
+} from '@iecp/types';
 import { Injectable } from '@nestjs/common';
 
 import type { Order } from '../../domain/entities/order.entity';
@@ -10,6 +15,7 @@ import type {
   OrderRepositoryPort,
   OrderWithDetail,
 } from '../../domain/ports/order.repository.port';
+import { OrderStateMachine } from '../../domain/services/order-state-machine';
 import { orderItemToDomain, orderStatusHistoryToDomain, orderToDomain } from '../order.mapper';
 
 function isUniqueViolationOn(error: unknown, column: string): boolean {
@@ -145,8 +151,7 @@ export class PrismaOrderRepository implements OrderRepositoryPort {
             grandTotal: props.grandTotal,
             shippingAddressSnapshot: props.shippingAddressSnapshot as Prisma.InputJsonValue,
             billingAddressSnapshot: (props.billingAddressSnapshot ?? undefined) as
-              | Prisma.InputJsonValue
-              | undefined,
+              Prisma.InputJsonValue | undefined,
             items: {
               create: props.items.map((item) => ({
                 id: randomUUID(),
@@ -190,6 +195,23 @@ export class PrismaOrderRepository implements OrderRepositoryPort {
     }
   }
 
+  /**
+   * Row-locks `commerce.orders` (`SELECT ... FOR UPDATE`, the same
+   * technique `lockAndSumFulfilled` established) before deciding what to
+   * do — not just before writing. Two truly concurrent callers racing to
+   * transition the same order (e.g. `OrderService.cancel()` called twice
+   * at once) both pass their own pre-check against a stale read, but only
+   * one can hold this lock at a time: the first to acquire it makes the
+   * real transition and writes the one `OrderStatusHistory` row; every
+   * other one, once it acquires the lock in turn, sees the already-
+   * updated `status` and — via the same `OrderStateMachine.isNoOp` every
+   * caller already uses — resolves as a no-op instead of writing a
+   * second, spurious history entry. A transition that's no longer legal
+   * at all once the lock is held (state moved somewhere else entirely
+   * from what the caller checked) throws `InvalidOrderTransitionError`,
+   * a genuine 409 — the caller's own pre-check was correct when it ran,
+   * this is a real race outcome, not a bug to hide.
+   */
   async updateStatus(
     id: string,
     status: OrderStatus,
@@ -198,7 +220,18 @@ export class PrismaOrderRepository implements OrderRepositoryPort {
     extra?: { cancelledAt?: Date; completedAt?: Date },
   ): Promise<Order> {
     const row = await prisma.$transaction(async (tx) => {
-      const current = await tx.order.findUniqueOrThrow({ where: { id } });
+      const locked = await tx.$queryRaw<{ status: OrderStatus }[]>(
+        Prisma.sql`SELECT status FROM commerce.orders WHERE id = ${id}::uuid FOR UPDATE`,
+      );
+      const currentStatus = locked[0]?.status;
+      if (currentStatus === undefined) {
+        throw new Error(`Order ${id} not found`);
+      }
+      if (OrderStateMachine.isNoOp(currentStatus, status)) {
+        return tx.order.findUniqueOrThrow({ where: { id } });
+      }
+      OrderStateMachine.assertTransition(currentStatus, status);
+
       const updated = await tx.order.update({
         where: { id },
         data: { status, cancelledAt: extra?.cancelledAt, completedAt: extra?.completedAt },
@@ -207,7 +240,7 @@ export class PrismaOrderRepository implements OrderRepositoryPort {
         data: {
           id: randomUUID(),
           orderId: id,
-          fromStatus: current.status,
+          fromStatus: currentStatus,
           toStatus: status,
           changedBy,
           note: note ?? null,
