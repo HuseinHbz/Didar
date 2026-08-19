@@ -2,7 +2,7 @@
 
 Full architectural rationale: [`docs/adr/ADR-009-order-fulfillment.md`](../adr/ADR-009-order-fulfillment.md).
 Full endpoint/permission reference: [`docs/api/order.md`](../api/order.md) /
-[`docs/security/order-fulfillment-security.md`](../security/order-fulfillment-security.md).
+[`docs/security/order-security.md`](../security/order-security.md).
 Business/product framing this phase implements: `docs/product/blueprint.md`
 §17, §25, §54. This document says what's real **today** versus still
 aspirational — same convention as `docs/product/payment.md`.

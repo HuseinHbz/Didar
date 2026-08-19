@@ -129,11 +129,11 @@ by a `quality-gate` job. Branch protection requiring that check is still a
 manual GitHub-admin step (not configurable from inside the repo) — see that
 doc. Every phase's `feature/*` branch is merged to `main` once its PR lands
 (all of Phase 001-008's PRs are merged as of Phase 008; `develop` tracks the
-same tip) — see `docs/deployment/ci-pipeline.md`'s "Numbered branch naming"
-section for the two-digit prefix (`01-feature-foundation-monorepo`, …,
-`08-feature-payment-orchestration`) every phase branch carries from Phase
-001 onward, and for the naming rule to keep following on every future
-branch.
+same tip, with Phase 009's own branch pushed and pending) — see
+`docs/deployment/ci-pipeline.md`'s "Numbered branch naming" section for the
+two-digit prefix (`01-feature-foundation-monorepo`, …,
+`09-feature-order-fulfillment`) every phase branch carries from Phase 001
+onward, and for the naming rule to keep following on every future branch.
 
 Phase 003 built the real PostgreSQL foundation (blueprint's "settle the
 database/domain skeleton first" ordering principle): the full ERD across all
@@ -275,14 +275,51 @@ verification is a documented gap for a staging environment to close, not
 hidden. **Backend-only, same precedent**: `apps/admin`/`apps/storefront`
 are still untouched — see `docs/product/payment.md`.
 
+Phase 009 built the real order/invoice/fulfillment domain on top of
+cart-checkout/catalog/inventory/payment at once —
+`services/api/src/modules/order` (see its own `README.md`) covers an
+`Order` created only from a verified `PaymentTransaction`
+(`OrderConversionService.convertFromCheckout()`, idempotent on
+`checkoutSessionId`/`paymentIntentId` and crash-recovery-resumable if a
+prior call died mid-flight — a real gap this phase found and fixed on
+itself, twice, once in the synchronous method and once in its own
+sweep's second pass), an 8-state order lifecycle plus separate
+fulfillment/shipment/invoice state machines, automatic invoice issuance
+with a real server-generated number (`finance.invoice_number_seq`),
+partial-fulfillment-aware fulfillment tracking with a row-locked
+never-over-fulfill invariant (`SELECT ... FOR UPDATE`, reusing
+`mutateInventoryItem`'s own Phase 006 technique), and a
+`ManualShippingProvider` behind a `ShippingProviderPort` — no live
+courier integration exists yet, and this phase says so rather than
+faking one. It imports four prior modules at once
+(`CartCheckoutModule`, `CatalogModule`, `InventoryModule`,
+`PaymentModule`) — the deepest composition chain in this repo so far —
+and reuses `cart-checkout`'s `ActorResolverGuard` for customer/guest
+order routes; admin routes are real RBAC (14 new `order.*` permissions,
+`order_manager`/`fulfillment_clerk` roles). It's the sixth full
+clean-architecture module in this repo and adds two more in-process
+BullMQ queues (`order_conversion`, `invoice_generation`). Its own
+mandatory concurrency e2e suite proved (not just declared) a real race
+this time in a different layer than every prior phase's own P2002-catch-
+and-reread findings: `OrderService.cancel()`'s check-then-act pattern
+(read the order, decide via the state machine, then write) was not
+atomic — six concurrent cancel requests on one order originally produced
+six `OrderStatusHistory` rows, not one — fixed by row-locking the order
+(`SELECT ... FOR UPDATE`) and re-checking the state machine against the
+*locked* status before writing, inside `PrismaOrderRepository
+.updateStatus()` itself so every caller benefits, not just `cancel()` —
+see `docs/architecture/order.md`. **Backend-only, same precedent**:
+`apps/admin`/`apps/storefront` are still untouched — see
+`docs/product/order-fulfillment.md`.
+
 **Next up** is the rest of Phase 1 (see end of blueprint doc "وضعیت
-فعلی"): the remaining real domain modules (`order`, …) beyond
-`identity`/`catalog`/`inventory`/`cart-checkout`/`payment`, each landing
-once its slice of the ERD/API contract/permission matrix/event map is
-designed — _before_ further UI/design-system work. The stated ordering
-principle: settle the database/domain skeleton first (done for identity,
-catalog, inventory, cart-checkout, and payment; the rest still pending),
-then design system + admin panel structure + web/PWA sitemap + Android
-structure.
+فعلی"): the remaining real domain modules beyond
+`identity`/`catalog`/`inventory`/`cart-checkout`/`payment`/`order`, each
+landing once its slice of the ERD/API contract/permission matrix/event
+map is designed — _before_ further UI/design-system work. The stated
+ordering principle: settle the database/domain skeleton first (done for
+identity, catalog, inventory, cart-checkout, payment, and order; the
+rest still pending), then design system + admin panel structure + web/PWA
+sitemap + Android structure.
 
 Treat any new architectural decision as needing to stay consistent with this document, or update it explicitly.

@@ -79,6 +79,22 @@ locationId)` with a full 7-bucket quantity model, `InventoryLedger`
   placeholder `payments`/`refunds` tables at authoring time (confirmed
   directly) — `down.sql` restores that exact placeholder shape; see its
   own header comment.
+- `20260814000000_order_fulfillment_foundation` (Phase 009) — drops
+  Phase 003's placeholder `commerce.Order`/`OrderItem`/
+  `OrderStatusHistory`/`finance.Invoice`/`InvoiceLine` (a shared
+  placeholder `OrderStatus` enum, no real payment link) and replaces
+  them with the real subtree: 6 new enums, 9 new tables (`Order`,
+  `OrderItem`, `OrderStatusHistory`, `Fulfillment`, `FulfillmentItem`,
+  `Shipment`, `ShipmentEvent` in `commerce`; `Invoice`,
+  `InvoiceItem` — renamed from `InvoiceLine` — in `finance`), plus two
+  real Postgres sequences (`commerce.order_number_seq`,
+  `finance.invoice_number_seq`) hand-added after the Prisma-generated
+  DDL. Full detail: [`order-erd.md`](./order-erd.md) and
+  [`docs/adr/ADR-009-order-fulfillment.md`](../adr/ADR-009-order-fulfillment.md).
+  Not data-preserving in the Phase 008 sense — 0 rows existed in the
+  placeholder `orders`/`invoices` tables at authoring time (confirmed
+  directly) — `down.sql` restores that exact placeholder shape; see its
+  own header comment.
 
 This is **not** full coverage of blueprint §57's eventual table list. See
 ["Deliberately out of scope"](#deliberately-out-of-scope) below for exactly
@@ -279,6 +295,18 @@ real local PostgreSQL:
   `payments`/`refunds` shape (0 rows either way), so the round trip is
   reproducible regardless of how many times it repeats. See
   [`payment-erd.md`](./payment-erd.md)'s own "Migration" section.
+- Phase 009: the order/fulfillment/shipment addition to `commerce` plus
+  the invoice addition to `finance` (6 new enums, 9 new tables,
+  replacing Phase 003's placeholder `Order`/`OrderItem`/
+  `OrderStatusHistory`/`Invoice`/`InvoiceLine`), round-tripped once — up
+  → down → up — with `prisma migrate diff` confirming zero drift at
+  every step and `catalog.products`/`inventory.warehouses`/
+  `commerce.carts`/`commerce.checkout_sessions`/`identity.users`/
+  `commerce.payment_intents`/`commerce.payment_transactions` row counts
+  confirmed intact throughout. The rollback restores the exact Phase 003
+  placeholder `orders`/`invoices` shape (0 rows either way), so the
+  round trip is reproducible regardless of how many times it repeats.
+  See [`order-erd.md`](./order-erd.md)'s own "Migration" section.
 
 ## Seeding
 
@@ -287,8 +315,8 @@ pnpm --filter @iecp/database seed
 ```
 
 `prisma/seed.ts` walks one coherent slice through every schema — an admin
-user and a demo customer (identity/customer), 43 real RBAC permissions
-across identity/catalog/inventory/payment with 10 roles including a
+user and a demo customer (identity/customer), 57 real RBAC permissions
+across identity/catalog/inventory/payment/order with 12 roles including a
 deny-override (identity), three products including two
 priced/published/stocked SKUs — one with a catalog-level discount
 (catalog/finance), two warehouses/three locations with real stock, two
@@ -298,15 +326,18 @@ cart + a guest cart + a checkout-ready fixture with a real reservation + an
 expired checkout (commerce, Phase 007), a ZarinPal payment provider + three
 payment-intent chains covering a verified success with a partial refund, a
 verified-but-mismatched failure, and an unresolved reconciliation finding
-(commerce, Phase 008), a home page/menu/FAQ (cms), notification templates +
-the demo customer's channel preferences (notification), and a feature flag
-+ two settings (system). Idempotent throughout (`upsert`, keyed on each
-model's real unique constraint) — safe to run against a freshly-migrated
-database or one that already has this data. Verified idempotent (ran
-repeatedly across Phases 006-008, row counts unchanged) and verified
-runnable under `iecp_app` alone — the seed only needs DML, confirming the
-least-privilege role is sufficient for real application-style writes, not
-just raw `psql`.
+(commerce, Phase 008), four order fixtures covering paid/unpaid/cancelled/
+fulfilled — including a real DELIVERED fulfillment + shipment + tracking
+history and three issued invoices (commerce/finance, Phase 009), a home
+page/menu/FAQ (cms), notification templates + the demo customer's channel
+preferences (notification), and a feature flag + two settings (system).
+Idempotent throughout (`upsert`, keyed on each model's real unique
+constraint, or a `findUnique`-then-create guard where no natural unique
+key exists) — safe to run against a freshly-migrated database or one that
+already has this data. Verified idempotent (ran repeatedly across Phases
+006-009, row counts unchanged) and verified runnable under `iecp_app`
+alone — the seed only needs DML, confirming the least-privilege role is
+sufficient for real application-style writes, not just raw `psql`.
 
 ## Backup/restore
 
