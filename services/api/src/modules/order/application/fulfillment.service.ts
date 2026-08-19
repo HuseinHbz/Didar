@@ -53,7 +53,10 @@ export class FulfillmentService {
   async create(
     orderId: string,
     actorUserId: string,
-    props: { warehouseId?: string | null; items: readonly { orderItemId: string; quantity: number }[] },
+    props: {
+      warehouseId?: string | null;
+      items: readonly { orderItemId: string; quantity: number }[];
+    },
   ): Promise<Fulfillment> {
     const orderDetail = await this.orders.findById(orderId);
     if (!orderDetail) throw new NotFoundException('Order not found');

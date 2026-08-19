@@ -20,7 +20,10 @@ import {
   InvoiceGenerationProcessor,
   InvoiceGenerationQueueService,
 } from './invoice-generation.processor';
-import { OrderConversionProcessor, OrderConversionQueueService } from './order-conversion.processor';
+import {
+  OrderConversionProcessor,
+  OrderConversionQueueService,
+} from './order-conversion.processor';
 import { INVOICE_GENERATION_QUEUE, ORDER_CONVERSION_QUEUE } from './queue-names';
 
 /**

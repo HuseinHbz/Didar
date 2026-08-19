@@ -69,9 +69,7 @@ export class FulfillmentAdminController {
   ) {
     await this.fulfillments.createShipment(fulfillmentId, actorId, dto);
     const detail = await this.fulfillments.get(fulfillmentId);
-    return detail.shipment
-      ? FulfillmentResponseDto.fromDomain(detail).shipment
-      : null;
+    return detail.shipment ? FulfillmentResponseDto.fromDomain(detail).shipment : null;
   }
 
   @Get('shipments')

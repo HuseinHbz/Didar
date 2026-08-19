@@ -48,7 +48,8 @@ export class OrderResponseDto {
   @ApiProperty({ nullable: true }) cancelledAt!: Date | null;
   @ApiProperty({ nullable: true }) completedAt!: Date | null;
   @ApiProperty({ type: [OrderItemResponseDto] }) items!: OrderItemResponseDto[];
-  @ApiProperty({ type: [OrderStatusHistoryResponseDto] }) statusHistory!: OrderStatusHistoryResponseDto[];
+  @ApiProperty({ type: [OrderStatusHistoryResponseDto] })
+  statusHistory!: OrderStatusHistoryResponseDto[];
   @ApiProperty() createdAt!: Date;
   @ApiProperty() updatedAt!: Date;
 

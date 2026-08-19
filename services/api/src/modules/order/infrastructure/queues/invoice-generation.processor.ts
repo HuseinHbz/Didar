@@ -3,7 +3,10 @@ import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import type { Job, Queue } from 'bullmq';
 
 import { InvoiceService } from '../../application/invoice.service';
-import { ORDER_REPOSITORY, type OrderRepositoryPort } from '../../domain/ports/order.repository.port';
+import {
+  ORDER_REPOSITORY,
+  type OrderRepositoryPort,
+} from '../../domain/ports/order.repository.port';
 
 import {
   DEFAULT_JOB_OPTIONS,
@@ -81,7 +84,9 @@ export class InvoiceGenerationProcessor extends WorkerHost {
           issued += 1;
         })
         .catch((error: unknown) => {
-          this.logger.warn(`invoice_generation_sweep_failed orderId=${order.id} error=${String(error)}`);
+          this.logger.warn(
+            `invoice_generation_sweep_failed orderId=${order.id} error=${String(error)}`,
+          );
         });
     }
 
