@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
 
 import { CouponRedemptionService } from './application/coupon-redemption.service';
 import { CouponService } from './application/coupon.service';
@@ -12,6 +13,7 @@ import { PrismaCustomerContextRepository } from './infrastructure/repositories/p
 import { PrismaPromotionRepository } from './infrastructure/repositories/prisma-promotion.repository';
 import { CouponAdminController } from './presentation/controllers/coupon-admin.controller';
 import { PromotionAdminController } from './presentation/controllers/promotion-admin.controller';
+import { PromotionDomainExceptionFilter } from './presentation/filters/promotion-domain-exception.filter';
 
 /**
  * Composition root for the promotion/discount/coupon engine (Phase 010,
@@ -31,6 +33,7 @@ import { PromotionAdminController } from './presentation/controllers/promotion-a
     CouponService,
     PromotionResolutionService,
     CouponRedemptionService,
+    { provide: APP_FILTER, useClass: PromotionDomainExceptionFilter },
   ],
   exports: [PromotionResolutionService, CouponRedemptionService, PromotionService, CouponService],
 })

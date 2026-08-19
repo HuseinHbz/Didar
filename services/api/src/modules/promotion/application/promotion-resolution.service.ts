@@ -37,9 +37,7 @@ export interface ResolveForCartInput {
  * its own (same pragmatism `CartPricingService` already applies reading
  * `system.Setting` directly). Domain layer stays Prisma-free regardless
  * — only this application service touches it. */
-async function catalogContext(
-  productSkuId: string,
-): Promise<{
+async function catalogContext(productSkuId: string): Promise<{
   productId: string | null;
   categoryId: string | null;
   brandId: string | null;

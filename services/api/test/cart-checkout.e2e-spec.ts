@@ -369,12 +369,23 @@ describe('Cart & Checkout (e2e)', () => {
         .post('/cart/price')
         .set('X-Cart-Token', guestToken)
         .expect(201);
-      const resolution = body<{ subtotal: string; grandTotal: string; shippingTotal: string }>(
-        priceRes,
-      );
+      const resolution = body<{
+        subtotal: string;
+        grandTotal: string;
+        shippingTotal: string;
+        taxTotal: string;
+      }>(priceRes);
       expect(resolution.subtotal).toBe('12500000');
-      expect(resolution.shippingTotal).toBe('500000');
-      expect(BigInt(resolution.grandTotal)).toBeGreaterThan(BigInt(resolution.subtotal));
+      // Phase 010 (ADR-010, seed "Promotion C — free shipping"): a
+      // 12,500,000-Rial cart clears its 3,000,000 minimum, so the
+      // automatic promotion waives shipping — the selected method's own
+      // 500,000 estimate is a *would-be* cost, never charged once a
+      // free-shipping promotion applies. Real, expected behavior from a
+      // real seeded automatic promotion, not a regression.
+      expect(resolution.shippingTotal).toBe('0');
+      expect(BigInt(resolution.grandTotal)).toBe(
+        BigInt(resolution.subtotal) + BigInt(resolution.taxTotal),
+      );
     });
   });
 
