@@ -86,6 +86,29 @@ describe('Order (e2e)', () => {
   let mainWarehouseId: string;
   let mainLocationId: string;
 
+  /** Provisions a fresh `identity.users` + `customer.customers` row and
+   * logs in via the real OTP flow — used instead of the seed's own
+   * `+989120000002` customer for tests that need "an authenticated
+   * customer with a guaranteed-empty cart." `ActorResolverGuard`
+   * requires a real Customer profile for any Bearer-token request (see
+   * the IDOR test below); `getOrCreateForCustomer()` reuses whatever
+   * cart a customer already has, so the seed's own shared customer would
+   * carry stale items across this whole file's — and every other e2e
+   * file's — repeated runs. */
+  const provisionCustomer = async (phone: string): Promise<string> => {
+    const user = await prisma.user.upsert({
+      where: { phone },
+      update: {},
+      create: { phone, isActive: true, phoneVerifiedAt: new Date() },
+    });
+    await prisma.customer.upsert({
+      where: { userId: user.id },
+      update: {},
+      create: { userId: user.id, firstName: 'E2E', lastName: 'Order Customer' },
+    });
+    return loginByPhone(phone);
+  };
+
   const loginByPhone = async (phone: string): Promise<string> => {
     const requestRes = await request(server)
       .post('/auth/otp/request')
@@ -307,7 +330,7 @@ describe('Order (e2e)', () => {
     server = app.getHttpServer() as Server;
 
     adminToken = await loginByPhone('+989120000001');
-    customerToken = await loginByPhone('+989120000002');
+    customerToken = await provisionCustomer('+989120099902');
     orderManagerToken = await loginByPhone('+989120000011');
     fulfillmentClerkToken = await loginByPhone('+989120000012');
 
@@ -525,20 +548,8 @@ describe('Order (e2e)', () => {
       // ActorResolverGuard requires a real customer.customers row for any
       // Bearer-token request (a valid JWT with no Customer profile is a
       // genuine 401, not a 403 — the seed's own support/admin users have
-      // no such profile, so this suite provisions a second real customer
-      // directly, the same way seed.ts itself provisions the first one).
-      const phone = '+989120099901';
-      const otherUser = await prisma.user.upsert({
-        where: { phone },
-        update: {},
-        create: { phone, isActive: true, phoneVerifiedAt: new Date() },
-      });
-      await prisma.customer.upsert({
-        where: { userId: otherUser.id },
-        update: {},
-        create: { userId: otherUser.id, firstName: 'E2E', lastName: 'Other Customer' },
-      });
-      const otherCustomerToken = await loginByPhone(phone);
+      // no such profile).
+      const otherCustomerToken = await provisionCustomer('+989120099901');
 
       await request(server)
         .get(`/orders/${order.id}`)
