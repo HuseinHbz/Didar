@@ -482,6 +482,171 @@ describe('Promotion & Coupon (e2e)', () => {
     });
   });
 
+  describe('security (§21 — IDOR, replay, negative-discount, client manipulation)', () => {
+    it('IDOR: a coupon applied to one guest cart is invisible to a different guest token', async () => {
+      const skuId = await createFreshSellableSku('2000000', 5);
+      const cartA = await createGuestCartWithItem(skuId);
+      await request(server)
+        .post('/cart/coupon')
+        .set('X-Cart-Token', cartA.guestToken)
+        .send({ code: 'DIDAR20' })
+        .expect(201);
+
+      // A second, unrelated guest cart never sees cart A's coupon or its
+      // discount — carts are isolated per-token, the same ownership
+      // boundary `ActorResolverGuard` already enforces for every other
+      // cart-checkout route, proven here for the promotion-specific state.
+      const cartB = await createGuestCartWithItem(skuId);
+      const priceB = body<CartPriceBody>(
+        await request(server).post('/cart/price').set('X-Cart-Token', cartB.guestToken).expect(201),
+      );
+      expect(priceB.discountTotal).toBe('0');
+
+      // cart A's own discount is unaffected by cart B's existence.
+      const priceA = body<CartPriceBody>(
+        await request(server).post('/cart/price').set('X-Cart-Token', cartA.guestToken).expect(201),
+      );
+      expect(priceA.discountTotal).toBe('400000');
+    });
+
+    it('replay: confirming ready-for-payment twice never creates a second reservation', async () => {
+      const skuId = await createFreshSellableSku('2000000', 5);
+      const { checkoutId, guestToken } = await prepareCheckoutReadyToConfirm(skuId, 'DIDAR20');
+
+      const first = await confirmReady(checkoutId, guestToken);
+      expect(first.status).toBe(201);
+      // A replayed confirmation on an already-frozen checkout is a
+      // documented no-op (`CheckoutService.readyForPayment()`'s own
+      // `isNoOp` early return) — it must never attempt a second
+      // `reserveAll()` and must never fail either.
+      const replay = await confirmReady(checkoutId, guestToken);
+      expect(replay.status).toBe(201);
+
+      const redemptions = await prisma.couponRedemption.count({
+        where: { checkoutSessionId: checkoutId },
+      });
+      expect(redemptions).toBe(1);
+    });
+
+    it('a client cannot inject a discount amount by adding extra fields to the coupon-apply request', async () => {
+      const skuId = await createFreshSellableSku('2000000', 5);
+      const cart = await createGuestCartWithItem(skuId);
+
+      // `ApplyCouponDto` only declares `code`; the service-wide
+      // `ValidationPipe({ whitelist: true, forbidNonWhitelisted: true })`
+      // rejects any extra field outright — there is no code path where a
+      // client-supplied `discountAmount`/`resolvedDiscount` ever reaches
+      // the pricing pipeline.
+      await request(server)
+        .post('/cart/coupon')
+        .set('X-Cart-Token', cart.guestToken)
+        .send({ code: 'DIDAR20', discountAmount: '999999999', resolvedDiscount: '999999999' })
+        .expect(400);
+    });
+
+    it('a client cannot override the computed total by sending extra fields to the pricing endpoint', async () => {
+      const skuId = await createFreshSellableSku('2000000', 5);
+      const cart = await createGuestCartWithItem(skuId);
+      await request(server)
+        .post('/cart/coupon')
+        .set('X-Cart-Token', cart.guestToken)
+        .send({ code: 'DIDAR20' })
+        .expect(201);
+
+      // `POST /cart/price` binds no `@Body()` at all — it recomputes
+      // server-side from scratch every time (the brief's own absolute
+      // rule: never trust a client-supplied total). A forged body is
+      // simply never read.
+      const priceRes = await request(server)
+        .post('/cart/price')
+        .set('X-Cart-Token', cart.guestToken)
+        .send({ grandTotal: '1', discountTotal: '0', subtotal: '1' })
+        .expect(201);
+      const price = body<CartPriceBody>(priceRes);
+      expect(price.discountTotal).toBe('400000'); // still the real, server-computed 20% off
+    });
+
+    it('negative-discount manipulation: a promotion authored with a negative discountValue can never inflate the price', async () => {
+      const skuId = await createFreshSellableSku('1000000', 5);
+      const cart = await createGuestCartWithItem(skuId);
+
+      // Even a malformed/malicious admin-authored promotion (no positivity
+      // validation on `discountValue` at the DTO layer) can never turn
+      // into a price *increase* — `DiscountEngine`'s own `capDiscount`
+      // floors any raw negative discount to zero before it's ever applied
+      // (ADR-010's "shipping discounts never negative" principle,
+      // generalized to every discount type here).
+      const promoRes = await request(server)
+        .post('/admin/promotions')
+        .set('Authorization', `Bearer ${promotionManagerToken}`)
+        .send({
+          name: `E2E negative-discount promotion ${randomUUID().slice(0, 8)}`,
+          discountType: 'FIXED_AMOUNT',
+          discountValue: '-500000',
+          requiresCoupon: true,
+        })
+        .expect(201);
+      const promotionId = body<PromotionBody>(promoRes).id;
+      await request(server)
+        .post(`/admin/promotions/${promotionId}/activate`)
+        .set('Authorization', `Bearer ${promotionManagerToken}`)
+        .expect(201);
+      const couponCode = `NEG-${randomUUID().slice(0, 8)}`.toUpperCase();
+      await request(server)
+        .post('/admin/coupons')
+        .set('Authorization', `Bearer ${promotionManagerToken}`)
+        .send({ promotionId, code: couponCode })
+        .expect(201);
+
+      await request(server)
+        .post('/cart/coupon')
+        .set('X-Cart-Token', cart.guestToken)
+        .send({ code: couponCode })
+        .expect(201);
+
+      const priceRes = await request(server)
+        .post('/cart/price')
+        .set('X-Cart-Token', cart.guestToken)
+        .expect(201);
+      const price = body<CartPriceBody>(priceRes);
+      expect(price.discountTotal).toBe('0'); // floored, never negative
+      expect(BigInt(price.grandTotal) >= 1_000_000n).toBe(true); // never below the real subtotal
+    });
+
+    it('IDOR: a customer token cannot read or mutate another actor’s admin-scoped coupon without permission', async () => {
+      // Reuses the RBAC boundary proven above, phrased as the classic
+      // IDOR shape: a real, existing coupon ID guessed/known by an
+      // unauthorized caller still yields 403, never a 200 leaking its
+      // state or a mutation succeeding.
+      const promoRes = await request(server)
+        .post('/admin/promotions')
+        .set('Authorization', `Bearer ${promotionManagerToken}`)
+        .send({
+          name: `E2E IDOR promotion ${randomUUID().slice(0, 8)}`,
+          discountType: 'PERCENTAGE',
+          discountValue: '1000',
+          requiresCoupon: true,
+        })
+        .expect(201);
+      const promotionId = body<PromotionBody>(promoRes).id;
+      const couponRes = await request(server)
+        .post('/admin/coupons')
+        .set('Authorization', `Bearer ${promotionManagerToken}`)
+        .send({ promotionId, code: `IDOR-${randomUUID().slice(0, 8)}` })
+        .expect(201);
+      const couponId = body<CouponBody>(couponRes).id;
+
+      await request(server)
+        .get(`/admin/coupons/${couponId}`)
+        .set('Authorization', `Bearer ${customerToken}`)
+        .expect(403);
+      await request(server)
+        .post(`/admin/coupons/${couponId}/disable`)
+        .set('Authorization', `Bearer ${customerToken}`)
+        .expect(403);
+    });
+  });
+
   describe('concurrency (mandatory, ADR-010 decision 8/§30)', () => {
     it('usageLimit=1 against many concurrent redemption attempts yields exactly one success', async () => {
       const skuId = await createFreshSellableSku('2500000', 30);
