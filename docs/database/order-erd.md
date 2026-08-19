@@ -1,4 +1,4 @@
-# Order ERD (Phase 009 — full detail)
+# Order ERD (Phase 009 — full detail; extended Phase 011)
 
 Source of truth for the order/fulfillment/shipment portion of the
 `commerce` schema and the invoice portion of the `finance` schema —
@@ -71,8 +71,8 @@ erDiagram
         string guest_token "nullable"
         enum source "STOREFRONT|ADMIN|POS"
         enum status "8-state lifecycle, default PENDING_PAYMENT"
-        enum payment_status "cached, default UNPAID"
-        enum fulfillment_status "cached, default UNFULFILLED"
+        enum payment_status "cached, default UNPAID, indexed since Phase 011"
+        enum fulfillment_status "cached, default UNFULFILLED, indexed since Phase 011"
         bigint subtotal
         bigint discount_total
         bigint tax_total
@@ -82,7 +82,7 @@ erDiagram
         bigint refunded_total "default 0"
         json shipping_address_snapshot
         json billing_address_snapshot "nullable"
-        timestamp placed_at
+        timestamp placed_at "indexed since Phase 011 (admin placedFrom/placedTo filter)"
         timestamp cancelled_at "nullable"
         timestamp completed_at "nullable"
     }
@@ -111,6 +111,7 @@ erDiagram
         uuid order_id FK
         enum status "8-state lifecycle, default PENDING"
         uuid warehouse_id "nullable, -> inventory.warehouses.id, unenforced"
+        string idempotency_key UK "nullable — Phase 011, ADR-011 decision 2"
         timestamp packed_at "nullable"
         timestamp shipped_at "nullable"
         timestamp delivered_at "nullable"
@@ -126,7 +127,7 @@ erDiagram
         uuid id PK
         uuid fulfillment_id UK "one shipment per fulfillment"
         string carrier "nullable"
-        string tracking_number "nullable"
+        string tracking_number UK "nullable — UNIQUE since Phase 011, ADR-011 decision 5"
         enum status "PENDING|IN_TRANSIT|DELIVERED|FAILED|CANCELLED"
         timestamp shipped_at "nullable"
         timestamp delivered_at "nullable"
@@ -253,3 +254,20 @@ confirmed intact throughout). The rollback restores the exact Phase 003
 placeholder `orders`/`invoices` shape (0 rows either way — nothing to
 carry back), so the round trip is reproducible regardless of how many
 times it repeats.
+
+`packages/database/prisma/migrations/20260819120000_order_lifecycle_hardening/`
+(Phase 011) — purely additive, no drops, no data transforms:
+`fulfillments.idempotency_key` (nullable `TEXT`, `UNIQUE` index —
+Postgres allows unlimited `NULL`s under a plain unique index, so every
+existing row is unaffected); `orders_payment_status_idx`/
+`orders_fulfillment_status_idx`/`orders_placed_at_idx` (plain `btree`
+indexes, justified directly by the new admin search/filter query
+patterns); `shipments.tracking_number` gained a `UNIQUE` index (one real
+pre-existing duplicate value was found and resolved — see the migration
+file's own header comment — before this could be applied safely). Also
+verified via a full up → down → up round trip against real Postgres,
+`prisma migrate diff` confirming zero drift at every step, and the
+migration's own header records the exact pre-migration row counts
+(`commerce.orders`: 108, `commerce.fulfillments`: 28, `commerce.shipments`: 10
+at authoring time in the live dev database — real seed + e2e-generated
+data, not an empty table).

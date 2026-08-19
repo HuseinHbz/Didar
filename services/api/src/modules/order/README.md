@@ -3,8 +3,10 @@
 Phase 009's clean-architecture module for order, invoice, and
 fulfillment management: turning a verified payment into a durable order
 record, issuing invoices, fulfilling and shipping order lines, and the
-customer/admin-facing lifecycle around all three. Same layering
-convention every prior module established:
+customer/admin-facing lifecycle around all three. Hardened in Phase 011
+(concurrency, completion trust, delivery RBAC, search, idempotency — see
+the "Phase 011" section below); the layering and every aggregate below
+are unchanged. Same layering convention every prior module established:
 
 ```
 order/
@@ -194,15 +196,63 @@ Same list as [`docs/product/order-fulfillment.md`](../../../../../docs/product/o
 and ADR-009's own "Deferred" section:
 
 - Inventory restock on cancellation — the same gap `docs/product/payment.md`
-  already declares for refunds, not a new omission.
+  already declares for refunds, not a new omission. Re-evaluated and
+  reaffirmed in Phase 011 (ADR-011 decision 8).
 - A manual/cash-on-delivery order-creation path — `Order.checkoutSessionId`/
   `paymentIntentId` are both required, real FKs; every order traces back
   to a real checkout and a real verified payment.
 - Fulfillment-item quantity correction once a `Fulfillment` is created —
   only its `status` can move afterward.
 - A live courier integration — `ManualShippingProvider` only, admin-entered
-  carrier/tracking, no webhook ingestion.
+  carrier/tracking, no webhook ingestion. Still true after Phase 011.
 - Invoice PDF generation — `Invoice.pdfUrl` exists in the schema, unused
   this phase.
 - Credit notes / invoice re-issue — a correction is `VOID` plus manual
   admin follow-up.
+
+## Phase 011 — order lifecycle hardening
+
+Full rationale: [`docs/adr/ADR-011-order-lifecycle-hardening.md`](../../../../../docs/adr/ADR-011-order-lifecycle-hardening.md).
+An audit of this module against a concurrency/security scenario list,
+not a rebuild — what it actually changed:
+
+- **`PrismaFulfillmentRepository.updateStatus()`/`updateShipmentStatus()`**
+  gained the same `SELECT ... FOR UPDATE` + re-check-the-locked-row
+  pattern `PrismaOrderRepository.updateStatus()` already had — a real,
+  previously-undetected check-then-act race on the two aggregates that
+  didn't have it. Both now return `StatusUpdateResult<T> = { entity: T;
+  transitioned: boolean }` so callers can skip audit-logging on a race
+  that resolved to a no-op — a pattern deliberately *not* retrofitted
+  onto `OrderRepositoryPort.updateStatus()`'s six pre-existing call
+  sites (found, documented as a known deferred finding, judged too large
+  a blast radius for the value; see the architecture doc).
+- **`Fulfillment.idempotencyKey`** (optional, `@unique`) — `create()`
+  auto-generates one if the caller doesn't supply one, and honors a
+  client-supplied one via the standard P2002-catch-and-reread pattern.
+- **`OrderCompletionValidator`** (new, pure domain service) — `OrderService
+  .complete()` now calls it before asserting the state-machine edge:
+  every non-`CANCELLED` `Fulfillment` must be `DELIVERED`, payment must
+  be settled. Throws `OrderNotReadyToCompleteError` (409) otherwise.
+- **`FulfillmentService.confirmDelivery()`** (new) — the only path to
+  `DELIVERED`, backing the new `POST .../shipments/:id/deliver` route
+  and its own `order.shipment.deliver` permission; the generic
+  `PATCH .../fulfillments/:id` and `PATCH .../shipments/:id` routes'
+  DTOs now reject `DELIVERED` outright (`400`, validation layer).
+- **`Shipment.trackingNumber`** gained a `UNIQUE` index and a new
+  `findShipmentByTrackingNumber()` port method, backing
+  `GET admin/shipments/by-tracking/:trackingNumber`
+  (`ShipmentLookupAdminController`, its own file — a tracking number is
+  looked up without already knowing the order, so it isn't nested under
+  `admin/orders/:orderId`).
+- **`OrderListFilter`** gained `paymentStatus`/`fulfillmentStatus`/
+  `placedFrom`/`placedTo`, all real `WHERE` clauses in
+  `PrismaOrderRepository.list()`, backed by three new indexes.
+- **`OrderWithDetail.promotions`** — the Phase 010 `OrderPromotion`
+  snapshot, read back and exposed on `GET /orders/:id`/
+  `GET /admin/orders/:id` for the first time.
+- **New tests**: `domain/services/order-completion-validator.spec.ts`
+  (8 unit tests), `test/order-repository.e2e-spec.ts` (5 repository-level
+  concurrency tests against real PostgreSQL — see its own header
+  comment), and a new `ADR-011 hardening` section in
+  `test/order.e2e-spec.ts` (functional + RBAC + idempotency + IDOR
+  coverage for everything above).

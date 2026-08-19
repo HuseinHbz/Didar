@@ -114,6 +114,22 @@ locationId)` with a full 7-bucket quantity model, `InventoryLedger`
   `promotion_products` tables at authoring time (confirmed directly) —
   `down.sql` restores that exact placeholder shape; see its own header
   comment.
+- `20260819120000_order_lifecycle_hardening` (Phase 011) — purely
+  additive, no drops: `commerce.fulfillments.idempotency_key` (nullable
+  `TEXT`, `UNIQUE` index — fulfillment-creation idempotency, ADR-011
+  decision 2); `commerce.orders_payment_status_idx`/
+  `orders_fulfillment_status_idx`/`orders_placed_at_idx` (three new
+  `btree` indexes backing the new admin search/filter query patterns,
+  ADR-011 decision 6); `commerce.shipments.tracking_number` gained a
+  `UNIQUE` index (ADR-011 decision 5). Unlike every migration above,
+  this one _is_ data-preserving in the ordinary sense — real rows already
+  existed (`commerce.orders`: 108, `commerce.fulfillments`: 28,
+  `commerce.shipments`: 10 at authoring time) — and one real pre-existing
+  duplicate `tracking_number` value was found and resolved before the new
+  `UNIQUE` index could be applied; see the migration file's own header
+  comment for the exact remediation. Full detail:
+  [`order-erd.md`](./order-erd.md) and
+  [`docs/adr/ADR-011-order-lifecycle-hardening.md`](../adr/ADR-011-order-lifecycle-hardening.md).
 
 This is **not** full coverage of blueprint §57's eventual table list. See
 ["Deliberately out of scope"](#deliberately-out-of-scope) below for exactly
@@ -339,6 +355,15 @@ real local PostgreSQL:
   `promotions`/`coupon_redemptions`/`promotion_products` shape (0 rows
   either way). See [`promotion-erd.md`](./promotion-erd.md)'s own
   "Migration" section.
+- Phase 011: purely additive hardening on `commerce`
+  (`fulfillments.idempotency_key`, three `orders` indexes,
+  `shipments.tracking_number` UNIQUE) — no table drops, nothing to
+  replace. Round-tripped — up → down → up — against the live dev
+  database with real accumulated data (440 `commerce.orders`, 189
+  `commerce.fulfillments`, 89 `commerce.shipments` at round-trip time),
+  row counts confirmed identical before rollback, after rollback, and
+  after reapplying; `prisma migrate status` reported "up to date" after.
+  See [`order-erd.md`](./order-erd.md)'s own "Migration" section.
 
 ## Seeding
 

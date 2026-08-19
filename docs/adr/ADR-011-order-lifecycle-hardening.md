@@ -195,6 +195,25 @@ rewritten. Manual/COD order creation and fulfillment-item quantity
 correction remain the same two Phase-009-documented deferred gaps this
 phase does not attempt — neither is in this phase's actual brief.
 
+## Decision 10 — Documentation stays inside the existing per-module docs; no new `fulfillment.md`/`shipping.md` files
+
+Every prior phase in this repo documents its whole module — however many
+aggregates it covers — as one file per doc category:
+`docs/architecture/order.md`, `docs/api/order.md`,
+`docs/security/order-security.md`, `docs/database/order-erd.md` already
+cover `Order`, `Invoice`, `Fulfillment`, and `Shipment` together, because
+they are one Nest module (`modules/order`) with one composition root, not
+four independently deployed services. There is no
+`docs/architecture/invoice.md` or `docs/api/invoice.md` from Phase 009
+either, for the same reason. Splitting fulfillment/shipping into their
+own top-level doc files this phase would fragment one module's
+documentation across two conventions for no architectural reason —
+fulfillment and shipment have no schema, routing, or ownership boundary
+independent of `Order`. This phase's documentation instead extends the
+four existing `order.*` doc files (plus the module's own `README.md`)
+with their own "Phase 011" sections, the same append-don't-fork pattern
+every prior hardening/extension phase in this repo already uses.
+
 ## Consequences
 
 - Two real, previously-undetected concurrency bugs (fulfillment-status

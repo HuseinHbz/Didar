@@ -1,10 +1,11 @@
-# Order security (Phase 009)
+# Order security (Phase 009, hardened Phase 011)
 
 This document is `docs/security/README.md`'s "In place today" table,
 expanded for the one module Phase 009 added. Read
 [`README.md`](./README.md) first for what applies service-wide (rate
 limiting, secrets, dependency scanning, ...); this document only covers
-what's specific to the order/invoice/fulfillment domain.
+what's specific to the order/invoice/fulfillment domain. Phase 011
+rationale: [`docs/adr/ADR-011-order-lifecycle-hardening.md`](../adr/ADR-011-order-lifecycle-hardening.md).
 
 Same two-model split `docs/security/payment-security.md` documents —
 see `docs/api/order.md`'s "Auth" section for the exact route grouping.
@@ -27,8 +28,9 @@ see `docs/api/order.md`'s "Auth" section for the exact route grouping.
 
 ## RBAC model
 
-14 new `order.*` permissions, matching exactly what every controller
-checks (`docs/api/order.md` has the full route-to-permission mapping):
+15 `order.*` permissions (14 from Phase 009 plus one Phase 011
+addition), matching exactly what every controller checks
+(`docs/api/order.md` has the full route-to-permission mapping):
 
 | Permission              | Meaning                                                          |
 | ----------------------- | ---------------------------------------------------------------- |
@@ -44,19 +46,26 @@ checks (`docs/api/order.md` has the full route-to-permission mapping):
 | `order.invoice.read`    | Read an order's invoice                                          |
 | `order.invoice.create`  | Manually (re)issue an invoice for an order                       |
 | `order.invoice.void`    | Void an issued invoice                                           |
-| `order.shipment.read`   | Read an order's shipments                                        |
-| `order.shipment.update` | Update a shipment status/tracking event                          |
+| `order.shipment.read`   | Read an order's shipments (Phase 011: and look one up by tracking number) |
+| `order.shipment.update` | Update a shipment status/tracking event — never `DELIVERED` (Phase 011; see below) |
+| `order.shipment.deliver` | Phase 011: confirm delivery of a shipment — the one permission that can move a shipment/fulfillment to `DELIVERED` |
 
-Two new roles, real least-privilege boundaries, not labels:
+Two roles, real least-privilege boundaries, not labels:
 
-- **`order_manager`** — every `order.*` permission (a department head —
-  can approve/cancel/refund/complete orders and void invoices).
+- **`order_manager`** — every `order.*` permission, `order.shipment.deliver`
+  included (a department head — can approve/cancel/refund/complete
+  orders, void invoices, and confirm delivery).
 - **`fulfillment_clerk`** — `order.read`, `order.update`, `order.fulfill`,
-  `order.ship`, `order.shipment.read`, `order.shipment.update` only. The
-  same "floor role can't approve its own sensitive action" shape
-  `warehouse_operator`/`finance_auditor` already established: creating
-  and updating fulfillments/shipments is safe to grant broadly, but
-  `approve`/`cancel`/`refund`/`complete`/`invoice.void` are not.
+  `order.ship`, `order.shipment.read`, `order.shipment.update` only —
+  deliberately **not** `order.shipment.deliver` (Phase 011). The same
+  "floor role can't approve its own sensitive action" shape
+  `warehouse_operator`/`finance_auditor` already established, now proven
+  one level deeper: this role can walk a shipment through every status
+  short of `DELIVERED` (`IN_TRANSIT`/`FAILED`/`CANCELLED` are all still
+  `order.shipment.update`), but confirming delivery — which can gate
+  order completion — needs the more senior permission.
+  `approve`/`cancel`/`refund`/`complete`/`invoice.void`/`shipment.deliver`
+  all stay out of reach.
 
 `admin` continues to receive every `order.*` permission alongside its
 existing `catalog.*`/`inventory.*`/`payment.*` grants — no separate
@@ -121,6 +130,74 @@ fixed at the repository layer so every caller of `updateStatus()`
 benefits, not just `cancel()`. See
 `docs/architecture/order.md`'s "Concurrency, proven not assumed" section.
 
+## Fulfillment/shipment status transitions cannot be corrupted by racing requests (Phase 011)
+
+The exact same gap the section above fixed for `Order` existed, unfixed,
+on `Fulfillment`/`Shipment` — a real, previously-undetected check-then-
+act race, found by auditing Phase 009 for this exact bug class rather
+than by a failing test. `PrismaFulfillmentRepository.updateStatus()`/
+`updateShipmentStatus()` now row-lock (`SELECT ... FOR UPDATE`) and
+re-check `FulfillmentStateMachine`/`ShipmentStateMachine` against the
+_locked_ row before writing — identical technique, applied to the two
+aggregates that didn't have it. Proven, not assumed:
+`test/order-repository.e2e-spec.ts` fires 20 concurrent identical status
+updates against a fresh fulfillment (and, separately, a fresh shipment)
+and asserts exactly one real transition each; a third test asserts a
+transition that's no longer legal once the lock is held throws a real
+`409`, not a silent no-op.
+
+## Order completion is a server-derived fact, not an admin-trusted flag (Phase 011)
+
+`OrderService.complete()` no longer trusts the `fulfillmentStatus` cache
+column alone. `OrderCompletionValidator.assertReady()` (pure domain
+logic, zero I/O, unit-tested in isolation) re-checks the order's real
+`Fulfillment` rows: every non-`CANCELLED` one must actually be
+`DELIVERED`, and payment must be settled — a `PATCH .../status` body
+naming `COMPLETED` was never a route this module exposes (Phase 009
+already avoided that specific trust gap), but `POST .../complete` itself
+used to be reachable the moment the cache column read `FULFILLED`,
+without checking the shipment side ever genuinely delivered. Proven:
+`test/order.e2e-spec.ts` asserts `/complete` returns `409` both for a
+`SHIPPED`-but-not-`DELIVERED` fulfillment and for an order with no
+fulfillment at all, and `201` only once delivery is real.
+
+## Delivery confirmation has its own permission and cannot be forged through a generic status update (Phase 011)
+
+`POST admin/orders/:orderId/shipments/:shipmentId/deliver` is the _only_
+route that can move a shipment to `DELIVERED`, gated by its own
+`order.shipment.deliver` permission — structurally distinct from the
+generic `PATCH .../shipments/:shipmentId` (`order.shipment.update`)
+`fulfillment_clerk` already holds. That generic route's own DTO
+(`UpdateShipmentStatusDto`) excludes `DELIVERED` from its accepted enum
+entirely, so an attempt is a `400` at the validation layer — it never
+reaches the service, let alone the database. Proven:
+`test/order.e2e-spec.ts` asserts `fulfillment_clerk` gets `403` on the
+dedicated deliver route (while still succeeding on a generic, non-
+`DELIVERED` `PATCH` to the same shipment — a boundary on `DELIVERED`
+specifically, not a blanket lockout), and that a `PATCH` naming
+`DELIVERED` on either the fulfillment or shipment route is a `400` with
+no state change (verified by a direct DB read after the rejected call).
+
+## Tracking numbers cannot collide, and cannot be used to enumerate shipments by guessing (Phase 011)
+
+`Shipment.trackingNumber` gained a `UNIQUE` index — a second shipment can
+no longer be created with a tracking number already in use. The new
+`GET admin/shipments/by-tracking/:trackingNumber` lookup is admin-only
+(`order.shipment.read`); a plain customer token gets `403`, and an
+unknown tracking number is a `404`, not a `200` with an empty/null body
+that would let an unauthenticated or under-privileged caller distinguish
+"exists" from "doesn't exist."
+
+## Admin search/filtering never widens what an admin can see (Phase 011)
+
+`GET admin/orders`'s new `paymentStatus`/`fulfillmentStatus`/
+`customerId`/`placedFrom`/`placedTo` filters are pure `WHERE`-clause
+narrowing on top of the same `order.read`-gated, no-ownership-check admin
+route that already existed — they cannot be used to retrieve an order an
+`order.read` holder couldn't already list without them. No new
+information-disclosure surface, just a real query instead of client-side
+filtering over an unfiltered fetch.
+
 ## Refunds requested from this module never exceed what's refundable
 
 `OrderService.cancel()`/`requestPartialRefund()` never move money
@@ -148,34 +225,61 @@ own mandatory concurrency suite, not only sequential retries.
   (`+989120000012`) via the real OTP flow and asserts it can create a
   fulfillment but gets `403` on `POST .../cancel` and `POST .../refund`;
   a plain customer token gets `403` on every `/admin/orders` route.
+  Phase 011: the same clerk gets `403` on `POST .../deliver` while still
+  succeeding on a generic, non-`DELIVERED` shipment `PATCH` — the finer-
+  grained boundary is real, not just declared in the permission table.
 - **IDOR is rejected** on `orders/*` for a mismatched guest and a real
-  second authenticated customer.
+  second authenticated customer, and (Phase 011) on
+  `GET admin/shipments/by-tracking/:trackingNumber` for a plain customer
+  token.
 - **An Order cannot be created, and its totals cannot be forged, from
   anything but a verified payment** — traced above; no e2e test path
   creates an order any way other than the real
   checkout->payment->conversion chain.
 - **Over-fulfillment and duplicate-transition races are proven closed**,
   not assumed — see the two sections above for the exact test and, for
-  the status-transition case, the real bug it caught and the fix.
+  the status-transition case, the real bug it caught and the fix. Phase
+  011 extends this to `Fulfillment`/`Shipment` status transitions
+  themselves (previously unlocked) and to fulfillment-creation
+  idempotency (`idempotencyKey`) — both proven under real concurrent HTTP
+  requests, not only at the repository layer.
 - **Duplicate invoice-issue and shipment-create requests, concurrent or
   sequential, always converge to exactly one row** — proven for both
   paths.
+- **Order completion cannot be forced by a cache-column lie** (Phase
+  011) — proven via `409` on both a `SHIPPED`-but-undelivered order and
+  a zero-fulfillment order, `201` only once delivery is real.
 
 ## Deliberately not built this phase
 
 - **No inventory restock on cancellation.** `OrderService.cancel()`
   requests a refund but never restocks reserved/converted inventory —
   the same gap `docs/product/payment.md`'s own Phase 008 scope already
-  declares for refunds, not a new omission. See
-  `docs/architecture/order.md`'s "Known, deliberate gaps" section.
+  declares for refunds, not a new omission. Re-evaluated in Phase 011 and
+  deliberately reaffirmed, not merely carried forward unexamined — see
+  ADR-011 decision 8 and `docs/architecture/order.md`'s "Known,
+  deliberate gaps" section.
 - **No audit logging gap here** — unlike Phase 008's own documented
   gap, this module _does_ write `system.AuditLog` for every privileged
   admin mutation (`ORDER_STATUS_CHANGED`, `ORDER_CANCELLED`,
   `ORDER_REFUND_REQUESTED`, `FULFILLMENT_CREATED`,
   `FULFILLMENT_STATUS_CHANGED`, `SHIPMENT_CREATED`,
-  `SHIPMENT_STATUS_CHANGED`) — reusing `AUDIT_LOG_REPOSITORY` the same
-  way `catalog`/`inventory` do, closing the gap Phase 008 itself left
-  open rather than repeating it.
+  `SHIPMENT_STATUS_CHANGED`, and, Phase 011, `SHIPMENT_DELIVERED`) —
+  reusing `AUDIT_LOG_REPOSITORY` the same way `catalog`/`inventory` do,
+  closing the gap Phase 008 itself left open rather than repeating it.
+  Phase 011's new `Fulfillment`/`Shipment` status-update methods only
+  audit-log on a genuine transition (`StatusUpdateResult.transitioned`),
+  closing a small duplicate-audit-row edge case for those two aggregates
+  specifically — a related instance of the same edge case on the
+  pre-existing `Order.updateStatus()` call sites (`approve`/`complete`/
+  `cancel()`) was found by the same audit but deliberately **not**
+  retrofitted this phase: it produces at most one harmless extra
+  `AuditLog` row when two callers race a no-op transition (never a
+  duplicate `OrderStatusHistory` row — the row lock already prevents
+  that), and fixing it means changing `OrderRepositoryPort.updateStatus()`'s
+  return shape across six existing call sites for a cosmetic, not a
+  correctness or security, gap. See `docs/architecture/order.md`'s
+  "Phase 011" section for the full writeup.
 - **No rate limiting specific to order mutation** — same blanket nginx
   `limit_req_zone` as everything else in this service (see
   `docs/security/README.md`'s "Not yet" list).
@@ -184,3 +288,8 @@ own mandatory concurrency suite, not only sequential retries.
   phone-order flow that creates an order before payment is a separate,
   deferred feature (see `docs/architecture/order.md`'s "Known,
   deliberate gaps").
+- **No live courier tracking-event ingestion** — `Shipment`/
+  `ShipmentEvent` are admin-entered only (`ManualShippingProvider`);
+  Phase 011 did not add a courier webhook, so there is still no client-
+  or-carrier-submitted event this module trusts without an admin in the
+  loop.

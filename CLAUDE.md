@@ -353,6 +353,41 @@ price (`DiscountEngine`'s own floor-at-zero), and replaying
 `apps/admin`/`apps/storefront` are still untouched — see
 `docs/product/promotions.md`.
 
+Phase 011 hardened Phase 009's order/fulfillment/shipping module rather
+than rebuilding it — an audit against a real concurrency/security
+scenario list, not a new feature set. It found and fixed the exact same
+check-then-act status-transition race Phase 009 had already found and
+fixed on `Order` (`SELECT ... FOR UPDATE` + re-check-the-locked-row),
+still open on `Fulfillment`/`Shipment` specifically — proven via 20
+concurrent identical status updates against each, collapsing to exactly
+one real transition (`test/order-repository.e2e-spec.ts`). It closed the
+subtler version of "don't trust a client PATCH to COMPLETED" that Phase
+009 hadn't fully closed: `OrderService.complete()` used to trust the
+`fulfillmentStatus` cache column alone; a new `OrderCompletionValidator`
+(pure domain service) now re-derives readiness from the order's real
+`Fulfillment` rows, requiring every non-cancelled one to be genuinely
+`DELIVERED`. Delivery confirmation moved to its own dedicated route and
+permission (`order.shipment.deliver`, deliberately withheld from
+`fulfillment_clerk`) — the generic status-update routes' own DTOs now
+reject `DELIVERED` outright at the validation layer. It added
+fulfillment-creation idempotency keys, a `UNIQUE` tracking-number index
+with a real lookup route, database-backed admin order search/filtering
+(never fetched-then-filtered), and finally surfaced Phase 010's own
+`OrderPromotion` snapshot on the order read path — a gap Phase 010's own
+final report had flagged. It deliberately did **not** implement
+inventory restock-on-cancellation — re-evaluated, not merely carried
+forward unexamined, and reaffirmed deferred because a correct
+implementation needs reservation-lineage tracking this phase's brief
+didn't ask for (`docs/adr/ADR-011-order-lifecycle-hardening.md` decision
+8). A related, lower-severity finding — six pre-existing
+`OrderRepositoryPort.updateStatus()` call sites can each write one
+harmless duplicate `AuditLog` row on a losing race, never a duplicate
+`OrderStatusHistory` row — was found and documented but deliberately not
+retrofitted this phase (too large a blast radius for a cosmetic gap).
+See `docs/architecture/order.md`'s "Phase 011" section for the full
+account. **Backend-only, same precedent**: `apps/admin`/`apps/storefront`
+are still untouched.
+
 **Next up** is the rest of Phase 1 (see end of blueprint doc "وضعیت
 فعلی"): the remaining real domain modules beyond
 `identity`/`catalog`/`inventory`/`cart-checkout`/`payment`/`order`/
