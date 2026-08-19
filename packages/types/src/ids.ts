@@ -167,3 +167,19 @@ export const asFulfillmentId = brandedId<'FulfillmentId'>('FulfillmentId').as;
 export const asFulfillmentItemId = brandedId<'FulfillmentItemId'>('FulfillmentItemId').as;
 export const asShipmentId = brandedId<'ShipmentId'>('ShipmentId').as;
 export const asShipmentEventId = brandedId<'ShipmentEventId'>('ShipmentEventId').as;
+
+// Phase 010 — promotion/discount/coupon engine (see
+// docs/adr/ADR-010-promotion-engine.md).
+export type PromotionId = Brand<string, 'PromotionId'>;
+export type PromotionRuleId = Brand<string, 'PromotionRuleId'>;
+export type PromotionTargetId = Brand<string, 'PromotionTargetId'>;
+export type CouponId = Brand<string, 'CouponId'>;
+export type CouponRedemptionId = Brand<string, 'CouponRedemptionId'>;
+export type OrderPromotionId = Brand<string, 'OrderPromotionId'>;
+
+export const asPromotionId = brandedId<'PromotionId'>('PromotionId').as;
+export const asPromotionRuleId = brandedId<'PromotionRuleId'>('PromotionRuleId').as;
+export const asPromotionTargetId = brandedId<'PromotionTargetId'>('PromotionTargetId').as;
+export const asCouponId = brandedId<'CouponId'>('CouponId').as;
+export const asCouponRedemptionId = brandedId<'CouponRedemptionId'>('CouponRedemptionId').as;
+export const asOrderPromotionId = brandedId<'OrderPromotionId'>('OrderPromotionId').as;

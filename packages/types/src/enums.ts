@@ -407,3 +407,60 @@ export const RECONCILIATION_STATUSES = [
   'MISSING_REMOTE',
 ] as const;
 export type ReconciliationStatus = (typeof RECONCILIATION_STATUSES)[number];
+
+/**
+ * Promotion/coupon lifecycle (Phase 010 — see
+ * docs/adr/ADR-010-promotion-engine.md).
+ */
+export const PROMOTION_STATUSES = [
+  'DRAFT',
+  'SCHEDULED',
+  'ACTIVE',
+  'PAUSED',
+  'EXPIRED',
+  'ARCHIVED',
+] as const;
+export type PromotionStatus = (typeof PROMOTION_STATUSES)[number];
+
+/** `Promotion.discountType` — the minimum discount-type set this phase
+ * implements (ADR-010 decision 3); no type beyond this list exists. */
+export const PROMOTION_ACTION_TYPES = [
+  'PERCENTAGE',
+  'FIXED_AMOUNT',
+  'FIXED_PRICE',
+  'FREE_SHIPPING',
+  'BUY_X_GET_Y',
+  'BUNDLE_PRICE',
+] as const;
+export type PromotionActionType = (typeof PROMOTION_ACTION_TYPES)[number];
+
+/** `PromotionTarget.type` — composable, OR'd (ADR-010 decision 4). No
+ * `ALL` value: zero target rows already means "whole cart" unambiguously. */
+export const PROMOTION_TARGET_TYPES = [
+  'PRODUCT',
+  'SKU',
+  'CATEGORY',
+  'BRAND',
+  'COLLECTION',
+] as const;
+export type PromotionTargetType = (typeof PROMOTION_TARGET_TYPES)[number];
+
+/** `PromotionRule.type` — eligibility conditions, structurally separate
+ * from discount calculation (ADR-010 decision 6). */
+export const PROMOTION_RULE_TYPES = [
+  'MINIMUM_QUANTITY',
+  'CUSTOMER_SEGMENT',
+  'FIRST_PURCHASE_ONLY',
+] as const;
+export type PromotionRuleType = (typeof PROMOTION_RULE_TYPES)[number];
+
+/** `Coupon.status` — a `DISABLED` coupon never reactivates automatically
+ * (ADR-010 decision 2). */
+export const COUPON_STATUSES = ['ACTIVE', 'PAUSED', 'EXPIRED', 'DISABLED'] as const;
+export type CouponStatus = (typeof COUPON_STATUSES)[number];
+
+/** `CouponRedemption.status` — `RESERVED` (checkout freeze) ->
+ * `REDEEMED` (order paid) or `RELEASED` (checkout cancelled/expired/
+ * swept). Never deleted (ADR-010 decision 8). */
+export const REDEMPTION_STATUSES = ['RESERVED', 'REDEEMED', 'RELEASED'] as const;
+export type RedemptionStatus = (typeof REDEMPTION_STATUSES)[number];
