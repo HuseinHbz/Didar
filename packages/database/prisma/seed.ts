@@ -279,6 +279,30 @@ async function main(): Promise<void> {
       action: 'shipment.update',
       description: 'Update a shipment status/tracking event',
     },
+
+    // Phase 010 — promotion/discount/coupon engine (§19, see
+    // docs/adr/ADR-010-promotion-engine.md). Deletion is never given to
+    // every editor automatically (§19's explicit instruction) — only
+    // `promotion_manager` gets `promotion.delete`/`coupon.delete`;
+    // `promotion_editor` can author and activate/pause but never
+    // permanently remove a promotion/coupon or see analytics.
+    { module: 'promotion', action: 'read', description: 'Read any promotion' },
+    { module: 'promotion', action: 'create', description: 'Create a promotion' },
+    { module: 'promotion', action: 'update', description: 'Update a promotion' },
+    { module: 'promotion', action: 'activate', description: 'Activate a promotion' },
+    { module: 'promotion', action: 'pause', description: 'Pause an active promotion' },
+    { module: 'promotion', action: 'archive', description: 'Archive a promotion (terminal)' },
+    { module: 'promotion', action: 'delete', description: 'Permanently delete a promotion' },
+    {
+      module: 'promotion',
+      action: 'analytics.read',
+      description: 'Read promotion usage/redemption analytics',
+    },
+    { module: 'coupon', action: 'read', description: 'Read any coupon' },
+    { module: 'coupon', action: 'create', description: 'Create a coupon' },
+    { module: 'coupon', action: 'update', description: "Update a coupon's own fields/lifecycle" },
+    { module: 'coupon', action: 'disable', description: 'Permanently disable a coupon' },
+    { module: 'coupon', action: 'delete', description: 'Permanently delete a coupon' },
   ];
   const permissions = await Promise.all(
     permissionDefs.map((def) =>
@@ -351,15 +375,18 @@ async function main(): Promise<void> {
   await grant(adminRole.id, 'identity.roles.manage');
   await grant(adminRole.id, 'identity.permissions.manage');
   await grant(adminRole.id, 'identity.audit_logs.view');
-  // admin gets every catalog.*/inventory.*/payment.*/order.* permission —
-  // the module-access gate (@RequireModule) and every @RequirePermission
-  // check both pass for admin, same as identity's own endpoints.
+  // admin gets every catalog.*/inventory.*/payment.*/order.*/promotion.*/
+  // coupon.* permission — the module-access gate (@RequireModule) and
+  // every @RequirePermission check both pass for admin, same as
+  // identity's own endpoints.
   for (const def of permissionDefs) {
     if (
       def.module === 'catalog' ||
       def.module === 'inventory' ||
       def.module === 'payment' ||
-      def.module === 'order'
+      def.module === 'order' ||
+      def.module === 'promotion' ||
+      def.module === 'coupon'
     ) {
       await grant(adminRole.id, `${def.module}.${def.action}`);
     }
@@ -545,6 +572,45 @@ async function main(): Promise<void> {
     await grant(fulfillmentClerkRole.id, `order.${action}`);
   }
 
+  // Two promotion roles (Phase 010 — docs/security/promotion-security.md
+  // has the full matrix): `promotion_manager` gets every promotion.*/
+  // coupon.* permission including delete/analytics; `promotion_editor` is
+  // the day-to-day marketing role — can author, activate/pause/archive
+  // promotions and manage coupons, but can never permanently delete a
+  // promotion/coupon or read analytics (§19's explicit "never give
+  // deletion automatically to all editors").
+  const promotionManagerRole = await prisma.role.upsert({
+    where: { name: 'promotion_manager' },
+    update: { description: 'Full promotion module access — every promotion.*/coupon.* permission' },
+    create: {
+      name: 'promotion_manager',
+      description: 'Full promotion module access — every promotion.*/coupon.* permission',
+    },
+  });
+  for (const def of permissionDefs) {
+    if (def.module === 'promotion' || def.module === 'coupon') {
+      await grant(promotionManagerRole.id, `${def.module}.${def.action}`);
+    }
+  }
+  const promotionEditorRole = await prisma.role.upsert({
+    where: { name: 'promotion_editor' },
+    update: {
+      description:
+        'Day-to-day marketing role — author/activate/pause/archive promotions, manage coupons; cannot delete or read analytics',
+    },
+    create: {
+      name: 'promotion_editor',
+      description:
+        'Day-to-day marketing role — author/activate/pause/archive promotions, manage coupons; cannot delete or read analytics',
+    },
+  });
+  for (const action of ['read', 'create', 'update', 'activate', 'pause', 'archive']) {
+    await grant(promotionEditorRole.id, `promotion.${action}`);
+  }
+  for (const action of ['read', 'create', 'update', 'disable']) {
+    await grant(promotionEditorRole.id, `coupon.${action}`);
+  }
+
   const adminUser = await prisma.user.upsert({
     where: { phone: '+989120000001' },
     update: {},
@@ -685,6 +751,28 @@ async function main(): Promise<void> {
     ['+989120000012', 'fulfillment-clerk@iecp.dev', fulfillmentClerkRole.id],
   ];
   for (const [phone, email, roleId] of orderRoleUsers) {
+    const user = await prisma.user.upsert({
+      where: { phone },
+      update: {},
+      create: { phone, email, isActive: true, phoneVerifiedAt: new Date() },
+    });
+    await prisma.userRole.upsert({
+      where: { userId_roleId: { userId: user.id, roleId } },
+      update: {},
+      create: { userId: user.id, roleId },
+    });
+  }
+
+  // Thirteenth-fourteenth users: one per promotion role — real fixtures
+  // for the e2e suite's promotion permission-bypass cases
+  // (promotion_editor calling a `promotion.delete`-gated route, if one
+  // existed, or `coupon.delete`, must 403; a plain customer token must
+  // 403 every `/admin/promotions`/`/admin/coupons` route).
+  const promotionRoleUsers: [string, string, string][] = [
+    ['+989120000013', 'promotion-manager@iecp.dev', promotionManagerRole.id],
+    ['+989120000014', 'promotion-editor@iecp.dev', promotionEditorRole.id],
+  ];
+  for (const [phone, email, roleId] of promotionRoleUsers) {
     const user = await prisma.user.upsert({
       where: { phone },
       update: {},
@@ -1267,19 +1355,122 @@ async function main(): Promise<void> {
   }
 
   // ---------------------------------------------------------------------
-  // marketing — a welcome coupon
+  // marketing (Phase 010 — see docs/adr/ADR-010-promotion-engine.md):
+  // three promotions (one per stacking archetype) and five coupons —
+  // the spec's exact "at least" fixture list. Idempotent (upsert on
+  // `code`/a stable `name`), verified stable across two seed runs.
   // ---------------------------------------------------------------------
-  const welcomeCoupon = await prisma.coupon.upsert({
-    where: { code: 'WELCOME10' },
+  const promotionA = await prisma.promotion.upsert({
+    where: { id: '00000000-0000-4000-a000-000000000001' },
     update: {},
     create: {
-      code: 'WELCOME10',
-      type: 'PERCENTAGE',
-      value: 1000n, // 10.00% in basis points
-      minOrderAmount: 1_000_000n,
+      id: '00000000-0000-4000-a000-000000000001',
+      name: 'Seed — 20% off sunglasses',
+      description: '20% off every sunglasses-category item, coupon-gated',
+      status: 'ACTIVE',
+      priority: 10,
+      stackable: false,
+      exclusive: false,
+      requiresCoupon: true,
+      discountType: 'PERCENTAGE',
+      discountValue: 2000n, // 20.00% in basis points
+      maximumDiscount: 5_000_000n,
+      targets: { create: [{ type: 'CATEGORY', refId: category.id }] },
+    },
+  });
+  const promotionB = await prisma.promotion.upsert({
+    where: { id: '00000000-0000-4000-a000-000000000002' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-a000-000000000002',
+      name: 'Seed — fixed amount off',
+      description: 'A flat cart-wide discount, coupon-gated',
+      status: 'ACTIVE',
+      priority: 20,
+      stackable: false,
+      exclusive: false,
+      requiresCoupon: true,
+      minimumCartValue: 2_000_000n,
+      discountType: 'FIXED_AMOUNT',
+      discountValue: 500_000n,
+    },
+  });
+  // No coupon references Promotion C — it's automatic (requiresCoupon:
+  // false), so its row is never read again after creation.
+  await prisma.promotion.upsert({
+    where: { id: '00000000-0000-4000-a000-000000000003' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-a000-000000000003',
+      name: 'Seed — free shipping',
+      description: 'Automatic free shipping over a cart minimum, no code needed',
+      status: 'ACTIVE',
+      priority: 30,
+      stackable: true,
+      exclusive: false,
+      requiresCoupon: false,
+      minimumCartValue: 3_000_000n,
+      discountType: 'FREE_SHIPPING',
+    },
+  });
+
+  const didar20Coupon = await prisma.coupon.upsert({
+    where: { code: 'DIDAR20' },
+    update: {},
+    create: {
+      promotionId: promotionA.id,
+      code: 'DIDAR20',
+      status: 'ACTIVE',
       usageLimit: 1000,
-      perUserLimit: 1,
-      isActive: true,
+      perCustomerLimit: 1,
+    },
+  });
+  await prisma.coupon.upsert({
+    where: { code: 'WELCOME500' },
+    update: {},
+    create: {
+      promotionId: promotionB.id,
+      code: 'WELCOME500',
+      status: 'ACTIVE',
+      usageLimit: 1000,
+      perCustomerLimit: 1,
+    },
+  });
+  // An already-expired coupon — real fixture for the e2e suite's
+  // "expired coupon rejected" case (§21).
+  await prisma.coupon.upsert({
+    where: { code: 'EXPIREDCODE' },
+    update: {},
+    create: {
+      promotionId: promotionA.id,
+      code: 'EXPIREDCODE',
+      status: 'ACTIVE',
+      expiresAt: new Date('2020-01-01T00:00:00Z'),
+    },
+  });
+  // A not-yet-valid coupon — real fixture for the "future coupon
+  // rejected" case.
+  await prisma.coupon.upsert({
+    where: { code: 'FUTURECODE' },
+    update: {},
+    create: {
+      promotionId: promotionA.id,
+      code: 'FUTURECODE',
+      status: 'ACTIVE',
+      startsAt: new Date('2099-01-01T00:00:00Z'),
+    },
+  });
+  // A single-use coupon — real fixture for the mandatory concurrency
+  // suite (usageLimit=1, N concurrent redemption attempts -> exactly
+  // one success, ADR-010 decision 8/§30).
+  await prisma.coupon.upsert({
+    where: { code: 'LIMITEDCODE' },
+    update: {},
+    create: {
+      promotionId: promotionB.id,
+      code: 'LIMITEDCODE',
+      status: 'ACTIVE',
+      usageLimit: 1,
     },
   });
 
@@ -1476,9 +1667,9 @@ async function main(): Promise<void> {
     update: {},
     create: {
       cartId: customerCart.id,
-      couponId: welcomeCoupon.id,
-      code: welcomeCoupon.code,
-      resolvedDiscount: 1_250_000n,
+      couponId: didar20Coupon.id,
+      code: didar20Coupon.code,
+      resolvedDiscount: 2_500_000n, // 20% of 12,500,000 — DIDAR20 (Promotion A)
     },
   });
   await prisma.cartShippingSelection.upsert({
