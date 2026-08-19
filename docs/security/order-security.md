@@ -18,7 +18,7 @@ see `docs/api/order.md`'s "Auth" section for the exact route grouping.
   `customerId`/`guestToken` against the caller's resolved actor, the same
   shape `CartService`/`CheckoutService`/`PaymentIntentService`'s own
   `assertOwnership()` use. `GET /orders/by-checkout/:checkoutSessionId`
-  checks ownership against the *checkout session* itself
+  checks ownership against the _checkout session_ itself
   (`CheckoutService.get()`) before running conversion, so it can never be
   used to probe an arbitrary checkout's payment status.
 - **`admin/orders/*`** — RBAC, behind the service's global
@@ -30,22 +30,22 @@ see `docs/api/order.md`'s "Auth" section for the exact route grouping.
 14 new `order.*` permissions, matching exactly what every controller
 checks (`docs/api/order.md` has the full route-to-permission mapping):
 
-| Permission              | Meaning                                                        |
-| -------------------------- | ------------------------------------------------------------------ |
-| `order.read`               | Read any order (admin/support scope)                             |
-| `order.create`              | Manually retry checkout->order conversion for a verified payment |
-| `order.update`              | Update a fulfillment record on an order                          |
-| `order.cancel`              | Cancel an order                                                  |
-| `order.approve`             | Approve an order for processing                                  |
-| `order.fulfill`             | Create a fulfillment for an order                                 |
-| `order.ship`                | Create a shipment for a fulfillment                               |
-| `order.complete`            | Mark an order `COMPLETED`                                        |
-| `order.refund`              | Request a partial refund against a paid order                     |
-| `order.invoice.read`        | Read an order's invoice                                           |
-| `order.invoice.create`      | Manually (re)issue an invoice for an order                        |
-| `order.invoice.void`        | Void an issued invoice                                            |
-| `order.shipment.read`       | Read an order's shipments                                        |
-| `order.shipment.update`     | Update a shipment status/tracking event                           |
+| Permission              | Meaning                                                          |
+| ----------------------- | ---------------------------------------------------------------- |
+| `order.read`            | Read any order (admin/support scope)                             |
+| `order.create`          | Manually retry checkout->order conversion for a verified payment |
+| `order.update`          | Update a fulfillment record on an order                          |
+| `order.cancel`          | Cancel an order                                                  |
+| `order.approve`         | Approve an order for processing                                  |
+| `order.fulfill`         | Create a fulfillment for an order                                |
+| `order.ship`            | Create a shipment for a fulfillment                              |
+| `order.complete`        | Mark an order `COMPLETED`                                        |
+| `order.refund`          | Request a partial refund against a paid order                    |
+| `order.invoice.read`    | Read an order's invoice                                          |
+| `order.invoice.create`  | Manually (re)issue an invoice for an order                       |
+| `order.invoice.void`    | Void an issued invoice                                           |
+| `order.shipment.read`   | Read an order's shipments                                        |
+| `order.shipment.update` | Update a shipment status/tracking event                          |
 
 Two new roles, real least-privilege boundaries, not labels:
 
@@ -76,7 +76,7 @@ carve-out.
 
 `GET /orders/by-checkout/:checkoutSessionId` adds a second layer: before
 it ever runs conversion or looks at an `Order` row, it checks the
-*checkout's* ownership via `CheckoutService.get()` — the same 404/403 a
+_checkout's_ ownership via `CheckoutService.get()` — the same 404/403 a
 caller would get reading that checkout directly. A caller can never use
 this route to fish for whether someone else's checkout has been paid.
 
@@ -114,7 +114,7 @@ capacity for two, and asserts exactly two succeed and the total
 
 `PrismaOrderRepository.updateStatus()` row-locks the order
 (`SELECT ... FOR UPDATE`) and re-checks `OrderStateMachine` against the
-*locked* status before writing — discovered as a real gap by this
+_locked_ status before writing — discovered as a real gap by this
 module's own concurrency suite (six concurrent cancel requests on one
 order originally produced six `OrderStatusHistory` rows, not one) and
 fixed at the repository layer so every caller of `updateStatus()`
@@ -126,8 +126,8 @@ benefits, not just `cancel()`. See
 `OrderService.cancel()`/`requestPartialRefund()` never move money
 themselves — both call `RefundService.requestRefund()` (Phase 008), which
 runs `RefundValidator.assertRefundable()` before any row is written. This
-module adds no new money-movement code path; it only decides *when* to
-ask Phase 008 to refund, never *how much is safe to refund*.
+module adds no new money-movement code path; it only decides _when_ to
+ask Phase 008 to refund, never _how much is safe to refund_.
 
 ## Idempotency and replay
 
@@ -169,7 +169,7 @@ own mandatory concurrency suite, not only sequential retries.
   declares for refunds, not a new omission. See
   `docs/architecture/order.md`'s "Known, deliberate gaps" section.
 - **No audit logging gap here** — unlike Phase 008's own documented
-  gap, this module *does* write `system.AuditLog` for every privileged
+  gap, this module _does_ write `system.AuditLog` for every privileged
   admin mutation (`ORDER_STATUS_CHANGED`, `ORDER_CANCELLED`,
   `ORDER_REFUND_REQUESTED`, `FULFILLMENT_CREATED`,
   `FULFILLMENT_STATUS_CHANGED`, `SHIPMENT_CREATED`,

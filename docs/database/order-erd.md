@@ -178,11 +178,12 @@ is no schema-level path to a manually-created, unpaid order.
 
 **Three cached fields alongside one authoritative state machine.**
 `status`/`payment_status`/`fulfillment_status` — the same "cache columns
-+ append-only/authoritative source" split `CheckoutSession` and
-`InventoryItem` already established in prior phases (ADR-009 decision 3).
-`payment_status`/`fulfillment_status` are never independently written by
-a client; both are always re-derived from `PaymentTransaction`/`Refund`
-sums or `FulfillmentItem` sums respectively.
+
+- append-only/authoritative source" split `CheckoutSession` and
+  `InventoryItem` already established in prior phases (ADR-009 decision 3).
+  `payment_status`/`fulfillment_status` are never independently written by
+  a client; both are always re-derived from `PaymentTransaction`/`Refund`
+  sums or `FulfillmentItem` sums respectively.
 
 **`order_items` snapshots everything a receipt needs.** `sku_snapshot`/
 `name_snapshot`/`unit_price_snapshot` carry the historical truth

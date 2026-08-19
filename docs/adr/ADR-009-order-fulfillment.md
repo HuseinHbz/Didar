@@ -45,7 +45,7 @@ pattern `CheckoutService.assertOwnership()`/`PaymentIntentService
 
 The brief's own suggested table list is a menu, not a mandate ("do not
 blindly use these exact names if the existing repository already has
-equivalent models"). Two of its suggestions are deliberately *not* built
+equivalent models"). Two of its suggestions are deliberately _not_ built
 as separate tables:
 
 - **`OrderAddress`** — `CheckoutSession.addressSnapshot` (Phase 007) is
@@ -62,7 +62,7 @@ as separate tables:
 - **`OrderPayment`** — money movement is Payment's concern, not Order's
   (the brief's own explicit separation: "Order owns commercial state.
   Payment owns money movement."). `Order.paymentIntentId` is the pointer;
-  `Order.paidTotal`/`Order.refundedTotal` are a maintained *cache*
+  `Order.paidTotal`/`Order.refundedTotal` are a maintained _cache_
   (updated by `OrderService` whenever it learns of a payment/refund
   outcome — never the source of truth) of what `PaymentTransaction`/
   `Refund` rows already say authoritatively. A second `order_payments`
@@ -99,7 +99,7 @@ single place an `Order` gets created. It:
    `PaymentIntentService.findByCheckoutSessionId()` method (Phase 009's
    own reserved hook into Payment, same shape ADR-008 decision 10 reserved
    `CheckoutService.markConverted()` for Payment to call — each phase adds
-   an additive method to the *previous* phase's service for itself to
+   an additive method to the _previous_ phase's service for itself to
    consume, never the reverse).
 2. Requires `PaymentIntent.status === 'SUCCEEDED'` and a `VERIFIED`
    `PaymentTransaction` on it — an intent that hasn't actually verified
@@ -129,7 +129,7 @@ single place an `Order` gets created. It:
 (a customer's browser bouncing back) and the `order_conversion` sweep
 (Decision 9) both end up calling step 1-5 above for the same checkout —
 never two different code paths that could drift. This is deliberately
-*not* a change to `PaymentCallbackController` or any other Payment-module
+_not_ a change to `PaymentCallbackController` or any other Payment-module
 file (Payment stays ignorant of Order's existence, same one-way
 dependency direction every phase reaches back with, never forward) — the
 sweep exists specifically because Payment cannot call forward into Order.
@@ -207,7 +207,7 @@ string, so a fulfillment always traces back to exactly what was actually
 ordered). The invariant the brief states in words —
 `fulfilled_quantity ≤ ordered_quantity − already_fulfilled_quantity` — is
 enforced by re-deriving "already fulfilled" as
-`SUM(FulfillmentItem.quantity)` across every *non-`CANCELLED`*
+`SUM(FulfillmentItem.quantity)` across every _non-`CANCELLED`_
 `Fulfillment` for that `OrderItem`, computed inside a
 `SELECT ... FOR UPDATE`-locked transaction on the `OrderItem` row (the
 exact row-lock technique `mutateInventoryItem` already established for
@@ -228,14 +228,14 @@ implementations of:
 
 - **Pricing** — every amount `Order`/`OrderItem`/`Invoice` ever stores
   is copied from `CheckoutSession.pricingSnapshot` / `CheckoutTotals
-  .breakdown` (Phase 007's own `PricingResolver` output), never
+.breakdown` (Phase 007's own `PricingResolver` output), never
   recomputed by this module.
 - **Inventory reservation** — `ReservationService.convert()`/`.release()`
   (Phase 006) are the only inventory-state mutators this module calls;
   `OrderConversionService` never writes to `inventory.*` tables directly.
 - **Payment verification** — `PaymentIntentService.verifyPayment()`
   (Phase 008) is the only place a payment is ever confirmed; this module
-  only *reads* its result (`PaymentIntent.status`, the linked
+  only _reads_ its result (`PaymentIntent.status`, the linked
   `PaymentTransaction`).
 - **Customer lookup** — `CUSTOMER_LOOKUP_PORT` (re-bound the same way
   every module since Phase 007 re-binds it) resolves an authenticated
@@ -266,7 +266,7 @@ re-bound locally inside `OrderModule`, same convention every prior module
 `Refund.status` transition beyond `PENDING`. For a `PAID`/`PROCESSING`/
 `READY_TO_FULFILL` order being cancelled, it calls the already-exported
 `RefundService.requestRefund()` (Phase 008) with a deterministic
-`idempotencyKey` (`order-cancel__<orderId>`) — this only *creates* a
+`idempotencyKey` (`order-cancel__<orderId>`) — this only _creates_ a
 `PENDING` `Refund` row (Phase 008's own `RefundValidator` guards the
 amount); actually submitting it to the provider is
 `RefundService.processRefund()`, left for the existing admin
@@ -279,7 +279,7 @@ Deliberately does **not** restock inventory: by the time an `Order` row
 exists at all, `OrderConversionService.convertFromCheckout()` has already
 called `ReservationService.convert()` on every reservation the checkout
 held, so the stock is genuinely sold, not merely held — there is nothing
-left to *release*. A refund-triggered restock (crediting the sold
+left to _release_. A refund-triggered restock (crediting the sold
 quantity back onto the shelf) is a real, deliberate gap, the same one
 `docs/product/payment.md`'s own Phase 008 scope already declares
 ("A refund-triggered inventory restock or `Order`-status transition"),

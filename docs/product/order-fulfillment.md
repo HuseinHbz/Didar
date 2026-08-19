@@ -77,7 +77,7 @@ Order (PENDING_PAYMENT|PAID|PROCESSING|READY_TO_FULFILL|PARTIALLY_FULFILLED|
   partially-fulfilled, fulfilled, or delivered order cannot simply become
   `CANCELLED`.
 - **RBAC**: `order.*` permission matrix (read/create/update/cancel/
-  approve/fulfill/ship/complete/refund/invoice.*/shipment.*), two new
+  approve/fulfill/ship/complete/refund/invoice._/shipment._), two new
   roles, reusing Phase 004's `AuthorizationGuard` wholesale — no new
   authorization mechanism.
 - **Audit**: every sensitive mutation (creation, status change,

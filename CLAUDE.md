@@ -306,7 +306,7 @@ and-reread findings: `OrderService.cancel()`'s check-then-act pattern
 atomic — six concurrent cancel requests on one order originally produced
 six `OrderStatusHistory` rows, not one — fixed by row-locking the order
 (`SELECT ... FOR UPDATE`) and re-checking the state machine against the
-*locked* status before writing, inside `PrismaOrderRepository
+_locked_ status before writing, inside `PrismaOrderRepository
 .updateStatus()` itself so every caller benefits, not just `cancel()` —
 see `docs/architecture/order.md`. **Backend-only, same precedent**:
 `apps/admin`/`apps/storefront` are still untouched — see

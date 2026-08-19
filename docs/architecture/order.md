@@ -66,7 +66,7 @@ as unfinished work to resume, not a done deal to return as-is.
 
 - **Order status transitions** (`PrismaOrderRepository.updateStatus()`)
   — `SELECT ... FOR UPDATE` on the order row before deciding anything,
-  re-checking `OrderStateMachine` against the *locked* status. Two
+  re-checking `OrderStateMachine` against the _locked_ status. Two
   concurrent callers racing the same transition (e.g. two `cancel()`
   calls) resolve to exactly one real transition and one
   `OrderStatusHistory` row; the other collapses to a no-op instead of
@@ -112,7 +112,7 @@ order exist" — every such read goes to Postgres.
   (no ownership check) lookups `OrderConversionService` and the
   `order_conversion` sweep need.
 - **`services/api/src/modules/cart-checkout/domain/ports/checkout-session.repository.port.ts`**
-  + its Prisma implementation — additive `listConvertedSince(since)`.
+  - its Prisma implementation — additive `listConvertedSince(since)`.
 - **RBAC data** — 14 new `order.*` permissions, two new roles
   (`order_manager`, `fulfillment_clerk`) — see
   `docs/security/order-security.md`.

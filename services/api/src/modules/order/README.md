@@ -115,7 +115,7 @@ time a fulfillment changes).
 
 - **Order status transitions** (`PrismaOrderRepository.updateStatus()`)
   row-lock the order (`SELECT ... FOR UPDATE`) and re-check
-  `OrderStateMachine` against the *locked* status before writing. Found
+  `OrderStateMachine` against the _locked_ status before writing. Found
   and fixed via this module's own e2e concurrency suite: six concurrent
   `cancel()` calls on one order originally produced six
   `OrderStatusHistory` rows (a genuine check-then-act race, not merely a
