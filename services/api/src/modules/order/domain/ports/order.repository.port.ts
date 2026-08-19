@@ -40,6 +40,12 @@ export interface OrderRepositoryPort {
   findByPaymentIntentId(paymentIntentId: string): Promise<Order | null>;
   list(filter: OrderListFilter): Promise<{ items: Order[]; nextCursor: string | null }>;
 
+  /** Every order past `PENDING_PAYMENT` (i.e. real, paid) updated since
+   * `since` — reserved for the `invoice_generation` sweep's reliability
+   * backstop (a crash between `orders.create()` and
+   * `invoices.issueForOrder()` inside `OrderConversionService`). */
+  listRecentlyPaid(since: Date): Promise<Order[]>;
+
   /** Generates the next order number from `commerce.order_number_seq`
    * (ADR-009 decision 6) and creates the `Order` + its `OrderItem` rows in
    * one transaction. Idempotent on `checkoutSessionId`/`paymentIntentId`

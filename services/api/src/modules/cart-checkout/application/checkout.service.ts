@@ -8,6 +8,7 @@ import { SkusService } from '../../catalog/application/skus.service';
 import { AllocationService } from '../../inventory/application/allocation.service';
 import { ReservationService } from '../../inventory/application/reservation.service';
 import { StockQueryService } from '../../inventory/application/stock-query.service';
+import type { CheckoutSession } from '../domain/entities/checkout-session.entity';
 import type { CheckoutValidationIssue } from '../domain/entities/checkout-validation-result.entity';
 import {
   CART_REPOSITORY,
@@ -513,5 +514,13 @@ export class CheckoutService {
    * acting user. Never exposed through a controller. */
   async findByIdSystem(checkoutId: string): Promise<CheckoutSessionWithDetail | null> {
     return this.sessions.findById(checkoutId);
+  }
+
+  /** Reserved for Phase 009's `order_conversion` sweep (ADR-009 decision
+   * 4) — every checkout `markConverted()` has already flipped to
+   * `CONVERTED` since `since`, the reliability backstop's own scan
+   * window. */
+  async listConvertedSince(since: Date): Promise<CheckoutSession[]> {
+    return this.sessions.listConvertedSince(since);
   }
 }

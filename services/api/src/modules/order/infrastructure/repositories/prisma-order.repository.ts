@@ -78,6 +78,13 @@ export class PrismaOrderRepository implements OrderRepositoryPort {
     };
   }
 
+  async listRecentlyPaid(since: Date): Promise<Order[]> {
+    const rows = await prisma.order.findMany({
+      where: { status: { not: 'PENDING_PAYMENT' }, updatedAt: { gte: since } },
+    });
+    return rows.map(orderToDomain);
+  }
+
   /**
    * Idempotent on `checkoutSessionId`/`paymentIntentId` under real
    * concurrency (ADR-009 decision 4) — same P2002-catch-and-reread
