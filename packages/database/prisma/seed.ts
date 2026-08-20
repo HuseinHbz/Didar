@@ -56,6 +56,30 @@ async function nextInvoiceNumber(): Promise<string> {
   return formatSequenceNumber('INV', nextval, new Date());
 }
 
+/** `RET-YYYYMMDD-NNNNNN` / `CN-YYYYMMDD-NNNNNN` — same shape, real
+ * Postgres sequences (`commerce.return_number_seq`/
+ * `finance.credit_note_number_seq`, ADR-012 decisions 5/7) Phase 012's
+ * `PrismaReturnRepository`/`PrismaCreditNoteRepository` draw from. */
+async function nextReturnNumber(): Promise<string> {
+  const rows = await prisma.$queryRaw<
+    { nextval: bigint }[]
+  >`SELECT nextval('commerce.return_number_seq') AS nextval`;
+  const nextval = rows[0]?.nextval;
+  if (nextval === undefined) throw new Error('[seed] return_number_seq.nextval() returned no row');
+  return formatSequenceNumber('RET', nextval, new Date());
+}
+
+async function nextCreditNoteNumber(): Promise<string> {
+  const rows = await prisma.$queryRaw<
+    { nextval: bigint }[]
+  >`SELECT nextval('finance.credit_note_number_seq') AS nextval`;
+  const nextval = rows[0]?.nextval;
+  if (nextval === undefined) {
+    throw new Error('[seed] credit_note_number_seq.nextval() returned no row');
+  }
+  return formatSequenceNumber('CN', nextval, new Date());
+}
+
 async function main(): Promise<void> {
   // ---------------------------------------------------------------------
   // identity — the real permission registry (matching what
@@ -309,6 +333,54 @@ async function main(): Promise<void> {
     { module: 'coupon', action: 'update', description: "Update a coupon's own fields/lifecycle" },
     { module: 'coupon', action: 'disable', description: 'Permanently disable a coupon' },
     { module: 'coupon', action: 'delete', description: 'Permanently delete a coupon' },
+
+    // Phase 012 — returns/refunds/credit notes (see
+    // docs/adr/ADR-012-returns-refunds-credit-notes.md's own RBAC
+    // section). `return.create`/`return.cancel` are deliberately *not*
+    // registered — return creation and cancellation are customer-facing,
+    // ownership-gated by ReturnService itself, not RBAC (same shape
+    // order creation/cancellation-by-customer already establish
+    // elsewhere in this file). `credit_note.create` is also not
+    // registered — a DRAFT note is only ever a side effect of
+    // `return.refund`, never a standalone ad-hoc creation route.
+    // `inventory.restock.return` is not registered either — restock has
+    // no standalone route (ADR-012 decision 6), only an internal call
+    // inside `return.refund`'s own approve-refund step.
+    {
+      module: 'return',
+      action: 'read',
+      description: 'Read any return request (admin/support scope)',
+    },
+    { module: 'return', action: 'approve', description: 'Approve a REQUESTED return' },
+    {
+      module: 'return',
+      action: 'reject',
+      description: 'Reject a return before or during inspection',
+    },
+    {
+      module: 'return',
+      action: 'receive',
+      description: 'Record a return as physically received at a warehouse location',
+    },
+    {
+      module: 'return',
+      action: 'inspect',
+      description: "Record a return's physical inspection outcome per item",
+    },
+    {
+      module: 'return',
+      action: 'refund',
+      description:
+        'Approve a return for refund (restocks accepted items) and trigger its settlement — gates both POST .../approve-refund and POST .../refund',
+    },
+    { module: 'credit_note', action: 'read', description: 'Read any credit note' },
+    {
+      module: 'credit_note',
+      action: 'issue',
+      description:
+        'Manually issue a DRAFT credit note (a recovery path for the documented approve-refund/refund crash window, not the normal flow)',
+    },
+    { module: 'credit_note', action: 'void', description: 'Void a DRAFT or ISSUED credit note' },
   ];
   const permissions = await Promise.all(
     permissionDefs.map((def) =>
@@ -529,15 +601,20 @@ async function main(): Promise<void> {
   }
   const financeAuditorRole = await prisma.role.upsert({
     where: { name: 'finance_auditor' },
-    update: { description: 'Read-only — refund and reconciliation visibility, no mutations' },
+    update: {
+      description: 'Read-only — refund, reconciliation, and credit-note visibility, no mutations',
+    },
     create: {
       name: 'finance_auditor',
-      description: 'Read-only — refund and reconciliation visibility, no mutations',
+      description: 'Read-only — refund, reconciliation, and credit-note visibility, no mutations',
     },
   });
   for (const action of ['refund.read', 'reconciliation.read']) {
     await grant(financeAuditorRole.id, `payment.${action}`);
   }
+  // Phase 012 — same read-only financial-visibility role, naturally
+  // extended (ADR-012 RBAC section).
+  await grant(financeAuditorRole.id, 'credit_note.read');
 
   // Two order roles (Phase 009 — docs/security/order-fulfillment-security.md
   // has the full matrix): `order_manager` gets every order.* permission (a
@@ -582,6 +659,47 @@ async function main(): Promise<void> {
   // broader `shipment.update` grant this role does receive.
   for (const action of ['read', 'update', 'fulfill', 'ship', 'shipment.read', 'shipment.update']) {
     await grant(fulfillmentClerkRole.id, `order.${action}`);
+  }
+
+  // Two return roles (Phase 012 — docs/security/returns-security.md has
+  // the full matrix): `returns_manager` gets every return.*/credit_note.*
+  // permission — the department-head shape `order_manager` established;
+  // `returns_clerk` is the warehouse-floor role — can read returns and
+  // record physical receipt/inspection, but cannot approve, reject,
+  // trigger a refund, or touch a credit note, the same
+  // "floor role can't reach its own more-sensitive action" shape
+  // `fulfillment_clerk` already establishes; real fixture for the e2e
+  // suite's permission-bypass case (a returns clerk calling
+  // POST .../approve or .../refund must 403).
+  const returnsManagerRole = await prisma.role.upsert({
+    where: { name: 'returns_manager' },
+    update: {
+      description: 'Full returns module access — every return.*/credit_note.* permission',
+    },
+    create: {
+      name: 'returns_manager',
+      description: 'Full returns module access — every return.*/credit_note.* permission',
+    },
+  });
+  for (const def of permissionDefs) {
+    if (def.module === 'return' || def.module === 'credit_note') {
+      await grant(returnsManagerRole.id, `${def.module}.${def.action}`);
+    }
+  }
+  const returnsClerkRole = await prisma.role.upsert({
+    where: { name: 'returns_clerk' },
+    update: {
+      description:
+        'Warehouse-floor returns — read returns, record receipt/inspection; cannot approve, reject, refund, or touch a credit note',
+    },
+    create: {
+      name: 'returns_clerk',
+      description:
+        'Warehouse-floor returns — read returns, record receipt/inspection; cannot approve, reject, refund, or touch a credit note',
+    },
+  });
+  for (const action of ['read', 'receive', 'inspect']) {
+    await grant(returnsClerkRole.id, `return.${action}`);
   }
 
   // Two promotion roles (Phase 010 — docs/security/promotion-security.md
@@ -785,6 +903,26 @@ async function main(): Promise<void> {
     ['+989120000014', 'promotion-editor@iecp.dev', promotionEditorRole.id],
   ];
   for (const [phone, email, roleId] of promotionRoleUsers) {
+    const user = await prisma.user.upsert({
+      where: { phone },
+      update: {},
+      create: { phone, email, isActive: true, phoneVerifiedAt: new Date() },
+    });
+    await prisma.userRole.upsert({
+      where: { userId_roleId: { userId: user.id, roleId } },
+      update: {},
+      create: { userId: user.id, roleId },
+    });
+  }
+
+  // Fifteenth-sixteenth users: one per return role — real fixtures for
+  // the e2e suite's return permission-bypass cases (returns_clerk calling
+  // POST .../approve, .../reject, or .../refund must 403).
+  const returnRoleUsers: [string, string, string][] = [
+    ['+989120000015', 'returns-manager@iecp.dev', returnsManagerRole.id],
+    ['+989120000016', 'returns-clerk@iecp.dev', returnsClerkRole.id],
+  ];
+  for (const [phone, email, roleId] of returnRoleUsers) {
     const user = await prisma.user.upsert({
       where: { phone },
       update: {},
@@ -2855,7 +2993,7 @@ async function main(): Promise<void> {
       },
     },
   });
-  await prisma.invoice.upsert({
+  const order4Invoice = await prisma.invoice.upsert({
     where: { orderId: order4.id },
     update: {},
     create: {
@@ -2886,6 +3024,246 @@ async function main(): Promise<void> {
       },
     },
   });
+
+  // ---------------------------------------------------------------------
+  // Phase 012 — returns/refunds/credit notes (docs/adr/ADR-012-returns-
+  // refunds-credit-notes.md). Two full-lifecycle returns against order4
+  // (the FULFILLED order with a DELIVERED fulfillment above) — one per
+  // resolution type, both driven all the way to COMPLETED so
+  // GET /returns/:id and GET /admin/returns/:id have something real to
+  // show on a freshly-seeded database. Amounts computed the same way
+  // RefundAmountCalculator does: lineTotal - discountAmount + taxAmount.
+  // ---------------------------------------------------------------------
+  const order4VerifiedTransaction = await prisma.paymentTransaction.findFirst({
+    where: { paymentIntentId: order4Intent.id, status: 'VERIFIED' },
+  });
+  if (!order4VerifiedTransaction) {
+    throw new Error('[seed] order4 return fixture: expected VERIFIED transaction missing');
+  }
+
+  const returnTimestamps = {
+    requestedAt: new Date(Date.now() - 20 * 60 * 60_000),
+    approvedAt: new Date(Date.now() - 18 * 60 * 60_000),
+    receivedAt: new Date(Date.now() - 10 * 60 * 60_000),
+    inspectedAt: new Date(Date.now() - 8 * 60 * 60_000),
+    refundedAt: new Date(Date.now() - 6 * 60 * 60_000),
+    completedAt: new Date(Date.now() - 5 * 60 * 60_000),
+  };
+
+  // Return #1 — REFUND resolution, the Aviator line, fully settled.
+  let order4RefundReturn = await prisma.returnRequest.findFirst({
+    where: { orderId: order4.id, resolution: 'REFUND' },
+    include: { items: true },
+  });
+  if (!order4RefundReturn) {
+    const aviatorTotalPayable = 12_500_000n - 0n + 1_125_000n; // lineTotal - discount + tax
+    order4RefundReturn = await prisma.returnRequest.create({
+      data: {
+        returnNumber: await nextReturnNumber(),
+        orderId: order4.id,
+        customerId: customer.id,
+        status: 'COMPLETED',
+        reason: 'CHANGED_MIND',
+        resolution: 'REFUND',
+        warehouseId: warehouseCentral.id,
+        locationId: locMain.id,
+        requestedAt: returnTimestamps.requestedAt,
+        approvedAt: returnTimestamps.approvedAt,
+        receivedAt: returnTimestamps.receivedAt,
+        inspectedAt: returnTimestamps.inspectedAt,
+        refundedAt: returnTimestamps.refundedAt,
+        completedAt: returnTimestamps.completedAt,
+        items: {
+          create: [
+            {
+              orderItemId: order4AviatorItem.id,
+              quantity: 1,
+              condition: 'UNOPENED',
+              refundAmount: aviatorTotalPayable,
+            },
+          ],
+        },
+        statusHistory: {
+          create: [
+            { fromStatus: null, toStatus: 'REQUESTED', note: 'Return requested' },
+            {
+              fromStatus: 'REQUESTED',
+              toStatus: 'APPROVED',
+              changedBy: adminUser.id,
+              note: 'Approved by returns team',
+            },
+            {
+              fromStatus: 'APPROVED',
+              toStatus: 'CUSTOMER_SHIPPING',
+              note: 'Customer shipped item',
+            },
+            {
+              fromStatus: 'CUSTOMER_SHIPPING',
+              toStatus: 'RECEIVED',
+              changedBy: adminUser.id,
+              note: 'Received at Tehran Central Warehouse',
+            },
+            {
+              fromStatus: 'RECEIVED',
+              toStatus: 'INSPECTING',
+              changedBy: adminUser.id,
+              note: 'Inspection started',
+            },
+            {
+              fromStatus: 'INSPECTING',
+              toStatus: 'APPROVED_FOR_REFUND',
+              changedBy: adminUser.id,
+              note: 'Unopened, restocked',
+            },
+            {
+              fromStatus: 'APPROVED_FOR_REFUND',
+              toStatus: 'REFUNDED',
+              changedBy: adminUser.id,
+              note: 'Refund requested',
+            },
+            {
+              fromStatus: 'REFUNDED',
+              toStatus: 'COMPLETED',
+              note: 'Settlement confirmed complete',
+            },
+          ],
+        },
+      },
+      include: { items: true },
+    });
+
+    const order4RefundReturnItem = order4RefundReturn.items[0];
+    if (!order4RefundReturnItem) {
+      throw new Error('[seed] order4 return fixture: expected return item missing');
+    }
+    await prisma.refund.create({
+      data: {
+        paymentTransactionId: order4VerifiedTransaction.id,
+        returnRequestId: order4RefundReturn.id,
+        amount: aviatorTotalPayable,
+        reason: `Return ${order4RefundReturn.returnNumber}`,
+        status: 'COMPLETED',
+        requestedBy: adminUser.id,
+        idempotencyKey: `return-refund__${order4RefundReturn.id}`,
+        lines: {
+          create: [{ returnItemId: order4RefundReturnItem.id, amount: aviatorTotalPayable }],
+        },
+      },
+    });
+    await prisma.order.update({
+      where: { id: order4.id },
+      data: { paymentStatus: 'PARTIALLY_REFUNDED', refundedTotal: aviatorTotalPayable },
+    });
+  }
+
+  // Return #2 — CREDIT_NOTE resolution, the Clubmaster line, fully
+  // settled with a real ISSUED CreditNote (never a historical-Invoice
+  // rewrite — ADR-012 decision 7).
+  let order4CreditNoteReturn = await prisma.returnRequest.findFirst({
+    where: { orderId: order4.id, resolution: 'CREDIT_NOTE' },
+    include: { items: true },
+  });
+  if (!order4CreditNoteReturn) {
+    const clubmasterTotalPayable = 9_800_000n - 0n + 882_000n;
+    order4CreditNoteReturn = await prisma.returnRequest.create({
+      data: {
+        returnNumber: await nextReturnNumber(),
+        orderId: order4.id,
+        customerId: customer.id,
+        status: 'COMPLETED',
+        reason: 'SIZE_FIT_ISSUE',
+        resolution: 'CREDIT_NOTE',
+        warehouseId: warehouseCentral.id,
+        locationId: locMain.id,
+        requestedAt: returnTimestamps.requestedAt,
+        approvedAt: returnTimestamps.approvedAt,
+        receivedAt: returnTimestamps.receivedAt,
+        inspectedAt: returnTimestamps.inspectedAt,
+        refundedAt: returnTimestamps.refundedAt,
+        completedAt: returnTimestamps.completedAt,
+        items: {
+          create: [
+            {
+              orderItemId: order4ClubmasterItem.id,
+              quantity: 1,
+              condition: 'OPENED_UNUSED',
+              refundAmount: clubmasterTotalPayable,
+            },
+          ],
+        },
+        statusHistory: {
+          create: [
+            { fromStatus: null, toStatus: 'REQUESTED', note: 'Return requested' },
+            {
+              fromStatus: 'REQUESTED',
+              toStatus: 'APPROVED',
+              changedBy: adminUser.id,
+              note: 'Approved by returns team',
+            },
+            {
+              fromStatus: 'APPROVED',
+              toStatus: 'CUSTOMER_SHIPPING',
+              note: 'Customer shipped item',
+            },
+            {
+              fromStatus: 'CUSTOMER_SHIPPING',
+              toStatus: 'RECEIVED',
+              changedBy: adminUser.id,
+              note: 'Received at Tehran Central Warehouse',
+            },
+            {
+              fromStatus: 'RECEIVED',
+              toStatus: 'INSPECTING',
+              changedBy: adminUser.id,
+              note: 'Inspection started',
+            },
+            {
+              fromStatus: 'INSPECTING',
+              toStatus: 'APPROVED_FOR_REFUND',
+              changedBy: adminUser.id,
+              note: 'Opened but unused, restocked',
+            },
+            {
+              fromStatus: 'APPROVED_FOR_REFUND',
+              toStatus: 'REFUNDED',
+              changedBy: adminUser.id,
+              note: 'Credit note issued',
+            },
+            {
+              fromStatus: 'REFUNDED',
+              toStatus: 'COMPLETED',
+              note: 'Settlement confirmed complete',
+            },
+          ],
+        },
+      },
+      include: { items: true },
+    });
+    await prisma.creditNote.create({
+      data: {
+        creditNoteNumber: await nextCreditNoteNumber(),
+        orderId: order4.id,
+        returnRequestId: order4CreditNoteReturn.id,
+        invoiceId: order4Invoice.id,
+        customerId: customer.id,
+        status: 'ISSUED',
+        currency: 'IRR',
+        subtotal: clubmasterTotalPayable,
+        grandTotal: clubmasterTotalPayable,
+        issuedAt: returnTimestamps.refundedAt,
+        items: {
+          create: [
+            {
+              description: 'Return credit — Ray-Ban Clubmaster Classic',
+              quantity: 1,
+              unitPrice: clubmasterTotalPayable,
+              lineTotal: clubmasterTotalPayable,
+            },
+          ],
+        },
+      },
+    });
+  }
 
   // ---------------------------------------------------------------------
   // cms — a home page, a menu, an FAQ entry
@@ -2988,12 +3366,12 @@ async function main(): Promise<void> {
   });
 
   console.log(
-    '[seed] done — RBAC (71 real permissions across identity/catalog/inventory/payment/order/' +
-      'promotion/coupon, role inheritance, a deny-override), admin/customer/support/' +
-      'catalog-editor/inventory-role/payment-role/order-role/promotion-manager/promotion-editor ' +
-      'users, demo customer, catalog (3 products — two PUBLISHED with ' +
-      'variant+SKU+price+media/collection, one DRAFT), inventory (2 warehouses, 3 locations, ' +
-      'stock for all SKUs, 2 reservations, a low-stock example, a transfer), ' +
+    '[seed] done — RBAC (80 real permissions across identity/catalog/inventory/payment/order/' +
+      'promotion/coupon/return/credit_note, role inheritance, a deny-override), admin/customer/' +
+      'support/catalog-editor/inventory-role/payment-role/order-role/promotion-manager/' +
+      'promotion-editor/returns-role users, demo customer, catalog (3 products — two PUBLISHED ' +
+      'with variant+SKU+price+media/collection, one DRAFT), inventory (2 warehouses, 3 ' +
+      'locations, stock for all SKUs, 2 reservations, a low-stock example, a transfer), ' +
       'cart-checkout (2 shipping methods, pricing settings, an active customer cart, a guest ' +
       'cart, a checkout-ready fixture with a real reservation, an expired checkout), payment ' +
       '(ZarinPal provider, a SUCCEEDED intent with a VERIFIED transaction + partial refund, a ' +
@@ -3001,9 +3379,11 @@ async function main(): Promise<void> {
       'finding), order (a PAID/PARTIALLY_REFUNDED order + issued invoice, a genuinely UNPAID/' +
       'PENDING_PAYMENT order demonstrating the conversion crash-recovery window, a PAID-then-' +
       'CANCELLED order + issued invoice, a FULFILLED order with a DELIVERED fulfillment/' +
-      'shipment/tracking history + issued invoice), promotion (3 promotions — percentage/' +
-      'fixed-amount/automatic-free-shipping — plus 5 coupons covering active/expired/future/' +
-      'single-use fixtures), CMS/notification/system basics.',
+      'shipment/tracking history + issued invoice), returns (two full-lifecycle COMPLETED ' +
+      'returns against the FULFILLED order — one REFUND-resolution with a real Refund+RefundLine, ' +
+      'one CREDIT_NOTE-resolution with a real ISSUED CreditNote), promotion (3 promotions — ' +
+      'percentage/fixed-amount/automatic-free-shipping — plus 5 coupons covering active/expired/' +
+      'future/single-use fixtures), CMS/notification/system basics.',
   );
 }
 
