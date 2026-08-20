@@ -688,4 +688,227 @@ describe('Returns/Refunds/CreditNotes (e2e)', () => {
         .expect(403);
     });
   });
+
+  describe('Admin settlement/reconciliation API (ADR-013)', () => {
+    it('a real REFUND-resolution settlement is readable, listed as active, retry no-ops, and reconcile finds nothing wrong', async () => {
+      const customerToken = await provisionCustomer('+989120099918');
+      const skuId = await createFreshSellableSku(50);
+      const { orderId, orderItemId } = await driveOrderToDelivered(skuId, 1, customerToken);
+
+      const created = body<ReturnBody>(
+        await request(server)
+          .post('/returns')
+          .set('Authorization', `Bearer ${customerToken}`)
+          .send({ orderId, reason: 'CHANGED_MIND', items: [{ orderItemId, quantity: 1 }] })
+          .expect(201),
+      );
+      await request(server)
+        .post(`/admin/returns/${created.id}/approve`)
+        .set('Authorization', `Bearer ${returnsManagerToken}`)
+        .expect(201);
+      await request(server)
+        .post(`/returns/${created.id}/ship`)
+        .set('Authorization', `Bearer ${customerToken}`)
+        .expect(201);
+      await request(server)
+        .post(`/admin/returns/${created.id}/receive`)
+        .set('Authorization', `Bearer ${returnsManagerToken}`)
+        .send({ warehouseId: mainWarehouseId, locationId: mainLocationId })
+        .expect(201);
+      const returnItemId = created.items[0]?.id;
+      if (!returnItemId) throw new Error('expected a return item');
+      await request(server)
+        .post(`/admin/returns/${created.id}/inspect`)
+        .set('Authorization', `Bearer ${returnsManagerToken}`)
+        .send({ items: [{ returnItemId, condition: 'UNOPENED' }] })
+        .expect(201);
+
+      // Before approve-refund: the settlement row does not exist yet.
+      await request(server)
+        .get(`/admin/returns/${created.id}/settlement`)
+        .set('Authorization', `Bearer ${returnsManagerToken}`)
+        .expect(404);
+
+      await request(server)
+        .post(`/admin/returns/${created.id}/approve-refund`)
+        .set('Authorization', `Bearer ${returnsManagerToken}`)
+        .expect(201);
+
+      // Restocked, still waiting for the admin's own refund() click —
+      // RESTOCKED is a legitimate waiting state, retry() is a no-op.
+      const afterRestock = body<{ id: string; status: string }>(
+        await request(server)
+          .get(`/admin/returns/${created.id}/settlement`)
+          .set('Authorization', `Bearer ${returnsManagerToken}`)
+          .expect(200),
+      );
+      expect(afterRestock.status).toBe('RESTOCKED');
+      const retriedNoOp = body<{ status: string }>(
+        await request(server)
+          .post(`/admin/returns/${created.id}/settlement/retry`)
+          .set('Authorization', `Bearer ${returnsManagerToken}`)
+          .expect(201),
+      );
+      expect(retriedNoOp.status).toBe('RESTOCKED');
+
+      await request(server)
+        .post(`/admin/returns/${created.id}/refund`)
+        .set('Authorization', `Bearer ${returnsManagerToken}`)
+        .expect(201);
+
+      const settled = body<{
+        id: string;
+        status: string;
+        attempts: number;
+        lastError: string | null;
+      }>(
+        await request(server)
+          .get(`/admin/returns/${created.id}/settlement`)
+          .set('Authorization', `Bearer ${returnsManagerToken}`)
+          .expect(200),
+      );
+      expect(settled.status).toBe('SETTLED');
+      expect(settled.attempts).toBe(0);
+      expect(settled.lastError).toBeNull();
+
+      // Listed in the default "active" view (SETTLED is still active —
+      // COMPLETED only happens via the separate return_settlement_sync
+      // sweep, ADR-013's own fix).
+      const activeList = body<{ id: string }[]>(
+        await request(server)
+          .get('/admin/returns/settlements')
+          .set('Authorization', `Bearer ${returnsManagerToken}`)
+          .expect(200),
+      );
+      expect(activeList.some((s) => s.id === settled.id)).toBe(true);
+
+      // Never appears in the MANUAL_REVIEW view — nothing went wrong.
+      const manualReviewList = body<{ id: string }[]>(
+        await request(server)
+          .get('/admin/returns/settlements?status=MANUAL_REVIEW')
+          .set('Authorization', `Bearer ${returnsManagerToken}`)
+          .expect(200),
+      );
+      expect(manualReviewList.some((s) => s.id === settled.id)).toBe(false);
+
+      // retry() on an already-SETTLED settlement is a safe no-op.
+      const retriedAgain = body<{ status: string }>(
+        await request(server)
+          .post(`/admin/returns/${created.id}/settlement/retry`)
+          .set('Authorization', `Bearer ${returnsManagerToken}`)
+          .expect(201),
+      );
+      expect(retriedAgain.status).toBe('SETTLED');
+
+      // reconcile() runs the real global engine and returns only this
+      // return's own findings — a healthy settlement produces none.
+      const reconciled = body<{ findings: unknown[]; manualReviewCount: number }>(
+        await request(server)
+          .post(`/admin/returns/${created.id}/reconcile`)
+          .set('Authorization', `Bearer ${returnsManagerToken}`)
+          .expect(201),
+      );
+      expect(reconciled.findings).toHaveLength(0);
+    });
+
+    it('404s for a return with no settlement row, and for a genuinely nonexistent return id', async () => {
+      await request(server)
+        .get(`/admin/returns/${randomUUID()}/settlement`)
+        .set('Authorization', `Bearer ${returnsManagerToken}`)
+        .expect(404);
+      await request(server)
+        .post(`/admin/returns/${randomUUID()}/settlement/retry`)
+        .set('Authorization', `Bearer ${returnsManagerToken}`)
+        .expect(404);
+      await request(server)
+        .post(`/admin/returns/${randomUUID()}/reconcile`)
+        .set('Authorization', `Bearer ${returnsManagerToken}`)
+        .expect(404);
+    });
+
+    it('RBAC: returns_clerk and a plain customer get 403 on every settlement route; a customer can never reach it via any path', async () => {
+      const customerToken = await provisionCustomer('+989120099919');
+      const skuId = await createFreshSellableSku(50);
+      const { orderId, orderItemId } = await driveOrderToDelivered(skuId, 1, customerToken);
+      const created = body<ReturnBody>(
+        await request(server)
+          .post('/returns')
+          .set('Authorization', `Bearer ${customerToken}`)
+          .send({ orderId, reason: 'CHANGED_MIND', items: [{ orderItemId, quantity: 1 }] })
+          .expect(201),
+      );
+
+      for (const token of [returnsClerkToken, customerToken]) {
+        await request(server)
+          .get('/admin/returns/settlements')
+          .set('Authorization', `Bearer ${token}`)
+          .expect(403);
+        await request(server)
+          .get(`/admin/returns/${created.id}/settlement`)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(403);
+        await request(server)
+          .post(`/admin/returns/${created.id}/settlement/retry`)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(403);
+        await request(server)
+          .post(`/admin/returns/${created.id}/reconcile`)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(403);
+      }
+    });
+
+    it('a premature refund() before restock completes is a real 409, and the settlement records neither an attempt nor an error', async () => {
+      const customerToken = await provisionCustomer('+989120099920');
+      const skuId = await createFreshSellableSku(50);
+      const { orderId, orderItemId } = await driveOrderToDelivered(skuId, 1, customerToken);
+      const created = body<ReturnBody>(
+        await request(server)
+          .post('/returns')
+          .set('Authorization', `Bearer ${customerToken}`)
+          .send({ orderId, reason: 'CHANGED_MIND', items: [{ orderItemId, quantity: 1 }] })
+          .expect(201),
+      );
+      await request(server)
+        .post(`/admin/returns/${created.id}/approve`)
+        .set('Authorization', `Bearer ${returnsManagerToken}`)
+        .expect(201);
+      await request(server)
+        .post(`/returns/${created.id}/ship`)
+        .set('Authorization', `Bearer ${customerToken}`)
+        .expect(201);
+      await request(server)
+        .post(`/admin/returns/${created.id}/receive`)
+        .set('Authorization', `Bearer ${returnsManagerToken}`)
+        .send({ warehouseId: mainWarehouseId, locationId: mainLocationId })
+        .expect(201);
+      const returnItemId = created.items[0]?.id;
+      if (!returnItemId) throw new Error('expected a return item');
+      await request(server)
+        .post(`/admin/returns/${created.id}/inspect`)
+        .set('Authorization', `Bearer ${returnsManagerToken}`)
+        .send({ items: [{ returnItemId, condition: 'UNOPENED' }] })
+        .expect(201);
+      await request(server)
+        .post(`/admin/returns/${created.id}/approve-refund`)
+        .set('Authorization', `Bearer ${returnsManagerToken}`)
+        .expect(201);
+
+      // Double-click protection: approve-refund a second time is a
+      // safe no-op (ADR-012, unchanged), never a duplicate restock.
+      await request(server)
+        .post(`/admin/returns/${created.id}/approve-refund`)
+        .set('Authorization', `Bearer ${returnsManagerToken}`)
+        .expect(201);
+
+      const settlement = body<{ id: string; status: string; attempts: number }>(
+        await request(server)
+          .get(`/admin/returns/${created.id}/settlement`)
+          .set('Authorization', `Bearer ${returnsManagerToken}`)
+          .expect(200),
+      );
+      expect(settlement.status).toBe('RESTOCKED');
+      expect(settlement.attempts).toBe(0);
+    });
+  });
 });
