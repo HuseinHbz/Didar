@@ -6,6 +6,15 @@ follow; it is not an endpoint reference — for that, run the service and open
 `/api/v1/docs` (generated Swagger UI, always in sync with the code since it's
 generated from the same `@nestjs/swagger` decorators the controllers use).
 
+## Module endpoint references
+
+This document is the service-wide standard; per-module endpoint tables
+(hand-maintained companions to `/api/v1/docs` for reviewing scope without
+booting anything) live alongside each domain: [`catalog.md`](catalog.md),
+[`inventory.md`](inventory.md), [`cart-checkout.md`](cart-checkout.md),
+[`payment.md`](payment.md), [`order.md`](order.md),
+[`promotions.md`](promotions.md), [`returns.md`](returns.md).
+
 ## Conventions
 
 - **Base path**: `/api/v1` — versioned from the first endpoint (blueprint §70),

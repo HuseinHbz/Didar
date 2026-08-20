@@ -130,6 +130,33 @@ locationId)` with a full 7-bucket quantity model, `InventoryLedger`
   comment for the exact remediation. Full detail:
   [`order-erd.md`](./order-erd.md) and
   [`docs/adr/ADR-011-order-lifecycle-hardening.md`](../adr/ADR-011-order-lifecycle-hardening.md).
+- `20260820000000_returns_refunds_credit_notes` (Phase 012) — purely
+  additive, no drops: `commerce.return_requests`/`return_items`/
+  `return_status_history` (the new `ReturnRequest` aggregate), a
+  nullable, real-FK `return_request_id` column on the existing
+  `commerce.refunds` table plus a new `commerce.refund_lines` child
+  table (every existing `refunds` column and row untouched — exactly one
+  refund pathway still exists), and `finance.credit_notes`/
+  `credit_note_lines` (a real, minimal credit-note lifecycle,
+  `invoice_id` a real enforced FK, `Invoice` itself never mutated). Two
+  new Postgres sequences (`commerce.return_number_seq`,
+  `finance.credit_note_number_seq`), same technique as
+  `order_number_seq`/`invoice_number_seq`. Full detail:
+  [`return-erd.md`](./return-erd.md) and
+  [`docs/adr/ADR-012-returns-refunds-credit-notes.md`](../adr/ADR-012-returns-refunds-credit-notes.md).
+  Data-preserving in the ordinary sense — real rows already existed
+  (`commerce.orders`: 545, `commerce.order_items`: 546,
+  `commerce.refunds`: 78, `finance.invoices`: 545,
+  `commerce.fulfillments`: 243 at authoring time) — round-tripped
+  UP -> DOWN -> UP with row counts identical throughout, and `prisma
+migrate diff` against a fresh shadow database confirming zero drift in
+  both directions (live vs. shadow, shadow vs. `schema.prisma`). A real
+  schema-authoring bug was caught this way: `prisma format` kept
+  silently reintroducing a `commerce -> finance` FK via a stray
+  `ReturnRequest.creditNotes` back-relation this schema's own
+  unenforced-cross-schema convention rules out — see the migration
+  file's own header comment and `return-erd.md`'s "Key design
+  decisions" for the fix.
 
 This is **not** full coverage of blueprint §57's eventual table list. See
 ["Deliberately out of scope"](#deliberately-out-of-scope) below for exactly
@@ -364,6 +391,18 @@ real local PostgreSQL:
   row counts confirmed identical before rollback, after rollback, and
   after reapplying; `prisma migrate status` reported "up to date" after.
   See [`order-erd.md`](./order-erd.md)'s own "Migration" section.
+- Phase 012: purely additive (`commerce.return_requests`/`return_items`/
+  `return_status_history`, `commerce.refunds.return_request_id` +
+  `commerce.refund_lines`, `finance.credit_notes`/`credit_note_lines`)
+  — no table drops, nothing to replace. Round-tripped — up -> down -> up
+  — against the live dev database with real accumulated data
+  (`commerce.orders`: 545, `commerce.order_items`: 546,
+  `commerce.refunds`: 78, `finance.invoices`: 545,
+  `commerce.fulfillments`: 243 at authoring time), row counts confirmed
+  identical throughout, and `prisma migrate diff` against a fresh shadow
+  database confirming zero drift in both directions (live vs. shadow,
+  shadow vs. `schema.prisma`) — not merely a syntax check. See
+  [`return-erd.md`](./return-erd.md)'s own "Migration" section.
 
 ## Seeding
 
@@ -390,12 +429,17 @@ promotions (percentage/fixed-amount/automatic-free-shipping) and five
 coupons covering active/expired/future/single-use fixtures, two new
 RBAC roles (`promotion_manager`/`promotion_editor`) (marketing, Phase
 010), a home page/menu/FAQ (cms), notification templates + the demo
-customer's channel preferences (notification), and a feature flag + two
-settings (system). Idempotent throughout (`upsert`, keyed on each
+customer's channel preferences (notification), a feature flag + two
+settings (system), two full-lifecycle COMPLETED return fixtures against
+the FULFILLED order — one REFUND-resolution with a real `Refund` +
+`RefundLine`, one CREDIT_NOTE-resolution with a real ISSUED
+`CreditNote` — plus 9 new `return.*`/`credit_note.*` permissions and two
+new RBAC roles (`returns_manager`/`returns_clerk`) (commerce/finance,
+Phase 012). Idempotent throughout (`upsert`, keyed on each
 model's real unique constraint, or a `findUnique`-then-create guard
 where no natural unique key exists) — safe to run against a
 freshly-migrated database or one that already has this data. Verified
-idempotent (ran repeatedly across Phases 006-010, row counts unchanged)
+idempotent (ran repeatedly across Phases 006-012, row counts unchanged)
 and verified runnable under `iecp_app`
 alone — the seed only needs DML, confirming the least-privilege role is
 sufficient for real application-style writes, not just raw `psql`.

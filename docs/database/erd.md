@@ -53,6 +53,10 @@ graph LR
     inventory -. "fulfillments.warehouse_id (Phase 009)" .-> commerce
     identity -. "order_status_history.changed_by (Phase 009)" .-> commerce
     customer -. "invoices.customer_id (Phase 009)" .-> finance
+    inventory -. "return_requests.warehouse_id/location_id (Phase 012)" .-> commerce
+    identity -. "return_status_history.changed_by (Phase 012)" .-> commerce
+    commerce -. "credit_notes.order_id/return_request_id (Phase 012)" .-> finance
+    customer -. "credit_notes.customer_id (Phase 012)" .-> finance
     customer -. "notification_preferences.customer_id" .-> notification
     customer -. "notification_logs.customer_id" .-> notification
     customer -. "analytics_events.customer_id" .-> analytics
@@ -518,12 +522,21 @@ here — `order_promotions`, an immutable per-order snapshot of every
 promotion/coupon that discounted it, `order_id`-FK'd to `orders` with
 unenforced pointers back into `marketing` for the promotion/coupon
 identity (the same "order ≠ live product" principle `order_items`
-already established). The diagram below is intentionally minimal — only
+already established). Phase 012 (see [`return-erd.md`](./return-erd.md)
+for the full diagram) added the `return_requests`/`return_items`/
+`return_status_history` subtree — purely additive, no drops — plus a
+nullable, real-FK `return_request_id` column on the existing `refunds`
+table and a new `refund_lines` child table (the per-`ReturnItem`
+breakdown of one refund). Every existing `refunds` column and row is
+untouched; there remains exactly one refund pathway
+(`RefundService.requestRefund()`/`processRefund()`), extended, never
+duplicated. The diagram below is intentionally minimal — only
 `carts`/`cart_items`, the one part of this schema simple enough to still
 show inline — see
-`cart-checkout-erd.md`/`payment-erd.md`/`order-erd.md`/`promotion-erd.md`
-for everything else; all four are the source of truth for their share of
-this schema going forward, same convention `inventory-erd.md` set above.
+`cart-checkout-erd.md`/`payment-erd.md`/`order-erd.md`/`promotion-erd.md`/
+`return-erd.md` for everything else; all five are the source of truth for
+their share of this schema going forward, same convention
+`inventory-erd.md` set above.
 
 ```mermaid
 erDiagram
@@ -667,9 +680,17 @@ earlier revisions of this document and replaced them with the real
 `invoices`/`invoice_items` subtree (`invoice_items` renamed from
 `invoice_lines`) — real `status`/`customer_id`/`issued_at`/`voided_at`
 fields, `order_id` now unique (one invoice per order), a server-generated
-`invoice_number` drawn from a real Postgres sequence. Only
-`product_prices`/`price_history` (Phase 005, unrelated to invoicing) are
-still shown inline below; see `order-erd.md` for the invoice subtree.
+`invoice_number` drawn from a real Postgres sequence. Phase 012 (see
+[`return-erd.md`](./return-erd.md)) added `credit_notes`/
+`credit_note_lines` — a real, minimal credit-note lifecycle
+(`DRAFT -> ISSUED -> APPLIED`, `VOID`), `invoice_id` a real enforced FK
+(both in `finance`), `order_id`/`return_request_id`/`customer_id` plain
+unenforced `uuid` columns matching `invoices.order_id`'s own convention.
+`Invoice` itself is never mutated when a `CreditNote` is issued against
+it — no column on `invoices` changes; the two rows together represent
+the adjustment. Only `product_prices`/`price_history` (Phase 005,
+unrelated to invoicing) are still shown inline below; see
+`order-erd.md`/`return-erd.md` for the invoice/credit-note subtrees.
 
 ```mermaid
 erDiagram
