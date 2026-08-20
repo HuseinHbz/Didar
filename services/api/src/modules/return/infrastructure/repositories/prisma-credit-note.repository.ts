@@ -47,9 +47,15 @@ export class PrismaCreditNoteRepository implements CreditNoteRepositoryPort {
   /** Draws `finance.credit_note_number_seq` inside the same transaction
    * as the insert (ADR-012 decision 7/9) — same technique
    * `PrismaOrderRepository.create()`/`PrismaReturnRepository.create()`
-   * already use for their own number sequences. No idempotency-key
-   * handling here: see this port's own doc comment for why a duplicate
-   * call would mean the caller's own row lock was bypassed. */
+   * already use for their own number sequences.
+   *
+   * ADR-013 decision 9 — `returnRequestId` is now a real `@unique`
+   * column (a plain Postgres UNIQUE already allows unlimited NULLs, so
+   * this is safe for the hypothetical non-return credit note too). A
+   * retried/duplicate draft attempt for the same return hits `P2002`
+   * and re-reads the original row instead of creating a second one —
+   * closing the gap this method's own prior doc comment claimed was
+   * "structurally guarded" with no database backing it at all. */
   async create(props: {
     orderId: string;
     returnRequestId?: string | null;
@@ -67,42 +73,57 @@ export class PrismaCreditNoteRepository implements CreditNoteRepositoryPort {
       lineTotal: bigint;
     }[];
   }): Promise<CreditNote> {
-    const row = await prisma.$transaction(async (tx) => {
-      const seqRows = await tx.$queryRaw<{ nextval: bigint }[]>(
-        Prisma.sql`SELECT nextval('finance.credit_note_number_seq') AS nextval`,
-      );
-      const nextval = seqRows[0]?.nextval;
-      if (nextval === undefined) {
-        throw new Error('credit_note_number_seq.nextval() returned no row');
-      }
-      const creditNoteNumber = formatCreditNoteNumber(nextval, new Date());
+    try {
+      const row = await prisma.$transaction(async (tx) => {
+        const seqRows = await tx.$queryRaw<{ nextval: bigint }[]>(
+          Prisma.sql`SELECT nextval('finance.credit_note_number_seq') AS nextval`,
+        );
+        const nextval = seqRows[0]?.nextval;
+        if (nextval === undefined) {
+          throw new Error('credit_note_number_seq.nextval() returned no row');
+        }
+        const creditNoteNumber = formatCreditNoteNumber(nextval, new Date());
 
-      return tx.creditNote.create({
-        data: {
-          id: randomUUID(),
-          creditNoteNumber,
-          orderId: props.orderId,
-          returnRequestId: props.returnRequestId ?? null,
-          invoiceId: props.invoiceId ?? null,
-          customerId: props.customerId ?? null,
-          currency: props.currency ?? 'IRR',
-          subtotal: props.subtotal,
-          discountTotal: props.discountTotal ?? 0n,
-          taxTotal: props.taxTotal ?? 0n,
-          grandTotal: props.grandTotal,
-          items: {
-            create: props.lines.map((line) => ({
-              id: randomUUID(),
-              description: line.description,
-              quantity: line.quantity,
-              unitPrice: line.unitPrice,
-              lineTotal: line.lineTotal,
-            })),
+        return tx.creditNote.create({
+          data: {
+            id: randomUUID(),
+            creditNoteNumber,
+            orderId: props.orderId,
+            returnRequestId: props.returnRequestId ?? null,
+            invoiceId: props.invoiceId ?? null,
+            customerId: props.customerId ?? null,
+            currency: props.currency ?? 'IRR',
+            subtotal: props.subtotal,
+            discountTotal: props.discountTotal ?? 0n,
+            taxTotal: props.taxTotal ?? 0n,
+            grandTotal: props.grandTotal,
+            items: {
+              create: props.lines.map((line) => ({
+                id: randomUUID(),
+                description: line.description,
+                quantity: line.quantity,
+                unitPrice: line.unitPrice,
+                lineTotal: line.lineTotal,
+              })),
+            },
           },
-        },
+        });
       });
-    });
-    return creditNoteToDomain(row);
+      return creditNoteToDomain(row);
+    } catch (error) {
+      if (
+        props.returnRequestId &&
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002' &&
+        (error.meta?.['target'] as string[] | undefined)?.includes('return_request_id') === true
+      ) {
+        const existing = await prisma.creditNote.findUnique({
+          where: { returnRequestId: props.returnRequestId },
+        });
+        if (existing) return creditNoteToDomain(existing);
+      }
+      throw error;
+    }
   }
 
   /** Same row-lock + re-check technique every other status-bearing

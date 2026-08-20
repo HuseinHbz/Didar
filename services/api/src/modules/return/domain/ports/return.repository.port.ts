@@ -129,4 +129,16 @@ export interface ReturnRepositoryPort {
       refundAmount: bigint;
     }[],
   ): Promise<ReturnItem[]>;
+
+  /** ADR-013 decision 6 — marks one `ReturnItem` as restocked
+   * (`restocked_at = COALESCE(restocked_at, NOW())`, a single-row
+   * atomic `UPDATE`, idempotent by construction: a redundant call never
+   * overwrites the original timestamp). This is the fast-path
+   * "already done" check `ReturnSettlementService.beginRestock()` reads
+   * before ever attempting `receiveStock()` again — the real
+   * correctness guarantee is `InventoryLedger.idempotencyKey`
+   * (decision 6), not this column; a crash between the ledger write
+   * and this call is safe because retrying `receiveStock()` with the
+   * same key is itself a harmless no-op. */
+  markItemRestocked(returnItemId: string): Promise<void>;
 }

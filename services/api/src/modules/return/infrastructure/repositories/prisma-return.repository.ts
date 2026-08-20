@@ -337,4 +337,12 @@ export class PrismaReturnRepository implements ReturnRepositoryPort {
     );
     return updated.map(returnItemToDomain);
   }
+
+  /** ADR-013 decision 6 — see the port's own doc comment for why a
+   * plain, unlocked `UPDATE ... WHERE restocked_at IS NULL` is
+   * sufficient here: this column is a fast-path cache, never the
+   * correctness authority (`InventoryLedger.idempotencyKey` is). */
+  async markItemRestocked(returnItemId: string): Promise<void> {
+    await prisma.$executeRaw`UPDATE commerce.return_items SET restocked_at = COALESCE(restocked_at, NOW()) WHERE id = ${returnItemId}::uuid`;
+  }
 }

@@ -27,6 +27,12 @@ export class ReturnItem {
     public readonly quantity: number,
     public readonly condition: ReturnItemCondition | null,
     public readonly refundAmount: bigint | null,
+    /** ADR-013 decision 6 — non-null once this line's own restock has
+     * actually completed (a real `InventoryLedger` row keyed on this
+     * item's own deterministic idempotency key). The durable
+     * "already restocked" fact a crash/retry checks before ever
+     * calling `receiveStock()` again for this item. */
+    public readonly restockedAt: Date | null,
     public readonly createdAt: Date,
   ) {}
 
@@ -37,6 +43,7 @@ export class ReturnItem {
     quantity: number;
     condition?: ReturnItemCondition | null;
     refundAmount?: bigint | null;
+    restockedAt?: Date | null;
     createdAt: Date;
   }): ReturnItem {
     return new ReturnItem(
@@ -46,6 +53,7 @@ export class ReturnItem {
       props.quantity,
       props.condition ?? null,
       props.refundAmount ?? null,
+      props.restockedAt ?? null,
       props.createdAt,
     );
   }
