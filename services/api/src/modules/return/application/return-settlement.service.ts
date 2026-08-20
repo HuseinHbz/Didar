@@ -112,6 +112,56 @@ export class ReturnSettlementService {
     return this.settlements.listManualReview();
   }
 
+  /**
+   * `POST /admin/returns/:id/settlement/retry` (`return.settlement
+   * .retry`) — the one manual re-drive action, ADR-013's RBAC section.
+   * Never a raw status overwrite: every branch below either calls the
+   * exact same idempotent method the synchronous path/recovery sweep
+   * use, or refuses outright.
+   *
+   * - `PENDING_RESTOCK` / `REFUND_REQUESTED`: re-drives through
+   *   `beginRestock()`/`requestSettlement()`, same as a sweep tick.
+   * - `MANUAL_REVIEW`: resumes into whichever progressing state the
+   *   settlement's own `restockCompletedAt` says it had actually
+   *   reached — read from the row, never guessed — then re-drives from
+   *   there in the same call.
+   * - `RESTOCKED` / `SETTLED` / `COMPLETED`: nothing to retry, a safe
+   *   no-op (mirrors `beginRestock()`/`requestSettlement()`'s own
+   *   no-op-when-inapplicable behavior).
+   * - `FAILED_TERMINAL`: no legal transition exists from this state —
+   *   real HTTP 409, never a silent retry-forever (decision 10).
+   */
+  async retry(returnRequestId: string, actorUserId: string): Promise<ReturnSettlement> {
+    const settlement = await this.getForAdmin(returnRequestId);
+
+    if (settlement.status === 'FAILED_TERMINAL') {
+      throw new InvalidReturnSettlementTransitionError(settlement.status, 'PENDING_RESTOCK');
+    }
+
+    if (settlement.status === 'MANUAL_REVIEW') {
+      const resumeTo = settlement.restockCompletedAt ? 'REFUND_REQUESTED' : 'PENDING_RESTOCK';
+      const result = await this.settlements.updateStatus(settlement.id, resumeTo, {});
+      if (result.transitioned) {
+        await this.auditLog.record({
+          actorId: actorUserId,
+          action: 'RETURN_SETTLEMENT_MANUAL_REVIEW_RESUMED',
+          entityType: 'ReturnSettlement',
+          entityId: settlement.id,
+          newValue: { resumedTo: resumeTo },
+        });
+      }
+    }
+
+    const current = await this.getForAdmin(returnRequestId);
+    if (current.status === 'PENDING_RESTOCK') {
+      return this.beginRestock(returnRequestId, actorUserId);
+    }
+    if (current.status === 'REFUND_REQUESTED') {
+      return this.requestSettlement(returnRequestId, actorUserId);
+    }
+    return current;
+  }
+
   /** Called once, from `ReturnService.approveForRefund()`'s own
    * `transitioned: true` branch — idempotent via the real `@unique`
    * `returnRequestId` FK, safe even if that guard were ever bypassed by

@@ -23,6 +23,7 @@ import { PrismaReturnSettlementRepository } from './infrastructure/repositories/
 import { PrismaReturnRepository } from './infrastructure/repositories/prisma-return.repository';
 import { CreditNoteAdminController } from './presentation/controllers/credit-note-admin.controller';
 import { ReturnAdminController } from './presentation/controllers/return-admin.controller';
+import { ReturnSettlementAdminController } from './presentation/controllers/return-settlement-admin.controller';
 import { ReturnController } from './presentation/controllers/return.controller';
 import { ReturnDomainExceptionFilter } from './presentation/filters/return-domain-exception.filter';
 
@@ -59,7 +60,20 @@ import { ReturnDomainExceptionFilter } from './presentation/filters/return-domai
  */
 @Module({
   imports: [CartCheckoutModule, OrderModule, PaymentModule, InventoryModule, ReturnQueueModule],
-  controllers: [ReturnController, ReturnAdminController, CreditNoteAdminController],
+  // ReturnSettlementAdminController is registered before
+  // ReturnAdminController deliberately: both share the `admin/returns`
+  // prefix, and ReturnAdminController's `GET /admin/returns/:id` is a
+  // single-segment wildcard that would otherwise shadow this
+  // controller's own literal `GET /admin/returns/settlements` route
+  // (Express matches routes in registration order, not by specificity
+  // — a `:id` pattern registered first happily matches the literal
+  // string "settlements").
+  controllers: [
+    ReturnController,
+    ReturnSettlementAdminController,
+    ReturnAdminController,
+    CreditNoteAdminController,
+  ],
   providers: [
     { provide: RETURN_REPOSITORY, useClass: PrismaReturnRepository },
     { provide: CREDIT_NOTE_REPOSITORY, useClass: PrismaCreditNoteRepository },
