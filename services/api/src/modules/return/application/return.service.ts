@@ -353,9 +353,7 @@ export class ReturnService {
    * included — only on a full-order return (ADR-012 decision 4). Shared
    * by `approveForRefund()` (to draft a `CreditNote`) and `refund()` (to
    * build a `Refund`'s lines). */
-  private async computeSettlement(
-    detail: ReturnRequestWithDetail,
-  ): Promise<{
+  private async computeSettlement(detail: ReturnRequestWithDetail): Promise<{
     lines: SettlementLine[];
     lineTotal: bigint;
     shippingAmount: bigint;
@@ -493,6 +491,13 @@ export class ReturnService {
           amount: line.amount,
         })),
       });
+      // Keeps Order.paymentStatus/refundedTotal in sync with the real
+      // refund — same cache-update discipline
+      // OrderService.requestPartialRefund() already applies to its own
+      // admin-triggered refunds. Never done for the CREDIT_NOTE branch
+      // above — a credit note is a separate, non-payment-method
+      // adjustment (ADR-012 decision 7).
+      await this.orders.recordReturnRefund(detail.request.orderId, settlement.totalAmount);
       settlementAmount = settlement.totalAmount;
     }
 

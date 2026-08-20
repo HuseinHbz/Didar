@@ -1,3 +1,4 @@
+import type { OrderPaymentStatus } from '@iecp/types';
 import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 
 import {
@@ -243,5 +244,33 @@ export class OrderService {
       newValue: { amount: amount.toString(), reason: reason ?? null },
     });
     return updated;
+  }
+
+  /**
+   * ADR-012 — called by `ReturnService.refund()`, and nothing else,
+   * after a return-triggered `Refund` is successfully requested via
+   * `RefundService.requestRefund()` — keeps `Order`'s cached
+   * `paymentStatus`/`refundedTotal` columns in sync with the real
+   * refund, the same "cache read alongside status, never independently
+   * authoritative" discipline `updatePaymentState()` already establishes
+   * for `requestPartialRefund()` above. Never creates a `Refund` itself
+   * — that already happened; this only updates the cache, so a
+   * return-triggered refund is visible on the order the same way an
+   * admin-triggered partial refund already is. Deliberately not called
+   * for a `CREDIT_NOTE`-resolution return: a credit note is a separate,
+   * non-payment-method adjustment (ADR-012 decision 7's own point) —
+   * `Order.refundedTotal` reflects real payment-method money movement
+   * only.
+   */
+  async recordReturnRefund(orderId: string, additionalRefundedAmount: bigint): Promise<Order> {
+    const detail = await this.getForAdmin(orderId);
+    const refundedTotal = detail.order.refundedTotal + additionalRefundedAmount;
+    const paymentStatus: OrderPaymentStatus =
+      refundedTotal >= detail.order.paidTotal ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
+    return this.orders.updatePaymentState(orderId, {
+      paymentStatus,
+      paidTotal: detail.order.paidTotal,
+      refundedTotal,
+    });
   }
 }
