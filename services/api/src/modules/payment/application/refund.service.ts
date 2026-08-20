@@ -44,6 +44,24 @@ export class RefundService {
     return refund;
   }
 
+  /** `GET /admin/payments/refunds` — closes a gap ADR-012's own
+   * reconnaissance flagged (no list route existed despite the original
+   * Phase 008 brief asking for one). Exactly one of the two filters must
+   * be supplied; this never becomes an unfiltered "list every refund"
+   * scan. */
+  async list(filter: {
+    paymentTransactionId?: string;
+    returnRequestId?: string;
+  }): Promise<Refund[]> {
+    if (filter.returnRequestId) {
+      return this.refunds.listByReturnRequestId(filter.returnRequestId);
+    }
+    if (filter.paymentTransactionId) {
+      return this.refunds.listByTransactionId(filter.paymentTransactionId);
+    }
+    return [];
+  }
+
   /** `POST /payments/refunds` — admin-only (see this module's RBAC
    * permissions). Validates against the transaction's real remaining
    * balance before writing anything; a rejection here never reaches the
