@@ -112,6 +112,10 @@ import { InventoryDomainExceptionFilter } from './presentation/filters/inventory
   // module and inject them directly, reusing the real reservation engine
   // instead of reimplementing it. Additive, behavior-preserving: nothing
   // about how this module serves its own controllers changes.
-  exports: [ReservationService, AllocationService, StockQueryService],
+  //
+  // Phase 012 (ADR-012 decision 6) — `AdjustmentService` added, additively,
+  // so `ReturnModule` can call `receiveReturnedStock()` directly instead of
+  // re-binding `INVENTORY_ITEM_REPOSITORY` locally.
+  exports: [ReservationService, AllocationService, StockQueryService, AdjustmentService],
 })
 export class InventoryModule {}

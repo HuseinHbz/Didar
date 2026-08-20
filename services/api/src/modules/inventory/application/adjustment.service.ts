@@ -117,7 +117,12 @@ export class AdjustmentService {
     quantity: number;
     returnRequestId: string;
     returnItemId: string;
-    actorUserId?: UserId | null;
+    /** Plain string, not the branded `UserId` `create()` above expects —
+     * this method is called application-to-application by
+     * `ReturnService`, which carries `actorUserId` as a plain string
+     * the same way `OrderService`'s own methods do, not from a
+     * controller's `@CurrentUserId()` decorator directly. */
+    actorUserId?: string | null;
   }): Promise<{ item: InventoryItem; ledgerEntry: InventoryLedgerEntry }> {
     const correlationId = randomUUID();
     const result = await this.items.receiveStock({

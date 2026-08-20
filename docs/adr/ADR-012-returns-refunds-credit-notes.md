@@ -131,14 +131,20 @@ transition, since the actual refund confirmation is itself async.
 `assertTransition`) is a direct structural copy of `OrderStateMachine`'s
 own shape — same file layout, same no-op-is-not-an-error convention.
 
-## Decision 2 — `ReturnService` reaches `Order`/`Invoice` through `OrderModule`'s exports, not a new port
+## Decision 2 — `ReturnService` reaches `Order`/`Invoice`/`Fulfillment` through `OrderModule`'s exports, not a new port
 
 `OrderModule` currently exports nothing. Rather than have the new
-`ReturnModule` re-bind `ORDER_REPOSITORY`/`INVOICE_REPOSITORY` locally
-(the "avoid a cycle" pattern `OrderQueueModule` uses only because it
-_would_ create one importing `OrderModule` back), `OrderModule` gains an
-additive `exports: [OrderService, InvoiceService]` — nothing removed,
-nothing renamed. `ReturnModule` imports `OrderModule` directly, the same
+`ReturnModule` re-bind `ORDER_REPOSITORY`/`INVOICE_REPOSITORY`/
+`FULFILLMENT_REPOSITORY` locally (the "avoid a cycle" pattern
+`OrderQueueModule` uses only because it _would_ create one importing
+`OrderModule` back), `OrderModule` gains an additive
+`exports: [OrderService, InvoiceService, FulfillmentService]` — nothing
+removed, nothing renamed. `FulfillmentService` is needed alongside the
+two originally planned exports because `ReturnEligibilityValidator`
+(Decision 3) needs each named `OrderItem`'s real per-item delivered
+date, which lives on `Fulfillment.deliveredAt` (via
+`FulfillmentService.listByOrder()`'s own `FulfillmentItem` rows), not on
+`Order` itself. `ReturnModule` imports `OrderModule` directly, the same
 shape `OrderModule` already uses to import `PaymentModule`/
 `InventoryModule`. No cycle risk: nothing in `OrderModule` needs to know
 `ReturnModule` exists.
@@ -253,15 +259,35 @@ structurally, not by convention.
 Mechanically: `AdjustmentService` (inventory module) gains one new
 method, `receiveReturnedStock()` — a thin wrapper around the existing,
 previously-uncalled `InventoryItemRepositoryPort.receiveStock()`
-(`movementType: 'RETURN_RECEIPT'`, `referenceType: 'RETURN'`,
+(`movementType: 'RETURN_RECEIPT'`, `referenceType: 'ReturnRequest'`,
 `referenceId: returnRequestId`), writing the same `INVENTORY_ADJUSTED`-
 shaped audit entry `AdjustmentService.create()` already writes for
 manual corrections. `InventoryModule` gains `AdjustmentService` in its
-`exports` array (previously absent). `ReturnService.approveForRefund()`
-calls it once per accepted `ReturnItem`, inside the same transaction
-that writes the `APPROVED_FOR_REFUND` status transition — a crash
-between the two is impossible by construction (one transaction), not
-merely made unlikely.
+`exports` array (previously absent).
+
+`ReturnService.approveForRefund()` calls `returnRepository.updateStatus()`
+(`INSPECTING -> APPROVED_FOR_REFUND`) *first*, and only proceeds to
+restock — once per accepted `ReturnItem` — when that call reports
+`transitioned: true`. This is deliberately **not** one cross-module
+database transaction: nothing elsewhere in this codebase opens a shared
+Postgres transaction across module boundaries either (`OrderService
+.cancel()` calling `orderRepository.updateStatus()` then `refundService
+.requestRefund()` is the exact same two-separate-calls shape). What the
+gate on `transitioned: true` actually buys is the real property this
+phase's brief asks for: **concurrency**-safety — two simultaneous
+`approveForRefund()` calls on the same return can never both restock,
+because only the transaction that actually wins the row lock and flips
+the status sees `transitioned: true`; the loser sees `false` and skips
+restocking entirely, the same "skip side-effects on a losing racer"
+rule `FulfillmentService` already established. A process crash between
+the status write committing and the restock call completing is a
+different, narrower risk — a genuine known limitation, not silently
+swallowed (see Decision 10): the return is left `APPROVED_FOR_REFUND`
+with an incompletely-restocked set of items, recoverable only by a
+manual admin follow-up today, the same category of gap the existing
+`invoice_generation`/`order_conversion` sweeps exist to close for their
+own two-step crash windows — a future `return_restock_sync` sweep would
+be the equivalent fix here, deliberately left out of this phase's scope.
 
 Idempotency: retrying `approveForRefund()` on an already-`APPROVED_FOR_
 REFUND` return is a no-op via `ReturnStateMachine.isNoOp` — the restock
@@ -290,13 +316,15 @@ for consistency, even though a *real* FK would be possible here; kept
 unenforced to match every other `finance -> commerce` pointer in this
 schema rather than making this one row special) and `invoiceId` (a
 **real, enforced FK** — both rows live in `finance`). A `DRAFT`
-`CreditNote` is created automatically as part of `POST .../returns/:id/
-refund` when the return's `resolution` is `CREDIT_NOTE` (never a
-separate manual "create an ad-hoc credit note" endpoint this phase
-doesn't otherwise need), then `issue()` moves it to `ISSUED` with a real
-number drawn. `Invoice` itself is never mutated — no column on `Invoice`
-changes when a `CreditNote` is issued against it; the two rows together
-represent the adjustment, exactly as the brief requires.
+`CreditNote` — its `creditNoteNumber` already drawn, per above — is
+created automatically inside `ReturnService.approveForRefund()` when the
+return's `resolution` is `CREDIT_NOTE` (never a separate manual "create
+an ad-hoc credit note" endpoint this phase doesn't otherwise need);
+`issue()` afterwards is a pure `DRAFT -> ISSUED` state transition, no
+further number generation involved. `Invoice` itself is never mutated —
+no column on `Invoice` changes when a `CreditNote` is issued against it;
+the two rows together represent the adjustment, exactly as the brief
+requires.
 
 ## Decision 8 — `Refund`/`RefundLine`: an additive extension to the existing aggregate, not a parallel table
 
