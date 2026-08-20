@@ -935,6 +935,43 @@ async function main(): Promise<void> {
     });
   }
 
+  // A second, fully-privileged admin fixture (same adminRole as
+  // +989120000001), reserved exclusively for the return e2e suites
+  // (return-repository.e2e-spec.ts, return.e2e-spec.ts). Those suites need
+  // to drive an order all the way through admin fulfillment/delivery
+  // (order.*/fulfillment.*/inventory.* permissions) as HTTP-only setup —
+  // scoping that to a returns-only role isn't possible, and reusing
+  // +989120000001 makes them contend with the seven-plus other e2e spec
+  // files that already log in as that same phone. Real, confirmed root
+  // cause: VerifyOtpUseCase.execute() resolves the *latest* OTP row for a
+  // (phone, purpose) pair (otpRequests.findLatest), which is correct
+  // production security behavior (only the most recently requested code is
+  // ever valid) but means two concurrent request+verify sequences for the
+  // same phone race — whichever request() call lands second silently
+  // invalidates the other's in-flight code. With Jest's default
+  // one-worker-per-spec-file parallelism (test:e2e has no --runInBand, and
+  // CI runs the identical command) this is a real, pre-existing,
+  // low-probability flake shared by every e2e file that logs in as
+  // +989120000001, not something introduced by or fixable inside the
+  // returns feature. It is not "fixed" here — only the two return e2e
+  // files stop contributing to that contention by using their own admin
+  // login.
+  const returnAdminUser = await prisma.user.upsert({
+    where: { phone: '+989120000017' },
+    update: {},
+    create: {
+      phone: '+989120000017',
+      email: 'returns-e2e-admin@iecp.dev',
+      isActive: true,
+      phoneVerifiedAt: new Date(),
+    },
+  });
+  await prisma.userRole.upsert({
+    where: { userId_roleId: { userId: returnAdminUser.id, roleId: adminRole.id } },
+    update: {},
+    create: { userId: returnAdminUser.id, roleId: adminRole.id },
+  });
+
   // A trusted device + an active-looking session for the admin user (blueprint
   // §56 "Device Trust") — session data itself is normally created by a real
   // login (services/api's CompleteLoginService), not seeded, but one example

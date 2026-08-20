@@ -294,7 +294,15 @@ describe('Return/Refund/CreditNote repository (integration)', () => {
     await app.init();
     server = app.getHttpServer() as Server;
 
-    adminToken = await loginByPhone('+989120000001');
+    // A dedicated second admin fixture (+989120000017, seed.ts) — not the
+    // shared +989120000001 every other e2e spec file also logs in as. Two
+    // concurrent request+verify sequences for the same phone race against
+    // VerifyOtpUseCase's findLatest(phone, purpose) semantics (only the
+    // most recently requested code is ever valid); with Jest's default
+    // one-worker-per-file parallelism that's a real, low-probability,
+    // pre-existing flake shared by every file contending on
+    // +989120000001, not something this suite can fix on its own.
+    adminToken = await loginByPhone('+989120000017');
 
     const warehousesRes = await request(server)
       .get('/admin/inventory/warehouses?limit=100')
