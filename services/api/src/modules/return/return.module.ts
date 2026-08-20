@@ -10,6 +10,7 @@ import { CreditNoteService } from './application/credit-note.service';
 import { ReturnService } from './application/return.service';
 import { CREDIT_NOTE_REPOSITORY } from './domain/ports/credit-note.repository.port';
 import { RETURN_REPOSITORY } from './domain/ports/return.repository.port';
+import { ReturnQueueModule } from './infrastructure/queues/return-queue.module';
 import { PrismaCreditNoteRepository } from './infrastructure/repositories/prisma-credit-note.repository';
 import { PrismaReturnRepository } from './infrastructure/repositories/prisma-return.repository';
 
@@ -28,12 +29,18 @@ import { PrismaReturnRepository } from './infrastructure/repositories/prisma-ret
  * root already sets, rather than importing `IdentityModule`'s
  * internals.
  *
+ * Imports `ReturnQueueModule` so the `return_settlement_sync` sweep
+ * (task #153) actually gets registered on app bootstrap — see that
+ * module's own doc comment for why it re-declares its own repository-
+ * port bindings rather than importing this module back (would create a
+ * cycle).
+ *
  * Controllers are added in the next task (presentation layer) — this
  * module is providers-only until then, not yet imported into the root
  * `AppModule`.
  */
 @Module({
-  imports: [OrderModule, PaymentModule, InventoryModule],
+  imports: [OrderModule, PaymentModule, InventoryModule, ReturnQueueModule],
   providers: [
     { provide: RETURN_REPOSITORY, useClass: PrismaReturnRepository },
     { provide: CREDIT_NOTE_REPOSITORY, useClass: PrismaCreditNoteRepository },
