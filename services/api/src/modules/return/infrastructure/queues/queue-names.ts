@@ -30,3 +30,29 @@ export const DEFAULT_JOB_OPTIONS = {
  * dependency uses — is enough.
  */
 export const RETURN_SETTLEMENT_SYNC_SWEEP_INTERVAL_MS = 5 * 60_000;
+
+/**
+ * ADR-013 decision 5/8 — the crash-recovery queue: re-drives every
+ * `ReturnSettlement` still active (`PENDING_RESTOCK`/`REFUND_REQUESTED`)
+ * through the exact same idempotent `ReturnSettlementService.
+ * beginRestock()`/`requestSettlement()` methods the synchronous admin
+ * path calls, catching a settlement that crashed between its own DB
+ * commit and its next side effect (ADR-013 crash windows A-E). A
+ * tighter cadence than `RETURN_SETTLEMENT_SYNC_SWEEP_INTERVAL_MS`
+ * (2 minutes, not 5) — an item stuck un-restocked or un-refunded is a
+ * sharper, more visible business cost than a return sitting one sweep
+ * tick short of `COMPLETED`.
+ */
+export const RETURN_SETTLEMENT_RECOVERY_QUEUE = 'return_settlement_recovery';
+export const RETURN_SETTLEMENT_RECOVERY_INTERVAL_MS = 2 * 60_000;
+
+/**
+ * ADR-013 decision 9 — the reconciliation engine's own periodic driver.
+ * Read-heavy and safe to run often; a 10 minute cadence is deliberately
+ * looser than the recovery queue's 2 minutes — reconciliation exists to
+ * catch patterns the recovery sweep structurally cannot (a missing
+ * settlement row, a stuck settlement needing `MANUAL_REVIEW`
+ * escalation, duplicate-artifact detection), not to race it.
+ */
+export const RETURN_RECONCILIATION_QUEUE = 'return_reconciliation';
+export const RETURN_RECONCILIATION_INTERVAL_MS = 10 * 60_000;

@@ -6,9 +6,12 @@ import { AUDIT_LOG_REPOSITORY } from '../identity/domain/ports/audit-log.reposit
 import { PrismaAuditLogRepository } from '../identity/infrastructure/repositories/prisma-audit-log.repository';
 import { InventoryModule } from '../inventory/inventory.module';
 import { OrderModule } from '../order/order.module';
+import { REFUND_REPOSITORY } from '../payment/domain/ports/refund.repository.port';
+import { PrismaRefundRepository } from '../payment/infrastructure/repositories/prisma-refund.repository';
 import { PaymentModule } from '../payment/payment.module';
 
 import { CreditNoteService } from './application/credit-note.service';
+import { ReturnReconciliationService } from './application/return-reconciliation.service';
 import { ReturnSettlementService } from './application/return-settlement.service';
 import { ReturnService } from './application/return.service';
 import { CREDIT_NOTE_REPOSITORY } from './domain/ports/credit-note.repository.port';
@@ -39,10 +42,11 @@ import { ReturnDomainExceptionFilter } from './presentation/filters/return-domai
  * internals.
  *
  * Imports `ReturnQueueModule` so the `return_settlement_sync` sweep
- * (task #153) actually gets registered on app bootstrap — see that
- * module's own doc comment for why it re-declares its own repository-
- * port bindings rather than importing this module back (would create a
- * cycle).
+ * (task #153) plus ADR-013's `return_settlement_recovery` and
+ * `return_reconciliation` sweeps actually get registered on app
+ * bootstrap — see that module's own doc comment for why it re-declares
+ * its own repository-port bindings rather than importing this module
+ * back (would create a cycle).
  *
  * `IdentityModule`'s `JwtAuthGuard`/`AuthorizationGuard` are already
  * global (`APP_GUARD`, registered in `IdentityModule`) — the admin
@@ -60,12 +64,14 @@ import { ReturnDomainExceptionFilter } from './presentation/filters/return-domai
     { provide: RETURN_REPOSITORY, useClass: PrismaReturnRepository },
     { provide: CREDIT_NOTE_REPOSITORY, useClass: PrismaCreditNoteRepository },
     { provide: RETURN_SETTLEMENT_REPOSITORY, useClass: PrismaReturnSettlementRepository },
+    { provide: REFUND_REPOSITORY, useClass: PrismaRefundRepository },
     { provide: AUDIT_LOG_REPOSITORY, useClass: PrismaAuditLogRepository },
     CreditNoteService,
     ReturnSettlementService,
+    ReturnReconciliationService,
     ReturnService,
     { provide: APP_FILTER, useClass: ReturnDomainExceptionFilter },
   ],
-  exports: [ReturnService, CreditNoteService, ReturnSettlementService],
+  exports: [ReturnService, CreditNoteService, ReturnSettlementService, ReturnReconciliationService],
 })
 export class ReturnModule {}

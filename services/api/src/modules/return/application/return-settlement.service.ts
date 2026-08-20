@@ -233,7 +233,10 @@ export class ReturnSettlementService {
    * method's own try/catch — a legitimate "not ready yet" business
    * state, never recorded as a settlement failure.
    */
-  async requestSettlement(returnRequestId: string, actorUserId: string): Promise<ReturnSettlement> {
+  async requestSettlement(
+    returnRequestId: string,
+    actorUserId: string | null,
+  ): Promise<ReturnSettlement> {
     const settlement = await this.settlements.findByReturnRequestId(returnRequestId);
     if (!settlement) {
       throw new NotFoundException(`No settlement exists for return ${returnRequestId}`);
@@ -272,7 +275,7 @@ export class ReturnSettlementService {
           paymentTransactionId: transaction.id,
           amount: computed.totalAmount,
           reason: `Return ${detail.request.returnNumber}`,
-          requestedBy: actorUserId,
+          requestedBy: actorUserId ?? undefined,
           idempotencyKey: `return-refund__${returnRequestId}`,
           returnRequestId,
           lines: computed.lines.map((line) => ({
