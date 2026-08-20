@@ -74,7 +74,19 @@ export class RefundService {
    * direct/order-level refund to before. `ReturnService.refund()` is the
    * only caller that supplies them; this method still only ever
    * validates via `RefundValidator` and creates one row through the same
-   * `RefundRepositoryPort.create()` path — no second refund pathway. */
+   * `RefundRepositoryPort.create()` path — no second refund pathway.
+   *
+   * ADR-013 — checks `idempotencyKey` *before* `RefundValidator`, not
+   * only inside `create()`'s own P2002-catch-reread: a call that is
+   * genuinely a duplicate of one that already completed must short-
+   * circuit to the existing row without ever re-running
+   * `assertRefundable()` against the *post*-refund balance — otherwise
+   * the same idempotent retry looks, to the validator, like a second,
+   * real refund stacked on top of the first one it already created, and
+   * gets rejected as "would exceed the transaction amount". Found via
+   * this phase's own 20-concurrent-`requestSettlement()` proof: `create()`'s
+   * own idempotency guard is necessary but not sufficient when a
+   * pre-flight balance check runs ahead of it. */
   async requestRefund(props: {
     paymentTransactionId: string;
     amount: bigint;
@@ -84,21 +96,38 @@ export class RefundService {
     returnRequestId?: string | null;
     lines?: readonly { returnItemId: string; amount: bigint }[];
   }): Promise<Refund> {
-    const transaction = await this.intents.findTransactionById(props.paymentTransactionId);
-    if (!transaction) throw new NotFoundException('Payment transaction not found');
-    if (!transaction.isVerified) {
-      throw new ForbiddenException('Only a VERIFIED payment transaction can be refunded');
-    }
+    const existing = await this.refunds.findByIdempotencyKey(props.idempotencyKey);
+    if (existing) return existing;
 
-    const priorRefunds = await this.refunds.listByTransactionId(props.paymentTransactionId);
-    RefundValidator.assertRefundable(
-      props.amount,
-      transaction.amount,
-      priorRefunds.map((refund) => ({
-        amount: refund.amount,
-        countsAgainstBalance: refund.countsAgainstBalance,
-      })),
-    );
+    try {
+      const transaction = await this.intents.findTransactionById(props.paymentTransactionId);
+      if (!transaction) throw new NotFoundException('Payment transaction not found');
+      if (!transaction.isVerified) {
+        throw new ForbiddenException('Only a VERIFIED payment transaction can be refunded');
+      }
+
+      const priorRefunds = await this.refunds.listByTransactionId(props.paymentTransactionId);
+      RefundValidator.assertRefundable(
+        props.amount,
+        transaction.amount,
+        priorRefunds.map((refund) => ({
+          amount: refund.amount,
+          countsAgainstBalance: refund.countsAgainstBalance,
+        })),
+      );
+    } catch (error) {
+      // The check above and this validation are two separate reads —
+      // a concurrent caller with the *same* idempotencyKey can commit
+      // its own real refund in the narrow window between them, making
+      // `assertRefundable()` see that already-completed refund as
+      // *additional* balance being consumed and reject this call. Give
+      // the idempotency key the final word before surfacing any error:
+      // if the winner has committed by now, this is a duplicate
+      // delivery converging on the same row, not a real failure.
+      const raced = await this.refunds.findByIdempotencyKey(props.idempotencyKey);
+      if (raced) return raced;
+      throw error;
+    }
 
     return this.refunds.create({
       paymentTransactionId: props.paymentTransactionId,
