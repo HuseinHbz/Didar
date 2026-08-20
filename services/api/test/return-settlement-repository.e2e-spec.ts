@@ -327,9 +327,7 @@ describe('Return settlement repository/orchestration (integration, ADR-013)', ()
     adjustments = app.get(AdjustmentService);
 
     adminToken = await loginByPhone('+989120000017');
-    adminUserId = (
-      await prisma.user.findUniqueOrThrow({ where: { phone: '+989120000017' } })
-    ).id;
+    adminUserId = (await prisma.user.findUniqueOrThrow({ where: { phone: '+989120000017' } })).id;
 
     const warehousesRes = await request(server)
       .get('/admin/inventory/warehouses?limit=100')

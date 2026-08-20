@@ -201,13 +201,13 @@ mechanism, not a promise deferred again.
 **Historical-data backfill (found empirically, not theoretically).**
 `ReturnItem.restockedAt` defaults to `NULL` for every row that existed
 before this migration — including returns the old, synchronous
-pre-Phase-013 `approveForRefund()` had *already* physically restocked
+pre-Phase-013 `approveForRefund()` had _already_ physically restocked
 (that method called `receiveReturnedStock()` directly, with no
 idempotency key at all, before this phase's mechanism existed). Without
 a backfill, `NULL` reads as "never restocked," and the recovery
 sweep/reconciliation engine — both of which re-drive every settlement
 missing a `ReturnSettlement` row through `beginRestock()` — would issue
-a real *second* physical restock for each one. This was caught by
+a real _second_ physical restock for each one. This was caught by
 running the compiled app against the real accumulated dev database
 (1196 orders, 180 returns) as part of this task's own boot-test
 verification: 18 duplicate `InventoryLedger` rows appeared across 18

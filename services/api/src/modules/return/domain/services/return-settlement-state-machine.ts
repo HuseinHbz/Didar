@@ -51,19 +51,17 @@ export class InvalidReturnSettlementTransitionError extends Error {
  * ever called `receiveStock()` with it.
  */
 export class ReturnSettlementStateMachine {
-  private static readonly GRAPH: Record<
-    ReturnSettlementStatus,
-    readonly ReturnSettlementStatus[]
-  > = {
-    PENDING_RESTOCK: ['RESTOCKED', 'FAILED_TERMINAL', 'MANUAL_REVIEW'],
-    RESTOCKED: ['REFUND_REQUESTED', 'FAILED_TERMINAL', 'MANUAL_REVIEW'],
-    REFUND_REQUESTED: ['SETTLED', 'FAILED_TERMINAL', 'MANUAL_REVIEW'],
-    SETTLED: ['COMPLETED'],
-    COMPLETED: [],
-    FAILED_RETRYABLE: [],
-    FAILED_TERMINAL: [],
-    MANUAL_REVIEW: ['PENDING_RESTOCK', 'RESTOCKED', 'REFUND_REQUESTED', 'FAILED_TERMINAL'],
-  };
+  private static readonly GRAPH: Record<ReturnSettlementStatus, readonly ReturnSettlementStatus[]> =
+    {
+      PENDING_RESTOCK: ['RESTOCKED', 'FAILED_TERMINAL', 'MANUAL_REVIEW'],
+      RESTOCKED: ['REFUND_REQUESTED', 'FAILED_TERMINAL', 'MANUAL_REVIEW'],
+      REFUND_REQUESTED: ['SETTLED', 'FAILED_TERMINAL', 'MANUAL_REVIEW'],
+      SETTLED: ['COMPLETED'],
+      COMPLETED: [],
+      FAILED_RETRYABLE: [],
+      FAILED_TERMINAL: [],
+      MANUAL_REVIEW: ['PENDING_RESTOCK', 'RESTOCKED', 'REFUND_REQUESTED', 'FAILED_TERMINAL'],
+    };
 
   static isNoOp(from: ReturnSettlementStatus, to: ReturnSettlementStatus): boolean {
     return from === to;

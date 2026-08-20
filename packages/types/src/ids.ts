@@ -205,5 +205,4 @@ export const asCreditNoteLineId = brandedId<'CreditNoteLineId'>('CreditNoteLineI
 // docs/adr/ADR-013-return-settlement-reconciliation.md).
 export type ReturnSettlementId = Brand<string, 'ReturnSettlementId'>;
 
-export const asReturnSettlementId =
-  brandedId<'ReturnSettlementId'>('ReturnSettlementId').as;
+export const asReturnSettlementId = brandedId<'ReturnSettlementId'>('ReturnSettlementId').as;
