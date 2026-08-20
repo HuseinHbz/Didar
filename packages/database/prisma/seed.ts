@@ -381,6 +381,26 @@ async function main(): Promise<void> {
         'Manually issue a DRAFT credit note (a recovery path for the documented approve-refund/refund crash window, not the normal flow)',
     },
     { module: 'credit_note', action: 'void', description: 'Void a DRAFT or ISSUED credit note' },
+    // ADR-013 — minimum settlement/reconciliation surface: read, retry,
+    // reconcile. No `settlement.manual_review` permission — a
+    // MANUAL_REVIEW settlement is resumed by the same retry action (see
+    // ReturnSettlementService.retry()'s own doc comment).
+    {
+      module: 'return',
+      action: 'settlement.read',
+      description: 'Read a return settlement (worker/queue metadata included, admin-only)',
+    },
+    {
+      module: 'return',
+      action: 'settlement.retry',
+      description:
+        'Manually re-drive a stuck or MANUAL_REVIEW settlement through the same idempotent recovery methods the sweep uses',
+    },
+    {
+      module: 'return',
+      action: 'settlement.reconcile',
+      description: 'Manually trigger the reconciliation engine (reconcileAll())',
+    },
   ];
   const permissions = await Promise.all(
     permissionDefs.map((def) =>
@@ -615,6 +635,10 @@ async function main(): Promise<void> {
   // Phase 012 — same read-only financial-visibility role, naturally
   // extended (ADR-012 RBAC section).
   await grant(financeAuditorRole.id, 'credit_note.read');
+  // ADR-013 — settlement read visibility fits this role's existing
+  // "refund/reconciliation/credit-note visibility, no mutations" scope
+  // exactly; no `.retry`/`.reconcile` (those are mutations).
+  await grant(financeAuditorRole.id, 'return.settlement.read');
 
   // Two order roles (Phase 009 — docs/security/order-fulfillment-security.md
   // has the full matrix): `order_manager` gets every order.* permission (a
