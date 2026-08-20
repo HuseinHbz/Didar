@@ -6,6 +6,7 @@ import type {
   PaymentTransaction as PrismaPaymentTransaction,
   ReconciliationRecord as PrismaReconciliationRecord,
   Refund as PrismaRefund,
+  RefundLine as PrismaRefundLine,
 } from '@iecp/database';
 
 import { PaymentAttempt } from '../domain/entities/payment-attempt.entity';
@@ -14,6 +15,7 @@ import { PaymentIntent } from '../domain/entities/payment-intent.entity';
 import { PaymentProvider } from '../domain/entities/payment-provider.entity';
 import { PaymentTransaction } from '../domain/entities/payment-transaction.entity';
 import { ReconciliationRecord } from '../domain/entities/reconciliation-record.entity';
+import { RefundLine } from '../domain/entities/refund-line.entity';
 import { Refund } from '../domain/entities/refund.entity';
 
 export function paymentProviderToDomain(row: PrismaPaymentProvider): PaymentProvider {
@@ -106,6 +108,16 @@ export function refundToDomain(row: PrismaRefund): Refund {
     idempotencyKey: row.idempotencyKey,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  });
+}
+
+export function refundLineToDomain(row: PrismaRefundLine): RefundLine {
+  return RefundLine.create({
+    id: row.id,
+    refundId: row.refundId,
+    returnItemId: row.returnItemId,
+    amount: row.amount,
+    createdAt: row.createdAt,
   });
 }
 
