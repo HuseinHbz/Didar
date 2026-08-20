@@ -200,3 +200,10 @@ export const asReturnStatusHistoryId =
 export const asRefundLineId = brandedId<'RefundLineId'>('RefundLineId').as;
 export const asCreditNoteId = brandedId<'CreditNoteId'>('CreditNoteId').as;
 export const asCreditNoteLineId = brandedId<'CreditNoteLineId'>('CreditNoteLineId').as;
+
+// Phase 013 — return settlement recovery & reconciliation (see
+// docs/adr/ADR-013-return-settlement-reconciliation.md).
+export type ReturnSettlementId = Brand<string, 'ReturnSettlementId'>;
+
+export const asReturnSettlementId =
+  brandedId<'ReturnSettlementId'>('ReturnSettlementId').as;

@@ -523,3 +523,25 @@ export type ReturnItemCondition = (typeof RETURN_ITEM_CONDITIONS)[number];
  * `CreditNote` together represent the adjustment. */
 export const CREDIT_NOTE_STATUSES = ['DRAFT', 'ISSUED', 'APPLIED', 'VOID'] as const;
 export type CreditNoteStatus = (typeof CREDIT_NOTE_STATUSES)[number];
+
+/**
+ * `ReturnSettlement.status` (Phase 013 — see
+ * docs/adr/ADR-013-return-settlement-reconciliation.md decision 5).
+ * Deliberately separate from `ReturnStatus`: restock and
+ * money-settlement are two independently admin-triggered phases, so
+ * `RESTOCKED`/`SETTLED` are never skippable even when there is nothing
+ * to do for them — a step never visited is indistinguishable from one
+ * still in progress. `FAILED_RETRYABLE`/`FAILED_TERMINAL`/
+ * `MANUAL_REVIEW` are reachable from any non-terminal state.
+ */
+export const RETURN_SETTLEMENT_STATUSES = [
+  'PENDING_RESTOCK',
+  'RESTOCKED',
+  'REFUND_REQUESTED',
+  'SETTLED',
+  'COMPLETED',
+  'FAILED_RETRYABLE',
+  'FAILED_TERMINAL',
+  'MANUAL_REVIEW',
+] as const;
+export type ReturnSettlementStatus = (typeof RETURN_SETTLEMENT_STATUSES)[number];
