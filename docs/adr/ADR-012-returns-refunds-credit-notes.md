@@ -97,14 +97,17 @@ REQUESTED -> APPROVED -> CUSTOMER_SHIPPING -> RECEIVED -> INSPECTING
   -> APPROVED_FOR_REFUND -> REFUNDED -> COMPLETED
 ```
 
-Terminal: `REJECTED` (reachable from `REQUESTED`/`APPROVED` — a return
-never gets rejected after physical goods are already in hand; once
-`RECEIVED` the only paths are forward or `CANCELLED`), `CANCELLED`
-(reachable from `REQUESTED`/`APPROVED`/`CUSTOMER_SHIPPING` only — the
-customer's own withdrawal option, gone once the warehouse has physically
-received the goods, same "no cancelling something already in motion"
-shape `OrderStateMachine` uses for `CANCELLED` past
-`PARTIALLY_FULFILLED`).
+Terminal: `REJECTED` (reachable from `REQUESTED`/`APPROVED` — an admin
+can decline a return before it ever ships back — **and** from
+`INSPECTING` — the physical goods didn't match the claimed reason/
+condition once actually examined; both are real business outcomes, not
+merely a paperwork rejection. Never reachable once `APPROVED_FOR_REFUND`
+— once settlement has begun, a `REJECTED` return is a state-machine
+contradiction). `CANCELLED` (reachable from `REQUESTED`/`APPROVED`/
+`CUSTOMER_SHIPPING` only — the customer's own withdrawal option, gone
+once the warehouse has physically received the goods, same "no
+cancelling something already in motion" shape `OrderStateMachine` uses
+for `CANCELLED` past `PARTIALLY_FULFILLED`).
 
 `CUSTOMER_SHIPPING` is a plain status, not a new shipment sub-entity —
 this phase does not build a return-shipment/tracking-number model (no
@@ -341,9 +344,13 @@ everywhere:
   `return-refund__${returnRequestId}`, the same deterministic-key
   convention `OrderService` already uses
   (`order-cancel__${orderId}`, `order-partial-refund__${orderId}__${amount}`).
-- **Credit note issuance** — no separate key: `CreditNoteStateMachine
-  .isNoOp` on an already-`ISSUED` note is a no-op, and the number
-  sequence draw only happens on the real `DRAFT -> ISSUED` edge.
+- **Credit note issuance** — no separate key: the `DRAFT` row (and its
+  real, sequence-drawn `creditNoteNumber` — drawn at insert time, same
+  as `Invoice.invoiceNumber`, not deferred to a later transition) is
+  only ever created once, structurally guarded by the same
+  `APPROVED_FOR_REFUND -> REFUNDED` row lock Decision 6 already relies
+  on for the restock step; `CreditNoteStateMachine.isNoOp` then makes
+  any retried `DRAFT -> ISSUED` call a safe no-op on top.
 - **Inventory restock** — no separate key: covered structurally by
   Decision 6 (unreachable a second time once `APPROVED_FOR_REFUND`).
 
