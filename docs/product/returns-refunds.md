@@ -12,8 +12,8 @@ what does it deliberately not" view, same role every prior phase's own
   (`returns.window_days` setting, default 30 days from the item's own
   fulfillment `deliveredAt`).
 - An 8-state admin-driven return lifecycle (`REQUESTED -> APPROVED ->
-  CUSTOMER_SHIPPING -> RECEIVED -> INSPECTING -> APPROVED_FOR_REFUND ->
-  REFUNDED -> COMPLETED`, with `REJECTED`/`CANCELLED` as terminal exits)
+CUSTOMER_SHIPPING -> RECEIVED -> INSPECTING -> APPROVED_FOR_REFUND ->
+REFUNDED -> COMPLETED`, with `REJECTED`/`CANCELLED` as terminal exits)
   — see the ADR for the exact graph and reachability rules.
 - Server-computed refund amounts, derived entirely from each order
   item's own immutable historical snapshot (never the live catalog,

@@ -28,7 +28,7 @@ promotion resolution, or RBAC/audit infrastructure.
   provider — `requestRefund()` (validates via `RefundValidator`, creates
   a `PENDING` row, idempotent on a caller-supplied `idempotencyKey`) then
   `processRefund()` (submits to the real provider adapter). `OrderService
-  .cancel()`/`.requestPartialRefund()` already call `requestRefund()`
+.cancel()`/`.requestPartialRefund()` already call `requestRefund()`
   only — never `processRefund()` — and rely entirely on the existing
   `refund_status_sync` BullMQ sweep to drive a `PENDING` refund forward.
   This is a real, deliberate, already-proven pattern this phase reuses
@@ -81,8 +81,8 @@ promotion resolution, or RBAC/audit infrastructure.
   `updateShipmentStatus()` (Phase 011), and
   `PrismaFulfillmentRepository`'s `lockAndSumFulfilled()` (over-
   fulfillment) all use `SELECT ... FOR UPDATE` inside `prisma
-  .$transaction()`, re-checking the state machine / re-summing against
-  the *locked* row before writing. Phase 012 reuses this exact technique
+.$transaction()`, re-checking the state machine / re-summing against
+  the _locked_ row before writing. Phase 012 reuses this exact technique
   twice: once for return-status transitions, once for the
   return-quantity invariant (`lockAndSumReturnedQuantity`, the direct
   analogue of `lockAndSumFulfilled`).
@@ -157,7 +157,7 @@ itself:
 
 - `order.status` must be `FULFILLED` or `COMPLETED` — the goods must have
   actually been delivered (at least one real `Fulfillment.status ===
-  'DELIVERED'`; the exact per-item delivered check happens per line, see
+'DELIVERED'`; the exact per-item delivered check happens per line, see
   below). A `CANCELLED` order, or one that never got this far, is never
   eligible.
 - `order.paymentStatus` must be `PAID` or `PARTIALLY_REFUNDED` — real
@@ -182,7 +182,7 @@ amount for a line as
 `(orderItem.lineTotal - orderItem.discountAmount + orderItem.taxAmount) / orderItem.quantity`,
 using the exact same "floor-rounded, deterministic remainder allocation"
 family `DiscountCalculator`/`TaxCalculator` already established
-elsewhere in this codebase — but applied across *time* (successive
+elsewhere in this codebase — but applied across _time_ (successive
 partial returns of the same line) rather than across lines in one call:
 the remainder from the floor division is assigned to the first
 `remainder` units (by ordinal slot), so summing the refund amount of
@@ -206,7 +206,7 @@ of) the live promotion definition cannot retroactively change what a
 return refunds, because the calculator never reads the live definition.
 
 **Shipping** (`Order.shippingTotal`) is refunded only when a return
-results in the order's *entire remaining deliverable quantity* being
+results in the order's _entire remaining deliverable quantity_ being
 returned (a full-order return) — a partial return of some units never
 refunds a share of shipping. This is a real, documented business-rule
 choice (common return-policy convention), not an oversight; it is
@@ -237,7 +237,7 @@ real concurrency (§ Concurrency below), not merely asserted.
 ## Decision 6 — Inventory restock happens only once, atomically with the transition that marks a return physically accepted, using the existing (unused) `receiveStock()` seam
 
 Unlike Phase 011's cancellation-restock deferral (ADR-011 decision 8 —
-still unresolved and *not* touched by this phase; see Decision 10), a
+still unresolved and _not_ touched by this phase; see Decision 10), a
 return's restock destination is never a guess: the receiving warehouse/
 location is real, present-tense operational data the admin/warehouse
 operator enters at the moment goods physically arrive (`POST
@@ -266,7 +266,7 @@ manual corrections. `InventoryModule` gains `AdjustmentService` in its
 `exports` array (previously absent).
 
 `ReturnService.approveForRefund()` calls `returnRepository.updateStatus()`
-(`INSPECTING -> APPROVED_FOR_REFUND`) *first*, and only proceeds to
+(`INSPECTING -> APPROVED_FOR_REFUND`) _first_, and only proceeds to
 restock — once per accepted `ReturnItem` — when that call reports
 `transitioned: true`. This is deliberately **not** one cross-module
 database transaction: nothing elsewhere in this codebase opens a shared
@@ -312,7 +312,7 @@ application-memory counter, never client-supplied. `CreditNote`
 references `orderId` (unenforced cross-schema pointer, same convention
 `Invoice.orderId` already uses), `returnRequestId` (unenforced —
 `commerce`, same schema as `Invoice`'s own unenforced `orderId` pointer
-for consistency, even though a *real* FK would be possible here; kept
+for consistency, even though a _real_ FK would be possible here; kept
 unenforced to match every other `finance -> commerce` pointer in this
 schema rather than making this one row special) and `invoiceId` (a
 **real, enforced FK** — both rows live in `finance`). A `DRAFT`
@@ -364,7 +364,7 @@ everywhere:
   retry risk (a flaky customer-facing submit button).
 - **Return status transitions** (approve/reject/receive/inspect/
   approve-for-refund) — no separate key needed: `ReturnStateMachine
-  .isNoOp` plus the row lock already makes a retried identical call a
+.isNoOp` plus the row lock already makes a retried identical call a
   safe no-op, the same reasoning `FulfillmentService`'s Phase 011
   transitions already rely on.
 - **Refund creation** — reuses `Refund.idempotencyKey` (already
@@ -404,7 +404,7 @@ New permission module `return`: `return.read`, `return.approve`,
 `return.reject`, `return.receive`, `return.inspect`, `return.refund`
 (gates both `.../approve-refund` and `.../refund` — two routes, one
 permission, same shape `order.shipment.deliver` being its own dedicated
-permission does *not* preclude two routes sharing one grant elsewhere in
+permission does _not_ preclude two routes sharing one grant elsewhere in
 this schema). New permission module `credit_note`: `credit_note.read`,
 `credit_note.issue`, `credit_note.void`. `return.cancel`/
 `credit_note.create`/`inventory.restock.return` are **not** created —
