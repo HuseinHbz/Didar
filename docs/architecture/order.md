@@ -276,3 +276,21 @@ judged out of this phase's actual scope (a return-type-shape change
 across every consumer, for a duplicate-but-harmless audit row, not a
 correctness or security gap) — documented here as a known, deferred
 finding rather than silently left unexamined.
+
+## Phase 013 — one bug found in `OrderService.recordReturnRefund()`
+
+Phase 013's own return-settlement concurrency testing (not a targeted
+audit of this module) surfaced a genuine, previously-undetected race in
+`recordReturnRefund(orderId, additionalRefundedAmount)`: the method
+re-read `Order.refundedTotal` and wrote back
+`refundedTotal + additionalRefundedAmount` without any claim on "have I
+already applied this settlement's refund to this order," so a retried
+call for the same return (recovery sweep + a racing manual retry, or
+two sweep ticks) could add the same amount twice. Fixed on the caller
+side, not by touching this method's own signature or `Order`'s schema:
+`ReturnSettlement.refundRecordedAt` (claimed via a single atomic
+`UPDATE ... WHERE refund_recorded_at IS NULL RETURNING id`, see
+[`returns.md`](returns.md)'s Phase 013 section) now guarantees at most
+one caller per return ever invokes `recordReturnRefund()` at all. No
+other behavior in this module changed — `OrderService` itself, its own
+state machine, and every other existing call path are untouched.

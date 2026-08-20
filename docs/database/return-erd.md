@@ -233,3 +233,89 @@ A real schema-authoring bug was caught this way, not by reading the SQL:
 the stray `ReturnRequest.creditNotes` back-relation described above,
 found while resolving an unexpected cross-schema FK `prisma format`
 regenerated.
+
+## Phase 013 — return settlement recovery & reconciliation
+
+Full design rationale: [`docs/adr/ADR-013-return-settlement-reconciliation.md`](../adr/ADR-013-return-settlement-reconciliation.md).
+Purely additive, same discipline as every prior schema phase — no table
+drops, no data transforms beyond one documented, verified backfill.
+
+```
+commerce.return_requests ──1:1── commerce.return_settlements
+                                        │
+                              (status, restock_completed_at,
+                               refund_requested_at,
+                               refund_recorded_at, settled_at,
+                               completed_at, attempts, last_error,
+                               last_attempt_at)
+
+commerce.return_items      + restocked_at   (nullable, additive)
+inventory.inventory_ledger + idempotency_key (nullable, UNIQUE)
+finance.credit_notes       return_request_id gains a real UNIQUE index
+                            (was structural-only before this phase)
+```
+
+**`commerce.return_settlements`** — one row per `ReturnRequest`
+(`return_request_id UUID NOT NULL UNIQUE`, real FK,
+`ON DELETE CASCADE`), `status` a new `ReturnSettlementStatus` enum
+(`PENDING_RESTOCK`/`RESTOCKED`/`REFUND_REQUESTED`/`SETTLED`/
+`COMPLETED`/`FAILED_RETRYABLE`/`FAILED_TERMINAL`/`MANUAL_REVIEW`,
+`DEFAULT 'PENDING_RESTOCK'`), an indexed `status` column (the recovery
+sweep's and reconciliation's own primary read pattern:
+"every non-terminal settlement").
+
+**`commerce.return_items.restocked_at`** — nullable `TIMESTAMP(3)`, the
+per-item "already restocked" fast-path fact `beginRestock()` checks
+before ever calling `receiveStock()` again. The real correctness
+guarantee is the ledger's own unique `idempotency_key`, not this
+column — a crash between the ledger write and this call is safe
+because retrying `receiveStock()` with the same key is itself a
+harmless no-op.
+
+**`inventory.inventory_ledger.idempotency_key`** — nullable `TEXT`,
+`UNIQUE`. Every pre-Phase-013 call site (reserve/release/convert,
+purchase receipt, adjustment, transfer, count reconciliation) omits it
+— a plain `UNIQUE` constraint allows unlimited `NULL`s (standard SQL),
+so every one of this repository's real accumulated ledger rows from
+before this phase is unaffected. The one new caller
+(`AdjustmentService.receiveReturnedStock()`) supplies
+`return-restock__${returnItemId}` — one key per return line, "one
+return item -> at most one restock event, ever."
+
+**`finance.credit_notes.return_request_id` gains a real `UNIQUE`
+index** — a plain (non-partial) Postgres `UNIQUE` already allows
+unlimited `NULL`s, so no hand-written partial-index workaround was
+needed the way Phase 010's `CHECK`-constraint backstop needed one.
+Closes a real gap: `CreditNoteService.createDraftForReturn()`'s own doc
+comment claimed this was "structurally guarded... never reachable a
+second time for the same return" with no database constraint actually
+backing that claim before this phase.
+
+### A real historical-data backfill, not just new columns
+
+Section 5 of the migration backfills `return_items.restocked_at` for
+every item a pre-Phase-013 return had _already_ physically restocked
+via the old, synchronous, non-idempotent `approveForRefund()` path —
+mirroring that method's exact restock-eligibility condition (restockable
+`condition`, real `productSkuId`, real `warehouseId`/`locationId`)
+so it marks precisely the items that condition already restocked, no
+more and no fewer. Discovered empirically, not theoretically: an app
+boot against this repository's own real accumulated dev data (1196
+orders, 180 returns at authoring time), before this backfill existed,
+produced 18 duplicate `inventory.inventory_ledger` rows across 18
+`ReturnItem`s (8 `REFUNDED` + 10 `COMPLETED` returns). Reversed by
+hand (verified safe first — no other write had touched those specific
+rows since), backfill added, and the full verification round trip
+redone from scratch afterward.
+
+### Verification (redone after the backfill was added)
+
+Applied UP → DOWN → UP against the live dev database with row counts
+recorded before/after at every step (zero drift on every unrelated
+table: `commerce.orders`, `finance.credit_notes`, `commerce.refunds`,
+`inventory.inventory_ledger` all unchanged in count save for the
+migration's own additive rows); a fresh shadow database built from the
+full migration history from scratch (empty starting point — the
+backfill's own `UPDATE` is a safe no-op against zero rows there) and
+diffed against `schema.prisma` — zero drift. `prisma migrate status`
+clean before and after.
