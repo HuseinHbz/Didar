@@ -6,13 +6,8 @@ import {
   AUDIT_LOG_REPOSITORY,
   type AuditLogRepositoryPort,
 } from '../../identity/domain/ports/audit-log.repository.port';
-import { AdjustmentService } from '../../inventory/application/adjustment.service';
 import { FulfillmentService } from '../../order/application/fulfillment.service';
-import { InvoiceService } from '../../order/application/invoice.service';
 import { type OrderActor, OrderService } from '../../order/application/order.service';
-import { PaymentIntentService } from '../../payment/application/payment-intent.service';
-import { RefundService } from '../../payment/application/refund.service';
-import type { ReturnItem } from '../domain/entities/return-item.entity';
 import type { ReturnRequest } from '../domain/entities/return-request.entity';
 import {
   RETURN_REPOSITORY,
@@ -24,32 +19,19 @@ import { RefundAmountCalculator } from '../domain/services/refund-amount-calcula
 import { ReturnEligibilityValidator } from '../domain/services/return-eligibility-validator';
 import { ReturnStateMachine } from '../domain/services/return-state-machine';
 
-import { CreditNoteService } from './credit-note.service';
+import { ReturnSettlementService } from './return-settlement.service';
 
 const RETURN_WINDOW_SETTING_KEY = 'returns.window_days';
 const FALLBACK_RETURN_WINDOW_DAYS = 30;
 
-/** Conditions the physical goods can be in and still go back on the
- * shelf — `DAMAGED`/`DEFECTIVE` never restock (ADR-012 decision 6's own
- * "rejected returns must NOT increase available inventory" requirement,
- * applied at the per-item level even inside an otherwise-accepted
- * return: a damaged unit is still refunded, per policy, but never
- * resold). A real, documented business-rule choice, not an oversight. */
-const RESTOCKABLE_CONDITIONS: readonly ReturnItemCondition[] = ['UNOPENED', 'OPENED_UNUSED'];
-
-interface SettlementLine {
-  returnItemId: string;
-  orderItemId: string;
-  amount: bigint;
-}
-
 /**
  * Orchestrates the return lifecycle end to end (ADR-012 decision 1) —
- * reaches `Order`/`Invoice`/`Fulfillment` only through `OrderModule`'s
- * exports (decision 2), triggers settlement only through the existing
- * `RefundService`/`CreditNoteService` pathways (never a second refund
- * pathway), and restocks only through `AdjustmentService
- * .receiveReturnedStock()` (decision 6). Every privileged mutation
+ * reaches `Order`/`Fulfillment` only through `OrderModule`'s exports
+ * (decision 2). Everything that happens once a return reaches
+ * `APPROVED_FOR_REFUND` — restocking, requesting the actual money
+ * settlement — is delegated to `ReturnSettlementService` (ADR-013),
+ * which owns that durability/idempotency/recovery story; this class
+ * only decides *when* to ask it to run. Every privileged mutation
  * writes its own `system.AuditLog` entry — this module has no internal
  * audit logging to retrofit, same "caller writes the audit entry"
  * convention `OrderService` already established.
@@ -60,12 +42,8 @@ export class ReturnService {
     @Inject(RETURN_REPOSITORY) private readonly returns: ReturnRepositoryPort,
     @Inject(AUDIT_LOG_REPOSITORY) private readonly auditLog: AuditLogRepositoryPort,
     private readonly orders: OrderService,
-    private readonly invoices: InvoiceService,
     private readonly fulfillments: FulfillmentService,
-    private readonly payments: PaymentIntentService,
-    private readonly refunds: RefundService,
-    private readonly adjustments: AdjustmentService,
-    private readonly creditNotes: CreditNoteService,
+    private readonly settlementService: ReturnSettlementService,
   ) {}
 
   async get(id: string, actor: OrderActor): Promise<ReturnRequestWithDetail> {
@@ -348,95 +326,19 @@ export class ReturnService {
     return result.entity;
   }
 
-  /** Builds the per-`ReturnItem` settlement breakdown (already computed
-   * at `inspect()` time) plus whether the order's shipping charge is
-   * included — only on a full-order return (ADR-012 decision 4). Shared
-   * by `approveForRefund()` (to draft a `CreditNote`) and `refund()` (to
-   * build a `Refund`'s lines). */
-  private async computeSettlement(detail: ReturnRequestWithDetail): Promise<{
-    lines: SettlementLine[];
-    lineTotal: bigint;
-    shippingAmount: bigint;
-    totalAmount: bigint;
-  }> {
-    const lines: SettlementLine[] = detail.items
-      .filter((item): item is ReturnItem & { refundAmount: bigint } => item.refundAmount !== null)
-      .map((item) => ({
-        returnItemId: item.id,
-        orderItemId: item.orderItemId,
-        amount: item.refundAmount,
-      }));
-    const lineTotal = lines.reduce((sum, line) => sum + line.amount, 0n);
-
-    const orderDetail = await this.orders.getForAdmin(detail.request.orderId);
-    const returnedAfter = await Promise.all(
-      orderDetail.items.map(async (orderItem) => ({
-        orderedQuantity: orderItem.quantity,
-        returnedQuantityAfterThisRequest: await this.returns.sumReturnedQuantity(orderItem.id),
-      })),
-    );
-    const includeShipping = RefundAmountCalculator.isFullOrderReturn(returnedAfter);
-    const shippingAmount = includeShipping ? orderDetail.order.shippingTotal : 0n;
-    return { lines, lineTotal, shippingAmount, totalAmount: lineTotal + shippingAmount };
-  }
-
   /**
    * `POST /admin/returns/:id/approve-refund` (`return.refund`) —
-   * `INSPECTING -> APPROVED_FOR_REFUND`. Restocks every accepted
-   * (sellable-condition) `ReturnItem` — once, only when this call
-   * actually wins the row lock (`transitioned: true`) — and, for a
-   * `CREDIT_NOTE` resolution, drafts the `CreditNote` now (ADR-012
-   * decisions 6/7). Never restocks a `productSkuId`-less line (the
-   * catalog SKU was deleted since — a known limitation, not silently
-   * swallowed) or one with no receiving location captured.
+   * `INSPECTING -> APPROVED_FOR_REFUND`. The actual restock/credit-note-
+   * draft work (ADR-012 decisions 6/7) is delegated to
+   * `ReturnSettlementService` (ADR-013) — this method's only remaining
+   * job is the status transition itself and its own audit entry, which
+   * are written *before* delegating so they're durable even if the
+   * settlement work that follows fails or is still in flight when this
+   * call returns (the recovery sweep resumes it either way).
    */
   async approveForRefund(id: string, actorUserId: string): Promise<ReturnRequest> {
-    const detail = await this.getForAdmin(id);
     const result = await this.returns.updateStatus(id, 'APPROVED_FOR_REFUND', actorUserId);
     if (!result.transitioned) return result.entity;
-
-    const orderDetail = await this.orders.getForAdmin(detail.request.orderId);
-    const orderItemById = new Map(orderDetail.items.map((item) => [item.id as string, item]));
-
-    for (const item of detail.items) {
-      if (!item.condition || !RESTOCKABLE_CONDITIONS.includes(item.condition)) continue;
-      const orderItem = orderItemById.get(item.orderItemId);
-      if (!orderItem?.productSkuId || !detail.request.warehouseId || !detail.request.locationId) {
-        continue;
-      }
-      await this.adjustments.receiveReturnedStock({
-        productSkuId: orderItem.productSkuId,
-        warehouseId: detail.request.warehouseId,
-        locationId: detail.request.locationId,
-        quantity: item.quantity,
-        returnRequestId: id,
-        returnItemId: item.id,
-        actorUserId,
-      });
-    }
-
-    if (detail.request.resolution === 'CREDIT_NOTE') {
-      const settlement = await this.computeSettlement(detail);
-      const invoice = await this.invoices.getByOrderId(detail.request.orderId);
-      await this.creditNotes.createDraftForReturn({
-        orderId: detail.request.orderId,
-        returnRequestId: id,
-        invoiceId: invoice?.invoice.id ?? null,
-        customerId: detail.request.customerId,
-        currency: orderDetail.order.currency,
-        subtotal: settlement.lineTotal,
-        taxTotal: 0n,
-        discountTotal: 0n,
-        grandTotal: settlement.totalAmount,
-        refundableAmount: settlement.totalAmount,
-        lines: settlement.lines.map((line) => ({
-          description: `Refund for order item ${line.orderItemId}`,
-          quantity: 1,
-          unitPrice: line.amount,
-          lineTotal: line.amount,
-        })),
-      });
-    }
 
     await this.auditLog.record({
       actorId: actorUserId,
@@ -444,75 +346,31 @@ export class ReturnService {
       entityType: 'ReturnRequest',
       entityId: id,
     });
+
+    await this.settlementService.ensureSettlement(id);
+    await this.settlementService.beginRestock(id, actorUserId);
     return result.entity;
   }
 
   /**
    * `POST /admin/returns/:id/refund` (`return.refund`) —
-   * `APPROVED_FOR_REFUND -> REFUNDED`. Creates the settlement *before*
-   * transitioning status, not after: `RefundService.requestRefund()` is
-   * idempotent on a deterministic `return-refund__${id}` key (ADR-012
-   * decision 9), so a retry after a crash between the two steps safely
-   * resolves to the same row rather than duplicating it, then completes
-   * the status transition. For `CREDIT_NOTE` resolution, issues the
-   * `DRAFT` note `approveForRefund()` already created — `issue()`'s own
-   * `CreditNoteStateMachine.isNoOp` gives the same retry-safety without
-   * needing a separate key.
+   * `APPROVED_FOR_REFUND -> REFUNDED`. This method's own pre-check is
+   * independent of, and complementary to,
+   * `ReturnSettlementService.requestSettlement()`'s own internal
+   * settlement-status check (ADR-013 decision 3): this one guards the
+   * *return's* own lifecycle (not rejected/cancelled/already
+   * refunded), the other guards whether restock has actually completed
+   * — both must pass. The actual settlement creation and the
+   * `APPROVED_FOR_REFUND -> REFUNDED` transition itself both now
+   * happen inside `requestSettlement()`.
    */
   async refund(id: string, actorUserId: string): Promise<ReturnRequest> {
     const detail = await this.getForAdmin(id);
     if (ReturnStateMachine.isNoOp(detail.request.status, 'REFUNDED')) return detail.request;
     ReturnStateMachine.assertTransition(detail.request.status, 'REFUNDED');
 
-    let settlementAmount = 0n;
-    if (detail.request.resolution === 'CREDIT_NOTE') {
-      const notes = await this.creditNotes.listByReturnRequestId(id);
-      const draft = notes.find((note) => note.status === 'DRAFT') ?? notes[0];
-      if (!draft) throw new NotFoundException('No credit note found for this return');
-      await this.creditNotes.issue(draft.id, actorUserId);
-      settlementAmount = draft.grandTotal;
-    } else {
-      const settlement = await this.computeSettlement(detail);
-      const orderDetail = await this.orders.getForAdmin(detail.request.orderId);
-      const intentDetail = await this.payments.findById(orderDetail.order.paymentIntentId);
-      const transaction = intentDetail?.transactions.find((t) => t.isVerified);
-      if (!transaction) {
-        throw new NotFoundException('No verified payment transaction found for this order');
-      }
-      await this.refunds.requestRefund({
-        paymentTransactionId: transaction.id,
-        amount: settlement.totalAmount,
-        reason: `Return ${detail.request.returnNumber}`,
-        requestedBy: actorUserId,
-        idempotencyKey: `return-refund__${id}`,
-        returnRequestId: id,
-        lines: settlement.lines.map((line) => ({
-          returnItemId: line.returnItemId,
-          amount: line.amount,
-        })),
-      });
-      // Keeps Order.paymentStatus/refundedTotal in sync with the real
-      // refund — same cache-update discipline
-      // OrderService.requestPartialRefund() already applies to its own
-      // admin-triggered refunds. Never done for the CREDIT_NOTE branch
-      // above — a credit note is a separate, non-payment-method
-      // adjustment (ADR-012 decision 7).
-      await this.orders.recordReturnRefund(detail.request.orderId, settlement.totalAmount);
-      settlementAmount = settlement.totalAmount;
-    }
-
-    const result = await this.returns.updateStatus(id, 'REFUNDED', actorUserId, null, {
-      refundedAt: new Date(),
-    });
-    if (result.transitioned) {
-      await this.auditLog.record({
-        actorId: actorUserId,
-        action: 'RETURN_REFUNDED',
-        entityType: 'ReturnRequest',
-        entityId: id,
-        newValue: { resolution: detail.request.resolution, amount: settlementAmount.toString() },
-      });
-    }
-    return result.entity;
+    await this.settlementService.requestSettlement(id, actorUserId);
+    const updated = await this.getForAdmin(id);
+    return updated.request;
   }
 }

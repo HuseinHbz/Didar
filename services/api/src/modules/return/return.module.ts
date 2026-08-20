@@ -9,11 +9,14 @@ import { OrderModule } from '../order/order.module';
 import { PaymentModule } from '../payment/payment.module';
 
 import { CreditNoteService } from './application/credit-note.service';
+import { ReturnSettlementService } from './application/return-settlement.service';
 import { ReturnService } from './application/return.service';
 import { CREDIT_NOTE_REPOSITORY } from './domain/ports/credit-note.repository.port';
+import { RETURN_SETTLEMENT_REPOSITORY } from './domain/ports/return-settlement.repository.port';
 import { RETURN_REPOSITORY } from './domain/ports/return.repository.port';
 import { ReturnQueueModule } from './infrastructure/queues/return-queue.module';
 import { PrismaCreditNoteRepository } from './infrastructure/repositories/prisma-credit-note.repository';
+import { PrismaReturnSettlementRepository } from './infrastructure/repositories/prisma-return-settlement.repository';
 import { PrismaReturnRepository } from './infrastructure/repositories/prisma-return.repository';
 import { CreditNoteAdminController } from './presentation/controllers/credit-note-admin.controller';
 import { ReturnAdminController } from './presentation/controllers/return-admin.controller';
@@ -56,11 +59,13 @@ import { ReturnDomainExceptionFilter } from './presentation/filters/return-domai
   providers: [
     { provide: RETURN_REPOSITORY, useClass: PrismaReturnRepository },
     { provide: CREDIT_NOTE_REPOSITORY, useClass: PrismaCreditNoteRepository },
+    { provide: RETURN_SETTLEMENT_REPOSITORY, useClass: PrismaReturnSettlementRepository },
     { provide: AUDIT_LOG_REPOSITORY, useClass: PrismaAuditLogRepository },
     CreditNoteService,
+    ReturnSettlementService,
     ReturnService,
     { provide: APP_FILTER, useClass: ReturnDomainExceptionFilter },
   ],
-  exports: [ReturnService, CreditNoteService],
+  exports: [ReturnService, CreditNoteService, ReturnSettlementService],
 })
 export class ReturnModule {}

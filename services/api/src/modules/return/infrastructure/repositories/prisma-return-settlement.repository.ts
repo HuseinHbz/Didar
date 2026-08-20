@@ -128,4 +128,21 @@ export class PrismaReturnSettlementRepository implements ReturnSettlementReposit
     });
     return returnSettlementToDomain(row);
   }
+
+  /** A single atomic `UPDATE ... WHERE ... IS NULL RETURNING id` — see
+   * the port's own doc comment for why this, not `updateStatus()`, is
+   * the real fix for the `recordReturnRefund()` double-counting bug. No
+   * explicit `SELECT ... FOR UPDATE` needed: Postgres already
+   * serializes concurrent `UPDATE`s targeting the same row, and only
+   * one of any number of simultaneous identical statements can ever
+   * match `refund_recorded_at IS NULL`. */
+  async claimRefundRecording(id: string): Promise<boolean> {
+    const rows = await prisma.$queryRaw<{ id: string }[]>(
+      Prisma.sql`UPDATE commerce.return_settlements
+        SET refund_recorded_at = NOW()
+        WHERE id = ${id}::uuid AND refund_recorded_at IS NULL
+        RETURNING id`,
+    );
+    return rows.length === 1;
+  }
 }

@@ -61,4 +61,22 @@ export interface ReturnSettlementRepositoryPort {
    * settlement simply stays in its current progressing state and
    * tries again next tick). */
   recordAttemptFailure(id: string, error: string): Promise<ReturnSettlement>;
+
+  /**
+   * ADR-013 §12 (financial consistency) — the real fix for the
+   * `OrderService.recordReturnRefund()` double-counting bug found while
+   * auditing Phase 012: a single atomic
+   * `UPDATE ... SET refund_recorded_at = NOW() WHERE id = $1 AND
+   * refund_recorded_at IS NULL RETURNING id` (Postgres guarantees only
+   * one of any number of truly concurrent identical statements ever
+   * matches a row). Returns `true` only for the one caller that
+   * actually flipped the column — that caller, and only that caller,
+   * may call `OrderService.recordReturnRefund()`. Every other
+   * concurrent or retried caller gets `false` and must skip it,
+   * regardless of how many times `requestSettlement()` itself is
+   * re-entered. Deliberately not folded into `updateStatus()`: this
+   * needs to be callable (and safe to call) independently of whichever
+   * status transition happens to be in flight around it.
+   */
+  claimRefundRecording(id: string): Promise<boolean>;
 }
