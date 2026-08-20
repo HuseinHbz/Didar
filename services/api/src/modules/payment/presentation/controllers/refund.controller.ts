@@ -1,5 +1,5 @@
 import { type UserId } from '@iecp/types';
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 
 import { CurrentUserId } from '../../../identity/presentation/decorators/current-user.decorator';
@@ -16,6 +16,21 @@ import { CreateRefundDto, RefundResponseDto } from '../dto/refund.dto';
 @Controller('admin/payments/refunds')
 export class RefundController {
   constructor(private readonly refunds: RefundService) {}
+
+  /** ADR-012's own reconnaissance flagged this as a pre-existing gap
+   * (no list route existed despite the original Phase 008 brief asking
+   * for one) — closed here, additively, not reworking anything else on
+   * this controller. */
+  @Get()
+  @RequirePermission('payment.refund.read')
+  @ApiOkResponse({ type: [RefundResponseDto] })
+  async list(
+    @Query('paymentTransactionId') paymentTransactionId?: string,
+    @Query('returnRequestId') returnRequestId?: string,
+  ): Promise<RefundResponseDto[]> {
+    const refunds = await this.refunds.list({ paymentTransactionId, returnRequestId });
+    return refunds.map((refund) => RefundResponseDto.fromDomain(refund));
+  }
 
   @Get(':id')
   @RequirePermission('payment.refund.read')

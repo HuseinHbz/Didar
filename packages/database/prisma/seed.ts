@@ -25,6 +25,61 @@ function sha256Hex(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+/** `ORD-YYYYMMDD-NNNNNN` / `INV-YYYYMMDD-NNNNNN` — same format and same
+ * real Postgres sequences (`commerce.order_number_seq`/
+ * `finance.invoice_number_seq`, ADR-009 decision 6) services/api's
+ * `PrismaOrderRepository`/`PrismaInvoiceRepository` draw from.
+ * Reimplemented here, not imported — same standalone-script rationale
+ * `sha256Hex` above documents. */
+function formatSequenceNumber(prefix: string, seq: bigint, drawnAt: Date): string {
+  const y = drawnAt.getUTCFullYear();
+  const m = String(drawnAt.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(drawnAt.getUTCDate()).padStart(2, '0');
+  return `${prefix}-${y}${m}${d}-${seq.toString().padStart(6, '0')}`;
+}
+
+async function nextOrderNumber(): Promise<string> {
+  const rows = await prisma.$queryRaw<
+    { nextval: bigint }[]
+  >`SELECT nextval('commerce.order_number_seq') AS nextval`;
+  const nextval = rows[0]?.nextval;
+  if (nextval === undefined) throw new Error('[seed] order_number_seq.nextval() returned no row');
+  return formatSequenceNumber('ORD', nextval, new Date());
+}
+
+async function nextInvoiceNumber(): Promise<string> {
+  const rows = await prisma.$queryRaw<
+    { nextval: bigint }[]
+  >`SELECT nextval('finance.invoice_number_seq') AS nextval`;
+  const nextval = rows[0]?.nextval;
+  if (nextval === undefined) throw new Error('[seed] invoice_number_seq.nextval() returned no row');
+  return formatSequenceNumber('INV', nextval, new Date());
+}
+
+/** `RET-YYYYMMDD-NNNNNN` / `CN-YYYYMMDD-NNNNNN` — same shape, real
+ * Postgres sequences (`commerce.return_number_seq`/
+ * `finance.credit_note_number_seq`, ADR-012 decisions 5/7) Phase 012's
+ * `PrismaReturnRepository`/`PrismaCreditNoteRepository` draw from. */
+async function nextReturnNumber(): Promise<string> {
+  const rows = await prisma.$queryRaw<
+    { nextval: bigint }[]
+  >`SELECT nextval('commerce.return_number_seq') AS nextval`;
+  const nextval = rows[0]?.nextval;
+  if (nextval === undefined) throw new Error('[seed] return_number_seq.nextval() returned no row');
+  return formatSequenceNumber('RET', nextval, new Date());
+}
+
+async function nextCreditNoteNumber(): Promise<string> {
+  const rows = await prisma.$queryRaw<
+    { nextval: bigint }[]
+  >`SELECT nextval('finance.credit_note_number_seq') AS nextval`;
+  const nextval = rows[0]?.nextval;
+  if (nextval === undefined) {
+    throw new Error('[seed] credit_note_number_seq.nextval() returned no row');
+  }
+  return formatSequenceNumber('CN', nextval, new Date());
+}
+
 async function main(): Promise<void> {
   // ---------------------------------------------------------------------
   // identity — the real permission registry (matching what
@@ -204,6 +259,128 @@ async function main(): Promise<void> {
       action: 'reconciliation.resolve',
       description: 'Record a resolution note on a reconciliation finding',
     },
+    // order (Phase 009) — matching what services/api's order module
+    // actually checks via @RequirePermission (see that module's README
+    // and docs/adr/ADR-009-order-fulfillment.md). Order creation itself
+    // is never client-triggered (only OrderConversionService, from a
+    // verified payment) — `order.create` gates only the admin manual
+    // conversion-retry route, not a generic "create an order" endpoint.
+    { module: 'order', action: 'read', description: 'Read any order (admin/support scope)' },
+    {
+      module: 'order',
+      action: 'create',
+      description: 'Manually retry checkout->order conversion for a verified payment',
+    },
+    {
+      module: 'order',
+      action: 'update',
+      description: 'Update a fulfillment record on an order',
+    },
+    { module: 'order', action: 'cancel', description: 'Cancel an order' },
+    { module: 'order', action: 'approve', description: 'Approve an order for processing' },
+    { module: 'order', action: 'fulfill', description: 'Create a fulfillment for an order' },
+    { module: 'order', action: 'ship', description: 'Create a shipment for a fulfillment' },
+    { module: 'order', action: 'complete', description: 'Mark an order COMPLETED' },
+    {
+      module: 'order',
+      action: 'refund',
+      description: 'Request a partial refund against a paid order',
+    },
+    { module: 'order', action: 'invoice.read', description: "Read an order's invoice" },
+    {
+      module: 'order',
+      action: 'invoice.create',
+      description: 'Manually (re)issue an invoice for an order',
+    },
+    { module: 'order', action: 'invoice.void', description: 'Void an issued invoice' },
+    {
+      module: 'order',
+      action: 'shipment.read',
+      description: "Read an order's shipments",
+    },
+    {
+      module: 'order',
+      action: 'shipment.update',
+      description: 'Update a shipment status/tracking event',
+    },
+    {
+      module: 'order',
+      action: 'shipment.deliver',
+      description:
+        'Confirm delivery of a shipment (Phase 011 — a distinct, more-sensitive boundary from shipment.update, since delivery can gate order completion)',
+    },
+
+    // Phase 010 — promotion/discount/coupon engine (§19, see
+    // docs/adr/ADR-010-promotion-engine.md). Deletion is never given to
+    // every editor automatically (§19's explicit instruction) — only
+    // `promotion_manager` gets `promotion.delete`/`coupon.delete`;
+    // `promotion_editor` can author and activate/pause but never
+    // permanently remove a promotion/coupon or see analytics.
+    { module: 'promotion', action: 'read', description: 'Read any promotion' },
+    { module: 'promotion', action: 'create', description: 'Create a promotion' },
+    { module: 'promotion', action: 'update', description: 'Update a promotion' },
+    { module: 'promotion', action: 'activate', description: 'Activate a promotion' },
+    { module: 'promotion', action: 'pause', description: 'Pause an active promotion' },
+    { module: 'promotion', action: 'archive', description: 'Archive a promotion (terminal)' },
+    { module: 'promotion', action: 'delete', description: 'Permanently delete a promotion' },
+    {
+      module: 'promotion',
+      action: 'analytics.read',
+      description: 'Read promotion usage/redemption analytics',
+    },
+    { module: 'coupon', action: 'read', description: 'Read any coupon' },
+    { module: 'coupon', action: 'create', description: 'Create a coupon' },
+    { module: 'coupon', action: 'update', description: "Update a coupon's own fields/lifecycle" },
+    { module: 'coupon', action: 'disable', description: 'Permanently disable a coupon' },
+    { module: 'coupon', action: 'delete', description: 'Permanently delete a coupon' },
+
+    // Phase 012 — returns/refunds/credit notes (see
+    // docs/adr/ADR-012-returns-refunds-credit-notes.md's own RBAC
+    // section). `return.create`/`return.cancel` are deliberately *not*
+    // registered — return creation and cancellation are customer-facing,
+    // ownership-gated by ReturnService itself, not RBAC (same shape
+    // order creation/cancellation-by-customer already establish
+    // elsewhere in this file). `credit_note.create` is also not
+    // registered — a DRAFT note is only ever a side effect of
+    // `return.refund`, never a standalone ad-hoc creation route.
+    // `inventory.restock.return` is not registered either — restock has
+    // no standalone route (ADR-012 decision 6), only an internal call
+    // inside `return.refund`'s own approve-refund step.
+    {
+      module: 'return',
+      action: 'read',
+      description: 'Read any return request (admin/support scope)',
+    },
+    { module: 'return', action: 'approve', description: 'Approve a REQUESTED return' },
+    {
+      module: 'return',
+      action: 'reject',
+      description: 'Reject a return before or during inspection',
+    },
+    {
+      module: 'return',
+      action: 'receive',
+      description: 'Record a return as physically received at a warehouse location',
+    },
+    {
+      module: 'return',
+      action: 'inspect',
+      description: "Record a return's physical inspection outcome per item",
+    },
+    {
+      module: 'return',
+      action: 'refund',
+      description:
+        'Approve a return for refund (restocks accepted items) and trigger its settlement — gates both POST .../approve-refund and POST .../refund',
+    },
+    { module: 'credit_note', action: 'read', description: 'Read any credit note' },
+    {
+      module: 'credit_note',
+      action: 'issue',
+      description:
+        'Manually issue a DRAFT credit note (a recovery path for the documented approve-refund/refund crash window, not the normal flow)',
+    },
+    { module: 'credit_note', action: 'void', description: 'Void a DRAFT or ISSUED credit note' },
   ];
   const permissions = await Promise.all(
     permissionDefs.map((def) =>
@@ -276,11 +453,19 @@ async function main(): Promise<void> {
   await grant(adminRole.id, 'identity.roles.manage');
   await grant(adminRole.id, 'identity.permissions.manage');
   await grant(adminRole.id, 'identity.audit_logs.view');
-  // admin gets every catalog.*/inventory.*/payment.* permission — the
-  // module-access gate (@RequireModule) and every @RequirePermission check
-  // both pass for admin, same as identity's own endpoints.
+  // admin gets every catalog.*/inventory.*/payment.*/order.*/promotion.*/
+  // coupon.* permission — the module-access gate (@RequireModule) and
+  // every @RequirePermission check both pass for admin, same as
+  // identity's own endpoints.
   for (const def of permissionDefs) {
-    if (def.module === 'catalog' || def.module === 'inventory' || def.module === 'payment') {
+    if (
+      def.module === 'catalog' ||
+      def.module === 'inventory' ||
+      def.module === 'payment' ||
+      def.module === 'order' ||
+      def.module === 'promotion' ||
+      def.module === 'coupon'
+    ) {
       await grant(adminRole.id, `${def.module}.${def.action}`);
     }
   }
@@ -416,14 +601,144 @@ async function main(): Promise<void> {
   }
   const financeAuditorRole = await prisma.role.upsert({
     where: { name: 'finance_auditor' },
-    update: { description: 'Read-only — refund and reconciliation visibility, no mutations' },
+    update: {
+      description: 'Read-only — refund, reconciliation, and credit-note visibility, no mutations',
+    },
     create: {
       name: 'finance_auditor',
-      description: 'Read-only — refund and reconciliation visibility, no mutations',
+      description: 'Read-only — refund, reconciliation, and credit-note visibility, no mutations',
     },
   });
   for (const action of ['refund.read', 'reconciliation.read']) {
     await grant(financeAuditorRole.id, `payment.${action}`);
+  }
+  // Phase 012 — same read-only financial-visibility role, naturally
+  // extended (ADR-012 RBAC section).
+  await grant(financeAuditorRole.id, 'credit_note.read');
+
+  // Two order roles (Phase 009 — docs/security/order-fulfillment-security.md
+  // has the full matrix): `order_manager` gets every order.* permission (a
+  // department head — can approve/cancel/refund/complete orders and void
+  // invoices); `fulfillment_clerk` is the warehouse-floor role — can read
+  // orders, create fulfillments/shipments, and update their status, but
+  // cannot approve, cancel, refund, complete an order, or void an invoice
+  // — the same "floor role can't approve its own sensitive action" shape
+  // `warehouse_operator`/`finance_auditor` already established; real
+  // fixture for the e2e suite's permission-bypass case (a fulfillment
+  // clerk calling POST .../cancel or .../refund must 403).
+  const orderManagerRole = await prisma.role.upsert({
+    where: { name: 'order_manager' },
+    update: { description: 'Full order module access — every order.* permission' },
+    create: {
+      name: 'order_manager',
+      description: 'Full order module access — every order.* permission',
+    },
+  });
+  for (const def of permissionDefs) {
+    if (def.module === 'order') {
+      await grant(orderManagerRole.id, `order.${def.action}`);
+    }
+  }
+  const fulfillmentClerkRole = await prisma.role.upsert({
+    where: { name: 'fulfillment_clerk' },
+    update: {
+      description:
+        'Warehouse-floor fulfillment — create/update fulfillments and shipments; cannot approve, cancel, refund, complete an order, or confirm delivery',
+    },
+    create: {
+      name: 'fulfillment_clerk',
+      description:
+        'Warehouse-floor fulfillment — create/update fulfillments and shipments; cannot approve, cancel, refund, complete an order, or confirm delivery',
+    },
+  });
+  // Phase 011 (ADR-011 decision 4) — `shipment.deliver` is deliberately
+  // NOT granted here: delivery confirmation is the one shipment event
+  // that can gate order completion, so it gets the same "floor role
+  // can't reach its own more-sensitive action" treatment `approve`/
+  // `cancel`/`refund`/`complete` already have, not folded into the
+  // broader `shipment.update` grant this role does receive.
+  for (const action of ['read', 'update', 'fulfill', 'ship', 'shipment.read', 'shipment.update']) {
+    await grant(fulfillmentClerkRole.id, `order.${action}`);
+  }
+
+  // Two return roles (Phase 012 — docs/security/returns-security.md has
+  // the full matrix): `returns_manager` gets every return.*/credit_note.*
+  // permission — the department-head shape `order_manager` established;
+  // `returns_clerk` is the warehouse-floor role — can read returns and
+  // record physical receipt/inspection, but cannot approve, reject,
+  // trigger a refund, or touch a credit note, the same
+  // "floor role can't reach its own more-sensitive action" shape
+  // `fulfillment_clerk` already establishes; real fixture for the e2e
+  // suite's permission-bypass case (a returns clerk calling
+  // POST .../approve or .../refund must 403).
+  const returnsManagerRole = await prisma.role.upsert({
+    where: { name: 'returns_manager' },
+    update: {
+      description: 'Full returns module access — every return.*/credit_note.* permission',
+    },
+    create: {
+      name: 'returns_manager',
+      description: 'Full returns module access — every return.*/credit_note.* permission',
+    },
+  });
+  for (const def of permissionDefs) {
+    if (def.module === 'return' || def.module === 'credit_note') {
+      await grant(returnsManagerRole.id, `${def.module}.${def.action}`);
+    }
+  }
+  const returnsClerkRole = await prisma.role.upsert({
+    where: { name: 'returns_clerk' },
+    update: {
+      description:
+        'Warehouse-floor returns — read returns, record receipt/inspection; cannot approve, reject, refund, or touch a credit note',
+    },
+    create: {
+      name: 'returns_clerk',
+      description:
+        'Warehouse-floor returns — read returns, record receipt/inspection; cannot approve, reject, refund, or touch a credit note',
+    },
+  });
+  for (const action of ['read', 'receive', 'inspect']) {
+    await grant(returnsClerkRole.id, `return.${action}`);
+  }
+
+  // Two promotion roles (Phase 010 — docs/security/promotion-security.md
+  // has the full matrix): `promotion_manager` gets every promotion.*/
+  // coupon.* permission including delete/analytics; `promotion_editor` is
+  // the day-to-day marketing role — can author, activate/pause/archive
+  // promotions and manage coupons, but can never permanently delete a
+  // promotion/coupon or read analytics (§19's explicit "never give
+  // deletion automatically to all editors").
+  const promotionManagerRole = await prisma.role.upsert({
+    where: { name: 'promotion_manager' },
+    update: { description: 'Full promotion module access — every promotion.*/coupon.* permission' },
+    create: {
+      name: 'promotion_manager',
+      description: 'Full promotion module access — every promotion.*/coupon.* permission',
+    },
+  });
+  for (const def of permissionDefs) {
+    if (def.module === 'promotion' || def.module === 'coupon') {
+      await grant(promotionManagerRole.id, `${def.module}.${def.action}`);
+    }
+  }
+  const promotionEditorRole = await prisma.role.upsert({
+    where: { name: 'promotion_editor' },
+    update: {
+      description:
+        'Day-to-day marketing role — author/activate/pause/archive promotions, manage coupons; cannot delete or read analytics',
+    },
+    create: {
+      name: 'promotion_editor',
+      description:
+        'Day-to-day marketing role — author/activate/pause/archive promotions, manage coupons; cannot delete or read analytics',
+    },
+  });
+  for (const action of ['read', 'create', 'update', 'activate', 'pause', 'archive']) {
+    await grant(promotionEditorRole.id, `promotion.${action}`);
+  }
+  for (const action of ['read', 'create', 'update', 'disable']) {
+    await grant(promotionEditorRole.id, `coupon.${action}`);
   }
 
   const adminUser = await prisma.user.upsert({
@@ -557,6 +872,105 @@ async function main(): Promise<void> {
       create: { userId: user.id, roleId },
     });
   }
+
+  // Eleventh-twelfth users: one per order role — real fixtures for the
+  // e2e suite's order permission-bypass cases (fulfillment_clerk calling
+  // POST .../cancel or .../refund must 403).
+  const orderRoleUsers: [string, string, string][] = [
+    ['+989120000011', 'order-manager@iecp.dev', orderManagerRole.id],
+    ['+989120000012', 'fulfillment-clerk@iecp.dev', fulfillmentClerkRole.id],
+  ];
+  for (const [phone, email, roleId] of orderRoleUsers) {
+    const user = await prisma.user.upsert({
+      where: { phone },
+      update: {},
+      create: { phone, email, isActive: true, phoneVerifiedAt: new Date() },
+    });
+    await prisma.userRole.upsert({
+      where: { userId_roleId: { userId: user.id, roleId } },
+      update: {},
+      create: { userId: user.id, roleId },
+    });
+  }
+
+  // Thirteenth-fourteenth users: one per promotion role — real fixtures
+  // for the e2e suite's promotion permission-bypass cases
+  // (promotion_editor calling a `promotion.delete`-gated route, if one
+  // existed, or `coupon.delete`, must 403; a plain customer token must
+  // 403 every `/admin/promotions`/`/admin/coupons` route).
+  const promotionRoleUsers: [string, string, string][] = [
+    ['+989120000013', 'promotion-manager@iecp.dev', promotionManagerRole.id],
+    ['+989120000014', 'promotion-editor@iecp.dev', promotionEditorRole.id],
+  ];
+  for (const [phone, email, roleId] of promotionRoleUsers) {
+    const user = await prisma.user.upsert({
+      where: { phone },
+      update: {},
+      create: { phone, email, isActive: true, phoneVerifiedAt: new Date() },
+    });
+    await prisma.userRole.upsert({
+      where: { userId_roleId: { userId: user.id, roleId } },
+      update: {},
+      create: { userId: user.id, roleId },
+    });
+  }
+
+  // Fifteenth-sixteenth users: one per return role — real fixtures for
+  // the e2e suite's return permission-bypass cases (returns_clerk calling
+  // POST .../approve, .../reject, or .../refund must 403).
+  const returnRoleUsers: [string, string, string][] = [
+    ['+989120000015', 'returns-manager@iecp.dev', returnsManagerRole.id],
+    ['+989120000016', 'returns-clerk@iecp.dev', returnsClerkRole.id],
+  ];
+  for (const [phone, email, roleId] of returnRoleUsers) {
+    const user = await prisma.user.upsert({
+      where: { phone },
+      update: {},
+      create: { phone, email, isActive: true, phoneVerifiedAt: new Date() },
+    });
+    await prisma.userRole.upsert({
+      where: { userId_roleId: { userId: user.id, roleId } },
+      update: {},
+      create: { userId: user.id, roleId },
+    });
+  }
+
+  // A second, fully-privileged admin fixture (same adminRole as
+  // +989120000001), reserved exclusively for the return e2e suites
+  // (return-repository.e2e-spec.ts, return.e2e-spec.ts). Those suites need
+  // to drive an order all the way through admin fulfillment/delivery
+  // (order.*/fulfillment.*/inventory.* permissions) as HTTP-only setup —
+  // scoping that to a returns-only role isn't possible, and reusing
+  // +989120000001 makes them contend with the seven-plus other e2e spec
+  // files that already log in as that same phone. Real, confirmed root
+  // cause: VerifyOtpUseCase.execute() resolves the *latest* OTP row for a
+  // (phone, purpose) pair (otpRequests.findLatest), which is correct
+  // production security behavior (only the most recently requested code is
+  // ever valid) but means two concurrent request+verify sequences for the
+  // same phone race — whichever request() call lands second silently
+  // invalidates the other's in-flight code. With Jest's default
+  // one-worker-per-spec-file parallelism (test:e2e has no --runInBand, and
+  // CI runs the identical command) this is a real, pre-existing,
+  // low-probability flake shared by every e2e file that logs in as
+  // +989120000001, not something introduced by or fixable inside the
+  // returns feature. It is not "fixed" here — only the two return e2e
+  // files stop contributing to that contention by using their own admin
+  // login.
+  const returnAdminUser = await prisma.user.upsert({
+    where: { phone: '+989120000017' },
+    update: {},
+    create: {
+      phone: '+989120000017',
+      email: 'returns-e2e-admin@iecp.dev',
+      isActive: true,
+      phoneVerifiedAt: new Date(),
+    },
+  });
+  await prisma.userRole.upsert({
+    where: { userId_roleId: { userId: returnAdminUser.id, roleId: adminRole.id } },
+    update: {},
+    create: { userId: returnAdminUser.id, roleId: adminRole.id },
+  });
 
   // A trusted device + an active-looking session for the admin user (blueprint
   // §56 "Device Trust") — session data itself is normally created by a real
@@ -1128,19 +1542,122 @@ async function main(): Promise<void> {
   }
 
   // ---------------------------------------------------------------------
-  // marketing — a welcome coupon
+  // marketing (Phase 010 — see docs/adr/ADR-010-promotion-engine.md):
+  // three promotions (one per stacking archetype) and five coupons —
+  // the spec's exact "at least" fixture list. Idempotent (upsert on
+  // `code`/a stable `name`), verified stable across two seed runs.
   // ---------------------------------------------------------------------
-  const welcomeCoupon = await prisma.coupon.upsert({
-    where: { code: 'WELCOME10' },
+  const promotionA = await prisma.promotion.upsert({
+    where: { id: '00000000-0000-4000-a000-000000000001' },
     update: {},
     create: {
-      code: 'WELCOME10',
-      type: 'PERCENTAGE',
-      value: 1000n, // 10.00% in basis points
-      minOrderAmount: 1_000_000n,
+      id: '00000000-0000-4000-a000-000000000001',
+      name: 'Seed — 20% off sunglasses',
+      description: '20% off every sunglasses-category item, coupon-gated',
+      status: 'ACTIVE',
+      priority: 10,
+      stackable: false,
+      exclusive: false,
+      requiresCoupon: true,
+      discountType: 'PERCENTAGE',
+      discountValue: 2000n, // 20.00% in basis points
+      maximumDiscount: 5_000_000n,
+      targets: { create: [{ type: 'CATEGORY', refId: category.id }] },
+    },
+  });
+  const promotionB = await prisma.promotion.upsert({
+    where: { id: '00000000-0000-4000-a000-000000000002' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-a000-000000000002',
+      name: 'Seed — fixed amount off',
+      description: 'A flat cart-wide discount, coupon-gated',
+      status: 'ACTIVE',
+      priority: 20,
+      stackable: false,
+      exclusive: false,
+      requiresCoupon: true,
+      minimumCartValue: 2_000_000n,
+      discountType: 'FIXED_AMOUNT',
+      discountValue: 500_000n,
+    },
+  });
+  // No coupon references Promotion C — it's automatic (requiresCoupon:
+  // false), so its row is never read again after creation.
+  await prisma.promotion.upsert({
+    where: { id: '00000000-0000-4000-a000-000000000003' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-a000-000000000003',
+      name: 'Seed — free shipping',
+      description: 'Automatic free shipping over a cart minimum, no code needed',
+      status: 'ACTIVE',
+      priority: 30,
+      stackable: true,
+      exclusive: false,
+      requiresCoupon: false,
+      minimumCartValue: 3_000_000n,
+      discountType: 'FREE_SHIPPING',
+    },
+  });
+
+  const didar20Coupon = await prisma.coupon.upsert({
+    where: { code: 'DIDAR20' },
+    update: {},
+    create: {
+      promotionId: promotionA.id,
+      code: 'DIDAR20',
+      status: 'ACTIVE',
       usageLimit: 1000,
-      perUserLimit: 1,
-      isActive: true,
+      perCustomerLimit: 1,
+    },
+  });
+  await prisma.coupon.upsert({
+    where: { code: 'WELCOME500' },
+    update: {},
+    create: {
+      promotionId: promotionB.id,
+      code: 'WELCOME500',
+      status: 'ACTIVE',
+      usageLimit: 1000,
+      perCustomerLimit: 1,
+    },
+  });
+  // An already-expired coupon — real fixture for the e2e suite's
+  // "expired coupon rejected" case (§21).
+  await prisma.coupon.upsert({
+    where: { code: 'EXPIREDCODE' },
+    update: {},
+    create: {
+      promotionId: promotionA.id,
+      code: 'EXPIREDCODE',
+      status: 'ACTIVE',
+      expiresAt: new Date('2020-01-01T00:00:00Z'),
+    },
+  });
+  // A not-yet-valid coupon — real fixture for the "future coupon
+  // rejected" case.
+  await prisma.coupon.upsert({
+    where: { code: 'FUTURECODE' },
+    update: {},
+    create: {
+      promotionId: promotionA.id,
+      code: 'FUTURECODE',
+      status: 'ACTIVE',
+      startsAt: new Date('2099-01-01T00:00:00Z'),
+    },
+  });
+  // A single-use coupon — real fixture for the mandatory concurrency
+  // suite (usageLimit=1, N concurrent redemption attempts -> exactly
+  // one success, ADR-010 decision 8/§30).
+  await prisma.coupon.upsert({
+    where: { code: 'LIMITEDCODE' },
+    update: {},
+    create: {
+      promotionId: promotionB.id,
+      code: 'LIMITEDCODE',
+      status: 'ACTIVE',
+      usageLimit: 1,
     },
   });
 
@@ -1337,9 +1854,9 @@ async function main(): Promise<void> {
     update: {},
     create: {
       cartId: customerCart.id,
-      couponId: welcomeCoupon.id,
-      code: welcomeCoupon.code,
-      resolvedDiscount: 1_250_000n,
+      couponId: didar20Coupon.id,
+      code: didar20Coupon.code,
+      resolvedDiscount: 2_500_000n, // 20% of 12,500,000 — DIDAR20 (Promotion A)
     },
   });
   await prisma.cartShippingSelection.upsert({
@@ -1444,14 +1961,21 @@ async function main(): Promise<void> {
     },
   });
 
+  // Phase 009: this fixture backs the order section's own "paid" order
+  // below (`successIntent`'s SUCCEEDED/VERIFIED chain, ADR-009 decision 4)
+  // — its `status` moves to CONVERTED (what `CheckoutService.markConverted`
+  // sets for real once an order is created from it) rather than staying
+  // READY_FOR_PAYMENT forever. `update` carries this on a re-run against a
+  // database seeded before Phase 009 existed, same convergent-not-merely-
+  // additive convention `permission.deleteMany` above already established.
   const checkoutReadySession = await prisma.checkoutSession.upsert({
     where: { idempotencyKey: 'SEED-CHECKOUT-READY-1' },
-    update: {},
+    update: { status: 'CONVERTED' },
     create: {
       id: '00000000-0000-4000-9000-000000000004',
       cartId: checkoutReadyCart.id,
       customerId: customer.id,
-      status: 'READY_FOR_PAYMENT',
+      status: 'CONVERTED',
       currency: 'IRR',
       subtotal: 12_500_000n,
       discountTotal: 0n,
@@ -1866,6 +2390,919 @@ async function main(): Promise<void> {
   }
 
   // ---------------------------------------------------------------------
+  // order (Phase 009 — see docs/adr/ADR-009-order-fulfillment.md): four
+  // Order fixtures covering the brief's own explicit list (paid, unpaid,
+  // cancelled, fulfilled), each with its own real checkout/payment chain
+  // — an `Order` always has a real, unique `checkoutSessionId`/
+  // `paymentIntentId` (ADR-009 decision 1), never a synthetic one.
+  // ---------------------------------------------------------------------
+
+  // --- Order 1 — PAID, not yet fulfilled, PARTIALLY_REFUNDED. Reuses the
+  // checkout-ready fixture above (now CONVERTED) and Chain 1's SUCCEEDED
+  // intent/VERIFIED transaction from the payment section, so this order's
+  // paidTotal/refundedTotal line up exactly with that section's own
+  // SEED-REFUND-1 (1,000,000 of the 13,625,000 paid). ---
+  const order1ShippingSnapshot = {
+    recipientName: 'Sara Ahmadi',
+    phone: '+989120000002',
+    province: 'Tehran',
+    city: 'Tehran',
+    addressLine1: 'Valiasr St, No. 100',
+    addressLine2: null,
+    postalCode: null,
+  };
+  let order1 = await prisma.order.findUnique({
+    where: { checkoutSessionId: checkoutReadySession.id },
+  });
+  order1 ??= await prisma.order.create({
+    data: {
+      orderNumber: await nextOrderNumber(),
+      checkoutSessionId: checkoutReadySession.id,
+      paymentIntentId: successIntent.id,
+      customerId: customer.id,
+      source: 'STOREFRONT',
+      status: 'PAID',
+      paymentStatus: 'PARTIALLY_REFUNDED',
+      fulfillmentStatus: 'UNFULFILLED',
+      currency: 'IRR',
+      subtotal: 12_500_000n,
+      taxTotal: 1_125_000n,
+      grandTotal: 13_625_000n,
+      paidTotal: 13_625_000n,
+      refundedTotal: 1_000_000n,
+      shippingAddressSnapshot: order1ShippingSnapshot,
+      items: {
+        create: {
+          productSkuId: sku.id,
+          skuSnapshot: sku.skuCode,
+          nameSnapshot: 'Ray-Ban Aviator Classic',
+          unitPriceSnapshot: 12_500_000n,
+          quantity: 1,
+          taxAmount: 1_125_000n,
+          lineTotal: 12_500_000n,
+        },
+      },
+      statusHistory: {
+        create: [
+          {
+            fromStatus: null,
+            toStatus: 'PENDING_PAYMENT',
+            note: 'Order created from a verified payment',
+          },
+          {
+            fromStatus: 'PENDING_PAYMENT',
+            toStatus: 'PAID',
+            note: 'Payment verified — order marked PAID',
+          },
+        ],
+      },
+    },
+  });
+  await prisma.invoice.upsert({
+    where: { orderId: order1.id },
+    update: {},
+    create: {
+      invoiceNumber: await nextInvoiceNumber(),
+      orderId: order1.id,
+      customerId: customer.id,
+      status: 'ISSUED',
+      currency: 'IRR',
+      subtotal: 12_500_000n,
+      taxTotal: 1_125_000n,
+      grandTotal: 13_625_000n,
+      issuedAt: new Date(),
+      items: {
+        create: {
+          description: 'Ray-Ban Aviator Classic',
+          quantity: 1,
+          unitPrice: 12_500_000n,
+          lineTotal: 12_500_000n,
+        },
+      },
+    },
+  });
+
+  // --- Order 2 — genuinely UNPAID/PENDING_PAYMENT: not a normally-
+  // reachable customer-facing state (an Order is only ever created from
+  // an already-verified payment, ADR-009 decision 4), but a real one —
+  // this represents the narrow crash-recovery window where
+  // `OrderConversionService.convertFromCheckout()`'s `orders.create()`
+  // step succeeded but the process died before the following PAID
+  // transition/invoice issuance/`checkout.markConverted()` steps ran.
+  // Its own guest checkout stays READY_FOR_PAYMENT (never reached
+  // `markConverted()`), even though its payment intent already
+  // SUCCEEDED/VERIFIED — a real, if unusual, mid-flight combination.
+  //
+  // Both `OrderConversionService.convertFromCheckout()` and the
+  // `order_conversion` sweep's own second pass now resume cleanly from
+  // exactly this state (see that service's own inline comment and
+  // `OrderConversionProcessor`'s) — this fixture exists so that resume
+  // path has something real to exercise on a freshly-seeded database. If
+  // the API is actually running against this database, expect the sweep
+  // to resolve it to PAID within `ORDER_STUCK_PENDING_GRACE_MS` of
+  // starting up — that's the fix working as intended, not seed data
+  // silently rotting; re-run `pnpm seed` for a fresh one on demand. ---
+  const order2GuestToken = 'seed-guest-cart-token-unpaid-000000000000000000';
+  const order2Cart = await prisma.cart.upsert({
+    where: { id: '00000000-0000-4000-9000-000000000009' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-9000-000000000009',
+      guestToken: order2GuestToken,
+      status: 'CHECKOUT_STARTED',
+      currency: 'IRR',
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60_000),
+    },
+  });
+  await prisma.cartItem.upsert({
+    where: {
+      cartId_productSkuId_configurationHash: {
+        cartId: order2Cart.id,
+        productSkuId: clubmasterSku.id,
+        configurationHash: '',
+      },
+    },
+    update: {},
+    create: {
+      cartId: order2Cart.id,
+      productSkuId: clubmasterSku.id,
+      quantity: 1,
+      unitPriceSnapshot: 9_800_000n,
+      currency: 'IRR',
+    },
+  });
+  const order2Checkout = await prisma.checkoutSession.upsert({
+    where: { idempotencyKey: 'SEED-CHECKOUT-STUCK-ORDER-1' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-9000-00000000000a',
+      cartId: order2Cart.id,
+      guestToken: order2GuestToken,
+      status: 'READY_FOR_PAYMENT',
+      currency: 'IRR',
+      subtotal: 9_800_000n,
+      taxTotal: 882_000n,
+      grandTotal: 10_682_000n,
+      idempotencyKey: 'SEED-CHECKOUT-STUCK-ORDER-1',
+      expiresAt: new Date(Date.now() + 20 * 60_000),
+    },
+  });
+  const order2Intent = await prisma.paymentIntent.upsert({
+    where: { checkoutSessionId: order2Checkout.id },
+    update: {},
+    create: {
+      checkoutSessionId: order2Checkout.id,
+      providerId: zarinpalProvider.id,
+      status: 'SUCCEEDED',
+      amount: 10_682_000n,
+      currency: 'IRR',
+      idempotencyKey: 'SEED-PAYMENT-STUCK-ORDER-1',
+      expiresAt: new Date(Date.now() + 30 * 60_000),
+    },
+  });
+  const order2Attempt = await prisma.paymentAttempt.upsert({
+    where: {
+      paymentIntentId_attemptNumber: { paymentIntentId: order2Intent.id, attemptNumber: 1 },
+    },
+    update: {},
+    create: {
+      paymentIntentId: order2Intent.id,
+      attemptNumber: 1,
+      providerAuthority: 'SEED-AUTHORITY-STUCK-000000000000000000000000',
+      status: 'RETURNED',
+      returnedAt: new Date(),
+    },
+  });
+  await prisma.paymentTransaction.upsert({
+    where: {
+      providerId_providerReference: {
+        providerId: zarinpalProvider.id,
+        providerReference: 'SEED-REFID-STUCK-1',
+      },
+    },
+    update: {},
+    create: {
+      paymentIntentId: order2Intent.id,
+      paymentAttemptId: order2Attempt.id,
+      providerId: zarinpalProvider.id,
+      providerReference: 'SEED-REFID-STUCK-1',
+      amount: 10_682_000n,
+      currency: 'IRR',
+      status: 'VERIFIED',
+      verifiedAt: new Date(),
+      rawVerificationResponse: { code: 100, message: 'Verified', ref_id: 'SEED-REFID-STUCK-1' },
+    },
+  });
+  let order2 = await prisma.order.findUnique({ where: { checkoutSessionId: order2Checkout.id } });
+  order2 ??= await prisma.order.create({
+    data: {
+      orderNumber: await nextOrderNumber(),
+      checkoutSessionId: order2Checkout.id,
+      paymentIntentId: order2Intent.id,
+      guestToken: order2GuestToken,
+      source: 'STOREFRONT',
+      // status/paymentStatus/fulfillmentStatus/paidTotal/refundedTotal
+      // deliberately left at their schema defaults (PENDING_PAYMENT/
+      // UNPAID/UNFULFILLED/0/0) — see this fixture's own comment above.
+      currency: 'IRR',
+      subtotal: 9_800_000n,
+      taxTotal: 882_000n,
+      grandTotal: 10_682_000n,
+      shippingAddressSnapshot: {},
+      items: {
+        create: {
+          productSkuId: clubmasterSku.id,
+          skuSnapshot: clubmasterSku.skuCode,
+          nameSnapshot: 'Ray-Ban Clubmaster Classic',
+          unitPriceSnapshot: 9_800_000n,
+          quantity: 1,
+          taxAmount: 882_000n,
+          lineTotal: 9_800_000n,
+        },
+      },
+      statusHistory: {
+        create: {
+          fromStatus: null,
+          toStatus: 'PENDING_PAYMENT',
+          note: 'Order created from a verified payment',
+        },
+      },
+    },
+  });
+
+  // --- Order 3 — PAID then CANCELLED. paymentStatus stays PAID (never
+  // auto-refunded on cancel — a real, deliberate, documented gap, ADR-009
+  // decision 10 and this module's own OrderService.cancel() doc comment;
+  // same shape as RefundService's own Phase 008 gap). ---
+  const order3Cart = await prisma.cart.upsert({
+    where: { id: '00000000-0000-4000-9000-00000000000b' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-9000-00000000000b',
+      customerId: customer.id,
+      status: 'CHECKOUT_STARTED',
+      currency: 'IRR',
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60_000),
+    },
+  });
+  await prisma.cartItem.upsert({
+    where: {
+      cartId_productSkuId_configurationHash: {
+        cartId: order3Cart.id,
+        productSkuId: clubmasterSku.id,
+        configurationHash: '',
+      },
+    },
+    update: {},
+    create: {
+      cartId: order3Cart.id,
+      productSkuId: clubmasterSku.id,
+      quantity: 2,
+      unitPriceSnapshot: 9_800_000n,
+      currency: 'IRR',
+    },
+  });
+  const order3Checkout = await prisma.checkoutSession.upsert({
+    where: { idempotencyKey: 'SEED-CHECKOUT-CANCELLED-ORDER-1' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-9000-00000000000c',
+      cartId: order3Cart.id,
+      customerId: customer.id,
+      status: 'CONVERTED',
+      currency: 'IRR',
+      subtotal: 19_600_000n,
+      taxTotal: 1_764_000n,
+      grandTotal: 21_364_000n,
+      idempotencyKey: 'SEED-CHECKOUT-CANCELLED-ORDER-1',
+      expiresAt: new Date(Date.now() + 20 * 60_000),
+    },
+  });
+  const order3Intent = await prisma.paymentIntent.upsert({
+    where: { checkoutSessionId: order3Checkout.id },
+    update: {},
+    create: {
+      checkoutSessionId: order3Checkout.id,
+      customerId: customer.id,
+      providerId: zarinpalProvider.id,
+      status: 'SUCCEEDED',
+      amount: 21_364_000n,
+      currency: 'IRR',
+      idempotencyKey: 'SEED-PAYMENT-CANCELLED-ORDER-1',
+      expiresAt: new Date(Date.now() + 30 * 60_000),
+    },
+  });
+  const order3Attempt = await prisma.paymentAttempt.upsert({
+    where: {
+      paymentIntentId_attemptNumber: { paymentIntentId: order3Intent.id, attemptNumber: 1 },
+    },
+    update: {},
+    create: {
+      paymentIntentId: order3Intent.id,
+      attemptNumber: 1,
+      providerAuthority: 'SEED-AUTHORITY-CANCELLED-00000000000000000000',
+      status: 'RETURNED',
+      returnedAt: new Date(),
+    },
+  });
+  await prisma.paymentTransaction.upsert({
+    where: {
+      providerId_providerReference: {
+        providerId: zarinpalProvider.id,
+        providerReference: 'SEED-REFID-CANCELLED-1',
+      },
+    },
+    update: {},
+    create: {
+      paymentIntentId: order3Intent.id,
+      paymentAttemptId: order3Attempt.id,
+      providerId: zarinpalProvider.id,
+      providerReference: 'SEED-REFID-CANCELLED-1',
+      amount: 21_364_000n,
+      currency: 'IRR',
+      status: 'VERIFIED',
+      verifiedAt: new Date(),
+      rawVerificationResponse: { code: 100, message: 'Verified', ref_id: 'SEED-REFID-CANCELLED-1' },
+    },
+  });
+  let order3 = await prisma.order.findUnique({ where: { checkoutSessionId: order3Checkout.id } });
+  order3 ??= await prisma.order.create({
+    data: {
+      orderNumber: await nextOrderNumber(),
+      checkoutSessionId: order3Checkout.id,
+      paymentIntentId: order3Intent.id,
+      customerId: customer.id,
+      source: 'STOREFRONT',
+      status: 'CANCELLED',
+      paymentStatus: 'PAID',
+      fulfillmentStatus: 'UNFULFILLED',
+      currency: 'IRR',
+      subtotal: 19_600_000n,
+      taxTotal: 1_764_000n,
+      grandTotal: 21_364_000n,
+      paidTotal: 21_364_000n,
+      cancelledAt: new Date(),
+      shippingAddressSnapshot: order1ShippingSnapshot,
+      items: {
+        create: {
+          productSkuId: clubmasterSku.id,
+          skuSnapshot: clubmasterSku.skuCode,
+          nameSnapshot: 'Ray-Ban Clubmaster Classic',
+          unitPriceSnapshot: 9_800_000n,
+          quantity: 2,
+          taxAmount: 1_764_000n,
+          lineTotal: 19_600_000n,
+        },
+      },
+      statusHistory: {
+        create: [
+          {
+            fromStatus: null,
+            toStatus: 'PENDING_PAYMENT',
+            note: 'Order created from a verified payment',
+          },
+          {
+            fromStatus: 'PENDING_PAYMENT',
+            toStatus: 'PAID',
+            note: 'Payment verified — order marked PAID',
+          },
+          {
+            fromStatus: 'PAID',
+            toStatus: 'CANCELLED',
+            changedBy: adminUser.id,
+            note: 'Cancelled — customer requested cancellation before fulfillment',
+          },
+        ],
+      },
+    },
+  });
+  await prisma.invoice.upsert({
+    where: { orderId: order3.id },
+    update: {},
+    create: {
+      invoiceNumber: await nextInvoiceNumber(),
+      orderId: order3.id,
+      customerId: customer.id,
+      status: 'ISSUED',
+      currency: 'IRR',
+      subtotal: 19_600_000n,
+      taxTotal: 1_764_000n,
+      grandTotal: 21_364_000n,
+      issuedAt: new Date(),
+      items: {
+        create: {
+          description: 'Ray-Ban Clubmaster Classic',
+          quantity: 2,
+          unitPrice: 9_800_000n,
+          lineTotal: 19_600_000n,
+        },
+      },
+    },
+  });
+
+  // --- Order 4 — the full happy path: PAID -> PROCESSING ->
+  // READY_TO_FULFILL -> FULFILLED, one Fulfillment (DELIVERED) covering
+  // both order lines, one Shipment (DELIVERED) with a real tracking
+  // history, and an issued Invoice. ---
+  const order4Cart = await prisma.cart.upsert({
+    where: { id: '00000000-0000-4000-9000-00000000000d' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-9000-00000000000d',
+      customerId: customer.id,
+      status: 'CHECKOUT_STARTED',
+      currency: 'IRR',
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60_000),
+    },
+  });
+  for (const [productSkuId, quantity, unitPrice] of [
+    [sku.id, 1, 12_500_000n],
+    [clubmasterSku.id, 1, 9_800_000n],
+  ] as const) {
+    await prisma.cartItem.upsert({
+      where: {
+        cartId_productSkuId_configurationHash: {
+          cartId: order4Cart.id,
+          productSkuId,
+          configurationHash: '',
+        },
+      },
+      update: {},
+      create: {
+        cartId: order4Cart.id,
+        productSkuId,
+        quantity,
+        unitPriceSnapshot: unitPrice,
+        currency: 'IRR',
+      },
+    });
+  }
+  const order4Checkout = await prisma.checkoutSession.upsert({
+    where: { idempotencyKey: 'SEED-CHECKOUT-FULFILLED-ORDER-1' },
+    update: {},
+    create: {
+      id: '00000000-0000-4000-9000-00000000000e',
+      cartId: order4Cart.id,
+      customerId: customer.id,
+      status: 'CONVERTED',
+      currency: 'IRR',
+      subtotal: 22_300_000n,
+      taxTotal: 2_007_000n,
+      grandTotal: 24_307_000n,
+      idempotencyKey: 'SEED-CHECKOUT-FULFILLED-ORDER-1',
+      expiresAt: new Date(Date.now() + 20 * 60_000),
+    },
+  });
+  const order4Intent = await prisma.paymentIntent.upsert({
+    where: { checkoutSessionId: order4Checkout.id },
+    update: {},
+    create: {
+      checkoutSessionId: order4Checkout.id,
+      customerId: customer.id,
+      providerId: zarinpalProvider.id,
+      status: 'SUCCEEDED',
+      amount: 24_307_000n,
+      currency: 'IRR',
+      idempotencyKey: 'SEED-PAYMENT-FULFILLED-ORDER-1',
+      expiresAt: new Date(Date.now() + 30 * 60_000),
+    },
+  });
+  const order4Attempt = await prisma.paymentAttempt.upsert({
+    where: {
+      paymentIntentId_attemptNumber: { paymentIntentId: order4Intent.id, attemptNumber: 1 },
+    },
+    update: {},
+    create: {
+      paymentIntentId: order4Intent.id,
+      attemptNumber: 1,
+      providerAuthority: 'SEED-AUTHORITY-FULFILLED-00000000000000000000',
+      status: 'RETURNED',
+      returnedAt: new Date(),
+    },
+  });
+  await prisma.paymentTransaction.upsert({
+    where: {
+      providerId_providerReference: {
+        providerId: zarinpalProvider.id,
+        providerReference: 'SEED-REFID-FULFILLED-1',
+      },
+    },
+    update: {},
+    create: {
+      paymentIntentId: order4Intent.id,
+      paymentAttemptId: order4Attempt.id,
+      providerId: zarinpalProvider.id,
+      providerReference: 'SEED-REFID-FULFILLED-1',
+      amount: 24_307_000n,
+      currency: 'IRR',
+      status: 'VERIFIED',
+      verifiedAt: new Date(),
+      rawVerificationResponse: { code: 100, message: 'Verified', ref_id: 'SEED-REFID-FULFILLED-1' },
+    },
+  });
+  let order4 = await prisma.order.findUnique({ where: { checkoutSessionId: order4Checkout.id } });
+  order4 ??= await prisma.order.create({
+    data: {
+      orderNumber: await nextOrderNumber(),
+      checkoutSessionId: order4Checkout.id,
+      paymentIntentId: order4Intent.id,
+      customerId: customer.id,
+      source: 'STOREFRONT',
+      status: 'FULFILLED',
+      paymentStatus: 'PAID',
+      fulfillmentStatus: 'FULFILLED',
+      currency: 'IRR',
+      subtotal: 22_300_000n,
+      taxTotal: 2_007_000n,
+      grandTotal: 24_307_000n,
+      paidTotal: 24_307_000n,
+      shippingAddressSnapshot: order1ShippingSnapshot,
+      items: {
+        create: [
+          {
+            productSkuId: sku.id,
+            skuSnapshot: sku.skuCode,
+            nameSnapshot: 'Ray-Ban Aviator Classic',
+            unitPriceSnapshot: 12_500_000n,
+            quantity: 1,
+            taxAmount: 1_125_000n,
+            lineTotal: 12_500_000n,
+          },
+          {
+            productSkuId: clubmasterSku.id,
+            skuSnapshot: clubmasterSku.skuCode,
+            nameSnapshot: 'Ray-Ban Clubmaster Classic',
+            unitPriceSnapshot: 9_800_000n,
+            quantity: 1,
+            taxAmount: 882_000n,
+            lineTotal: 9_800_000n,
+          },
+        ],
+      },
+      statusHistory: {
+        create: [
+          {
+            fromStatus: null,
+            toStatus: 'PENDING_PAYMENT',
+            note: 'Order created from a verified payment',
+          },
+          {
+            fromStatus: 'PENDING_PAYMENT',
+            toStatus: 'PAID',
+            note: 'Payment verified — order marked PAID',
+          },
+          {
+            fromStatus: 'PAID',
+            toStatus: 'PROCESSING',
+            changedBy: adminUser.id,
+            note: 'Approved for processing',
+          },
+          {
+            fromStatus: 'PROCESSING',
+            toStatus: 'READY_TO_FULFILL',
+            changedBy: adminUser.id,
+            note: 'Stock allocated, ready to pack',
+          },
+          {
+            fromStatus: 'READY_TO_FULFILL',
+            toStatus: 'FULFILLED',
+            changedBy: adminUser.id,
+            note: 'All items fulfilled and delivered',
+          },
+        ],
+      },
+    },
+  });
+  const order4Items = await prisma.orderItem.findMany({ where: { orderId: order4.id } });
+  const order4AviatorItem = order4Items.find((item) => item.productSkuId === sku.id);
+  const order4ClubmasterItem = order4Items.find((item) => item.productSkuId === clubmasterSku.id);
+  if (!order4AviatorItem || !order4ClubmasterItem) {
+    throw new Error('[seed] order4 fulfillment fixture: expected order items missing');
+  }
+
+  let order4Fulfillment = await prisma.fulfillment.findFirst({ where: { orderId: order4.id } });
+  order4Fulfillment ??= await prisma.fulfillment.create({
+    data: {
+      orderId: order4.id,
+      status: 'DELIVERED',
+      warehouseId: warehouseCentral.id,
+      packedAt: new Date(Date.now() - 3 * 24 * 60 * 60_000),
+      shippedAt: new Date(Date.now() - 2 * 24 * 60 * 60_000),
+      deliveredAt: new Date(Date.now() - 1 * 24 * 60 * 60_000),
+      items: {
+        create: [
+          { orderItemId: order4AviatorItem.id, quantity: 1 },
+          { orderItemId: order4ClubmasterItem.id, quantity: 1 },
+        ],
+      },
+    },
+  });
+  await prisma.shipment.upsert({
+    where: { fulfillmentId: order4Fulfillment.id },
+    update: {},
+    create: {
+      fulfillmentId: order4Fulfillment.id,
+      carrier: 'Tipax',
+      trackingNumber: 'SEED-TRACKING-000000000001',
+      status: 'DELIVERED',
+      shippedAt: new Date(Date.now() - 2 * 24 * 60 * 60_000),
+      deliveredAt: new Date(Date.now() - 1 * 24 * 60 * 60_000),
+      events: {
+        create: [
+          {
+            status: 'PENDING',
+            source: 'MANUAL_ADMIN',
+            occurredAt: new Date(Date.now() - 3 * 24 * 60 * 60_000),
+          },
+          {
+            status: 'IN_TRANSIT',
+            location: 'Tehran sorting hub',
+            source: 'MANUAL_ADMIN',
+            occurredAt: new Date(Date.now() - 2 * 24 * 60 * 60_000),
+          },
+          {
+            status: 'DELIVERED',
+            location: 'Valiasr St, No. 100, Tehran',
+            source: 'MANUAL_ADMIN',
+            occurredAt: new Date(Date.now() - 1 * 24 * 60 * 60_000),
+          },
+        ],
+      },
+    },
+  });
+  const order4Invoice = await prisma.invoice.upsert({
+    where: { orderId: order4.id },
+    update: {},
+    create: {
+      invoiceNumber: await nextInvoiceNumber(),
+      orderId: order4.id,
+      customerId: customer.id,
+      status: 'ISSUED',
+      currency: 'IRR',
+      subtotal: 22_300_000n,
+      taxTotal: 2_007_000n,
+      grandTotal: 24_307_000n,
+      issuedAt: new Date(),
+      items: {
+        create: [
+          {
+            description: 'Ray-Ban Aviator Classic',
+            quantity: 1,
+            unitPrice: 12_500_000n,
+            lineTotal: 12_500_000n,
+          },
+          {
+            description: 'Ray-Ban Clubmaster Classic',
+            quantity: 1,
+            unitPrice: 9_800_000n,
+            lineTotal: 9_800_000n,
+          },
+        ],
+      },
+    },
+  });
+
+  // ---------------------------------------------------------------------
+  // Phase 012 — returns/refunds/credit notes (docs/adr/ADR-012-returns-
+  // refunds-credit-notes.md). Two full-lifecycle returns against order4
+  // (the FULFILLED order with a DELIVERED fulfillment above) — one per
+  // resolution type, both driven all the way to COMPLETED so
+  // GET /returns/:id and GET /admin/returns/:id have something real to
+  // show on a freshly-seeded database. Amounts computed the same way
+  // RefundAmountCalculator does: lineTotal - discountAmount + taxAmount.
+  // ---------------------------------------------------------------------
+  const order4VerifiedTransaction = await prisma.paymentTransaction.findFirst({
+    where: { paymentIntentId: order4Intent.id, status: 'VERIFIED' },
+  });
+  if (!order4VerifiedTransaction) {
+    throw new Error('[seed] order4 return fixture: expected VERIFIED transaction missing');
+  }
+
+  const returnTimestamps = {
+    requestedAt: new Date(Date.now() - 20 * 60 * 60_000),
+    approvedAt: new Date(Date.now() - 18 * 60 * 60_000),
+    receivedAt: new Date(Date.now() - 10 * 60 * 60_000),
+    inspectedAt: new Date(Date.now() - 8 * 60 * 60_000),
+    refundedAt: new Date(Date.now() - 6 * 60 * 60_000),
+    completedAt: new Date(Date.now() - 5 * 60 * 60_000),
+  };
+
+  // Return #1 — REFUND resolution, the Aviator line, fully settled.
+  let order4RefundReturn = await prisma.returnRequest.findFirst({
+    where: { orderId: order4.id, resolution: 'REFUND' },
+    include: { items: true },
+  });
+  if (!order4RefundReturn) {
+    const aviatorTotalPayable = 12_500_000n - 0n + 1_125_000n; // lineTotal - discount + tax
+    order4RefundReturn = await prisma.returnRequest.create({
+      data: {
+        returnNumber: await nextReturnNumber(),
+        orderId: order4.id,
+        customerId: customer.id,
+        status: 'COMPLETED',
+        reason: 'CHANGED_MIND',
+        resolution: 'REFUND',
+        warehouseId: warehouseCentral.id,
+        locationId: locMain.id,
+        requestedAt: returnTimestamps.requestedAt,
+        approvedAt: returnTimestamps.approvedAt,
+        receivedAt: returnTimestamps.receivedAt,
+        inspectedAt: returnTimestamps.inspectedAt,
+        refundedAt: returnTimestamps.refundedAt,
+        completedAt: returnTimestamps.completedAt,
+        items: {
+          create: [
+            {
+              orderItemId: order4AviatorItem.id,
+              quantity: 1,
+              condition: 'UNOPENED',
+              refundAmount: aviatorTotalPayable,
+            },
+          ],
+        },
+        statusHistory: {
+          create: [
+            { fromStatus: null, toStatus: 'REQUESTED', note: 'Return requested' },
+            {
+              fromStatus: 'REQUESTED',
+              toStatus: 'APPROVED',
+              changedBy: adminUser.id,
+              note: 'Approved by returns team',
+            },
+            {
+              fromStatus: 'APPROVED',
+              toStatus: 'CUSTOMER_SHIPPING',
+              note: 'Customer shipped item',
+            },
+            {
+              fromStatus: 'CUSTOMER_SHIPPING',
+              toStatus: 'RECEIVED',
+              changedBy: adminUser.id,
+              note: 'Received at Tehran Central Warehouse',
+            },
+            {
+              fromStatus: 'RECEIVED',
+              toStatus: 'INSPECTING',
+              changedBy: adminUser.id,
+              note: 'Inspection started',
+            },
+            {
+              fromStatus: 'INSPECTING',
+              toStatus: 'APPROVED_FOR_REFUND',
+              changedBy: adminUser.id,
+              note: 'Unopened, restocked',
+            },
+            {
+              fromStatus: 'APPROVED_FOR_REFUND',
+              toStatus: 'REFUNDED',
+              changedBy: adminUser.id,
+              note: 'Refund requested',
+            },
+            {
+              fromStatus: 'REFUNDED',
+              toStatus: 'COMPLETED',
+              note: 'Settlement confirmed complete',
+            },
+          ],
+        },
+      },
+      include: { items: true },
+    });
+
+    const order4RefundReturnItem = order4RefundReturn.items[0];
+    if (!order4RefundReturnItem) {
+      throw new Error('[seed] order4 return fixture: expected return item missing');
+    }
+    await prisma.refund.create({
+      data: {
+        paymentTransactionId: order4VerifiedTransaction.id,
+        returnRequestId: order4RefundReturn.id,
+        amount: aviatorTotalPayable,
+        reason: `Return ${order4RefundReturn.returnNumber}`,
+        status: 'COMPLETED',
+        requestedBy: adminUser.id,
+        idempotencyKey: `return-refund__${order4RefundReturn.id}`,
+        lines: {
+          create: [{ returnItemId: order4RefundReturnItem.id, amount: aviatorTotalPayable }],
+        },
+      },
+    });
+    await prisma.order.update({
+      where: { id: order4.id },
+      data: { paymentStatus: 'PARTIALLY_REFUNDED', refundedTotal: aviatorTotalPayable },
+    });
+  }
+
+  // Return #2 — CREDIT_NOTE resolution, the Clubmaster line, fully
+  // settled with a real ISSUED CreditNote (never a historical-Invoice
+  // rewrite — ADR-012 decision 7).
+  let order4CreditNoteReturn = await prisma.returnRequest.findFirst({
+    where: { orderId: order4.id, resolution: 'CREDIT_NOTE' },
+    include: { items: true },
+  });
+  if (!order4CreditNoteReturn) {
+    const clubmasterTotalPayable = 9_800_000n - 0n + 882_000n;
+    order4CreditNoteReturn = await prisma.returnRequest.create({
+      data: {
+        returnNumber: await nextReturnNumber(),
+        orderId: order4.id,
+        customerId: customer.id,
+        status: 'COMPLETED',
+        reason: 'SIZE_FIT_ISSUE',
+        resolution: 'CREDIT_NOTE',
+        warehouseId: warehouseCentral.id,
+        locationId: locMain.id,
+        requestedAt: returnTimestamps.requestedAt,
+        approvedAt: returnTimestamps.approvedAt,
+        receivedAt: returnTimestamps.receivedAt,
+        inspectedAt: returnTimestamps.inspectedAt,
+        refundedAt: returnTimestamps.refundedAt,
+        completedAt: returnTimestamps.completedAt,
+        items: {
+          create: [
+            {
+              orderItemId: order4ClubmasterItem.id,
+              quantity: 1,
+              condition: 'OPENED_UNUSED',
+              refundAmount: clubmasterTotalPayable,
+            },
+          ],
+        },
+        statusHistory: {
+          create: [
+            { fromStatus: null, toStatus: 'REQUESTED', note: 'Return requested' },
+            {
+              fromStatus: 'REQUESTED',
+              toStatus: 'APPROVED',
+              changedBy: adminUser.id,
+              note: 'Approved by returns team',
+            },
+            {
+              fromStatus: 'APPROVED',
+              toStatus: 'CUSTOMER_SHIPPING',
+              note: 'Customer shipped item',
+            },
+            {
+              fromStatus: 'CUSTOMER_SHIPPING',
+              toStatus: 'RECEIVED',
+              changedBy: adminUser.id,
+              note: 'Received at Tehran Central Warehouse',
+            },
+            {
+              fromStatus: 'RECEIVED',
+              toStatus: 'INSPECTING',
+              changedBy: adminUser.id,
+              note: 'Inspection started',
+            },
+            {
+              fromStatus: 'INSPECTING',
+              toStatus: 'APPROVED_FOR_REFUND',
+              changedBy: adminUser.id,
+              note: 'Opened but unused, restocked',
+            },
+            {
+              fromStatus: 'APPROVED_FOR_REFUND',
+              toStatus: 'REFUNDED',
+              changedBy: adminUser.id,
+              note: 'Credit note issued',
+            },
+            {
+              fromStatus: 'REFUNDED',
+              toStatus: 'COMPLETED',
+              note: 'Settlement confirmed complete',
+            },
+          ],
+        },
+      },
+      include: { items: true },
+    });
+    await prisma.creditNote.create({
+      data: {
+        creditNoteNumber: await nextCreditNoteNumber(),
+        orderId: order4.id,
+        returnRequestId: order4CreditNoteReturn.id,
+        invoiceId: order4Invoice.id,
+        customerId: customer.id,
+        status: 'ISSUED',
+        currency: 'IRR',
+        subtotal: clubmasterTotalPayable,
+        grandTotal: clubmasterTotalPayable,
+        issuedAt: returnTimestamps.refundedAt,
+        items: {
+          create: [
+            {
+              description: 'Return credit — Ray-Ban Clubmaster Classic',
+              quantity: 1,
+              unitPrice: clubmasterTotalPayable,
+              lineTotal: clubmasterTotalPayable,
+            },
+          ],
+        },
+      },
+    });
+  }
+
+  // ---------------------------------------------------------------------
   // cms — a home page, a menu, an FAQ entry
   // ---------------------------------------------------------------------
   const homePage = await prisma.page.upsert({
@@ -1966,16 +3403,24 @@ async function main(): Promise<void> {
   });
 
   console.log(
-    '[seed] done — RBAC (43 real permissions across identity/catalog/inventory/payment, role ' +
-      'inheritance, a deny-override), admin/customer/support/catalog-editor/inventory-role/' +
-      'payment-role users, demo customer, catalog (3 products — two PUBLISHED with variant+' +
-      'SKU+price+media/collection, one DRAFT), inventory (2 warehouses, 3 locations, stock ' +
-      'for all SKUs, 2 reservations, a low-stock example, a transfer), coupon, cart-checkout ' +
-      '(2 shipping methods, pricing settings, an active customer cart, a guest cart, a ' +
-      'checkout-ready fixture with a real reservation, an expired checkout), payment (ZarinPal ' +
-      'provider, a SUCCEEDED intent with a VERIFIED transaction + partial refund, a FAILED ' +
-      'intent with a mismatched transaction, an unresolved AMOUNT_MISMATCH reconciliation ' +
-      'finding), CMS/notification/system basics.',
+    '[seed] done — RBAC (80 real permissions across identity/catalog/inventory/payment/order/' +
+      'promotion/coupon/return/credit_note, role inheritance, a deny-override), admin/customer/' +
+      'support/catalog-editor/inventory-role/payment-role/order-role/promotion-manager/' +
+      'promotion-editor/returns-role users, demo customer, catalog (3 products — two PUBLISHED ' +
+      'with variant+SKU+price+media/collection, one DRAFT), inventory (2 warehouses, 3 ' +
+      'locations, stock for all SKUs, 2 reservations, a low-stock example, a transfer), ' +
+      'cart-checkout (2 shipping methods, pricing settings, an active customer cart, a guest ' +
+      'cart, a checkout-ready fixture with a real reservation, an expired checkout), payment ' +
+      '(ZarinPal provider, a SUCCEEDED intent with a VERIFIED transaction + partial refund, a ' +
+      'FAILED intent with a mismatched transaction, an unresolved AMOUNT_MISMATCH reconciliation ' +
+      'finding), order (a PAID/PARTIALLY_REFUNDED order + issued invoice, a genuinely UNPAID/' +
+      'PENDING_PAYMENT order demonstrating the conversion crash-recovery window, a PAID-then-' +
+      'CANCELLED order + issued invoice, a FULFILLED order with a DELIVERED fulfillment/' +
+      'shipment/tracking history + issued invoice), returns (two full-lifecycle COMPLETED ' +
+      'returns against the FULFILLED order — one REFUND-resolution with a real Refund+RefundLine, ' +
+      'one CREDIT_NOTE-resolution with a real ISSUED CreditNote), promotion (3 promotions — ' +
+      'percentage/fixed-amount/automatic-free-shipping — plus 5 coupons covering active/expired/' +
+      'future/single-use fixtures), CMS/notification/system basics.',
   );
 }
 

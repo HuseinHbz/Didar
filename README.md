@@ -116,11 +116,20 @@ Phase 0 (product/architecture definition), the Phase 001 monorepo-foundation
 task, Phase 003's real PostgreSQL ERD, Phase 004's identity/RBAC module,
 Phase 005's product catalog/merchandising module, Phase 006's
 multi-warehouse inventory/ledger/reservation module, Phase 007's
-cart/checkout/pricing-resolution/reservation-integration module, and
-Phase 008's payment orchestration/Iranian gateway integration module are
-done — see `CLAUDE.md`'s "Current status" for exactly what each does and
-doesn't include. Next up: the remaining Phase 1 domain modules (`order`,
-…).
+cart/checkout/pricing-resolution/reservation-integration module,
+Phase 008's payment orchestration/Iranian gateway integration module,
+Phase 009's order/invoice/fulfillment module, Phase 010's promotion/
+discount/coupon engine, Phase 011's order lifecycle/fulfillment/
+shipping hardening (concurrency fixes, server-derived order completion,
+dedicated delivery RBAC, idempotency, database-backed admin search), and
+Phase 012's returns/refunds/credit-notes subsystem (eligibility gated on
+real fulfillment/delivery data, refund math derived only from immutable
+order-item snapshots, row-locked return-quantity invariant, restock
+exactly once and only after physical verification, server-generated
+credit-note numbering, exactly one refund pathway extended never
+duplicated) are done — see `CLAUDE.md`'s "Current status" for exactly
+what each does and doesn't include. Next up: the remaining Phase 1
+domain modules.
 
 ## License
 

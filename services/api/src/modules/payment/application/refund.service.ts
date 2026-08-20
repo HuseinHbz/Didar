@@ -44,17 +44,45 @@ export class RefundService {
     return refund;
   }
 
+  /** `GET /admin/payments/refunds` — closes a gap ADR-012's own
+   * reconnaissance flagged (no list route existed despite the original
+   * Phase 008 brief asking for one). Exactly one of the two filters must
+   * be supplied; this never becomes an unfiltered "list every refund"
+   * scan. */
+  async list(filter: {
+    paymentTransactionId?: string;
+    returnRequestId?: string;
+  }): Promise<Refund[]> {
+    if (filter.returnRequestId) {
+      return this.refunds.listByReturnRequestId(filter.returnRequestId);
+    }
+    if (filter.paymentTransactionId) {
+      return this.refunds.listByTransactionId(filter.paymentTransactionId);
+    }
+    return [];
+  }
+
   /** `POST /payments/refunds` — admin-only (see this module's RBAC
    * permissions). Validates against the transaction's real remaining
    * balance before writing anything; a rejection here never reaches the
    * repository (`RefundStateMachine`'s own doc comment explains why
-   * there is no `PENDING -> REJECTED` edge for this case). */
+   * there is no `PENDING -> REJECTED` edge for this case).
+   *
+   * `returnRequestId`/`lines`, added by ADR-012 decision 8, are both
+   * optional and additive — `OrderService.cancel()`/
+   * `.requestPartialRefund()` omit them and get an identical
+   * direct/order-level refund to before. `ReturnService.refund()` is the
+   * only caller that supplies them; this method still only ever
+   * validates via `RefundValidator` and creates one row through the same
+   * `RefundRepositoryPort.create()` path — no second refund pathway. */
   async requestRefund(props: {
     paymentTransactionId: string;
     amount: bigint;
     reason?: string;
     requestedBy?: string;
     idempotencyKey: string;
+    returnRequestId?: string | null;
+    lines?: readonly { returnItemId: string; amount: bigint }[];
   }): Promise<Refund> {
     const transaction = await this.intents.findTransactionById(props.paymentTransactionId);
     if (!transaction) throw new NotFoundException('Payment transaction not found');
@@ -78,6 +106,8 @@ export class RefundService {
       reason: props.reason,
       requestedBy: props.requestedBy,
       idempotencyKey: props.idempotencyKey,
+      returnRequestId: props.returnRequestId,
+      lines: props.lines,
     });
   }
 

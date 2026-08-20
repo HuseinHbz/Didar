@@ -128,12 +128,13 @@ Phase 002 added the enterprise git workflow + CI quality gate: `main`
 by a `quality-gate` job. Branch protection requiring that check is still a
 manual GitHub-admin step (not configurable from inside the repo) — see that
 doc. Every phase's `feature/*` branch is merged to `main` once its PR lands
-(all of Phase 001-008's PRs are merged as of Phase 008; `develop` tracks the
-same tip) — see `docs/deployment/ci-pipeline.md`'s "Numbered branch naming"
-section for the two-digit prefix (`01-feature-foundation-monorepo`, …,
-`08-feature-payment-orchestration`) every phase branch carries from Phase
-001 onward, and for the naming rule to keep following on every future
-branch.
+(all of Phase 001-009's PRs are merged as of Phase 009; `develop` tracks the
+same tip, with later phases' own branches pushed and pending) — see
+`docs/deployment/ci-pipeline.md`'s "Numbered branch naming" section for the
+two-digit prefix (`01-feature-foundation-monorepo`, …,
+`12-feature-returns-refunds-credit-notes`) every phase branch carries from
+Phase 001 onward, and for the naming rule to keep following on every
+future branch.
 
 Phase 003 built the real PostgreSQL foundation (blueprint's "settle the
 database/domain skeleton first" ordering principle): the full ERD across all
@@ -275,14 +276,163 @@ verification is a documented gap for a staging environment to close, not
 hidden. **Backend-only, same precedent**: `apps/admin`/`apps/storefront`
 are still untouched — see `docs/product/payment.md`.
 
+Phase 009 built the real order/invoice/fulfillment domain on top of
+cart-checkout/catalog/inventory/payment at once —
+`services/api/src/modules/order` (see its own `README.md`) covers an
+`Order` created only from a verified `PaymentTransaction`
+(`OrderConversionService.convertFromCheckout()`, idempotent on
+`checkoutSessionId`/`paymentIntentId` and crash-recovery-resumable if a
+prior call died mid-flight — a real gap this phase found and fixed on
+itself, twice, once in the synchronous method and once in its own
+sweep's second pass), an 8-state order lifecycle plus separate
+fulfillment/shipment/invoice state machines, automatic invoice issuance
+with a real server-generated number (`finance.invoice_number_seq`),
+partial-fulfillment-aware fulfillment tracking with a row-locked
+never-over-fulfill invariant (`SELECT ... FOR UPDATE`, reusing
+`mutateInventoryItem`'s own Phase 006 technique), and a
+`ManualShippingProvider` behind a `ShippingProviderPort` — no live
+courier integration exists yet, and this phase says so rather than
+faking one. It imports four prior modules at once
+(`CartCheckoutModule`, `CatalogModule`, `InventoryModule`,
+`PaymentModule`) — the deepest composition chain in this repo so far —
+and reuses `cart-checkout`'s `ActorResolverGuard` for customer/guest
+order routes; admin routes are real RBAC (14 new `order.*` permissions,
+`order_manager`/`fulfillment_clerk` roles). It's the sixth full
+clean-architecture module in this repo and adds two more in-process
+BullMQ queues (`order_conversion`, `invoice_generation`). Its own
+mandatory concurrency e2e suite proved (not just declared) a real race
+this time in a different layer than every prior phase's own P2002-catch-
+and-reread findings: `OrderService.cancel()`'s check-then-act pattern
+(read the order, decide via the state machine, then write) was not
+atomic — six concurrent cancel requests on one order originally produced
+six `OrderStatusHistory` rows, not one — fixed by row-locking the order
+(`SELECT ... FOR UPDATE`) and re-checking the state machine against the
+_locked_ status before writing, inside `PrismaOrderRepository
+.updateStatus()` itself so every caller benefits, not just `cancel()` —
+see `docs/architecture/order.md`. **Backend-only, same precedent**:
+`apps/admin`/`apps/storefront` are still untouched — see
+`docs/product/order-fulfillment.md`.
+
+Phase 010 built the real promotion/discount/coupon engine and extended
+(never duplicated) `cart-checkout`'s own single-coupon pricing pipeline
+to support any number of simultaneous promotions —
+`services/api/src/modules/promotion` (see its own `README.md`) covers 6
+discount types (`PERCENTAGE`/`FIXED_AMOUNT`/`FIXED_PRICE`/
+`FREE_SHIPPING`/`BUY_X_GET_Y`/`BUNDLE_PRICE`), composable OR'd targeting
+(product/SKU/category/brand/collection, zero rows = whole cart),
+deterministic stacking/exclusivity resolution (`priority ASC, id ASC`,
+never DB row order), and a coupon lifecycle with no enumeration leakage
+(the same code returns the same generic rejection whether it doesn't
+exist, is expired, or the cart just doesn't qualify). It generalizes
+"usage limit" into one redemption ledger
+(`marketing.CouponRedemption`, `RESERVED → REDEEMED`/`RELEASED`) shared
+by coupon-gated and automatic promotions alike, row-locked
+(`SELECT ... FOR UPDATE`) the same way `mutateInventoryItem`/
+`lockAndSumFulfilled` already proved safe, backstopped by a real
+Postgres `CHECK` constraint Prisma's schema DSL can't express — proven
+under real concurrency twice, once through the full HTTP checkout flow
+(15 concurrent confirmations against a `usageLimit: 1` coupon) and once
+directly at the repository layer (20 concurrent `reserve()` calls, no
+HTTP), both converging to exactly one success. `cart-checkout`'s
+`PricingResolver` traded its single `coupon: CouponRule | null` input
+for `adjustments: readonly PricingAdjustmentInput[]` — a strict
+superset, not a rewrite, so every pre-existing cart-checkout pricing
+test kept its exact expected numbers. `cart-checkout` and `order` each
+import `PromotionModule` directly and consume its exported
+`PromotionResolutionService`/`CouponRedemptionService` — this module
+depends on neither of them, the composition runs the other direction
+than Phase 009's four-module `order` did. It's the seventh full
+clean-architecture module in this repo and adds two more in-process
+BullMQ queues (`promotion_expiration`, `coupon_reservation_cleanup`).
+Explicit security coverage beyond RBAC/enumeration: a client cannot
+inject a discount amount (`forbidNonWhitelisted` rejects it) or forge a
+total (`/cart/price` binds no request body at all), a negative
+`discountValue` from bad/malicious admin input can never inflate a
+price (`DiscountEngine`'s own floor-at-zero), and replaying
+`ready-for-payment` never double-reserves — see
+`docs/security/promotion-security.md`. **Backend-only, same precedent**:
+`apps/admin`/`apps/storefront` are still untouched — see
+`docs/product/promotions.md`.
+
+Phase 011 hardened Phase 009's order/fulfillment/shipping module rather
+than rebuilding it — an audit against a real concurrency/security
+scenario list, not a new feature set. It found and fixed the exact same
+check-then-act status-transition race Phase 009 had already found and
+fixed on `Order` (`SELECT ... FOR UPDATE` + re-check-the-locked-row),
+still open on `Fulfillment`/`Shipment` specifically — proven via 20
+concurrent identical status updates against each, collapsing to exactly
+one real transition (`test/order-repository.e2e-spec.ts`). It closed the
+subtler version of "don't trust a client PATCH to COMPLETED" that Phase
+009 hadn't fully closed: `OrderService.complete()` used to trust the
+`fulfillmentStatus` cache column alone; a new `OrderCompletionValidator`
+(pure domain service) now re-derives readiness from the order's real
+`Fulfillment` rows, requiring every non-cancelled one to be genuinely
+`DELIVERED`. Delivery confirmation moved to its own dedicated route and
+permission (`order.shipment.deliver`, deliberately withheld from
+`fulfillment_clerk`) — the generic status-update routes' own DTOs now
+reject `DELIVERED` outright at the validation layer. It added
+fulfillment-creation idempotency keys, a `UNIQUE` tracking-number index
+with a real lookup route, database-backed admin order search/filtering
+(never fetched-then-filtered), and finally surfaced Phase 010's own
+`OrderPromotion` snapshot on the order read path — a gap Phase 010's own
+final report had flagged. It deliberately did **not** implement
+inventory restock-on-cancellation — re-evaluated, not merely carried
+forward unexamined, and reaffirmed deferred because a correct
+implementation needs reservation-lineage tracking this phase's brief
+didn't ask for (`docs/adr/ADR-011-order-lifecycle-hardening.md` decision
+8). A related, lower-severity finding — six pre-existing
+`OrderRepositoryPort.updateStatus()` call sites can each write one
+harmless duplicate `AuditLog` row on a losing race, never a duplicate
+`OrderStatusHistory` row — was found and documented but deliberately not
+retrofitted this phase (too large a blast radius for a cosmetic gap).
+See `docs/architecture/order.md`'s "Phase 011" section for the full
+account. **Backend-only, same precedent**: `apps/admin`/`apps/storefront`
+are still untouched.
+
+Phase 012 closed the returns/refunds/credit-notes gap every phase from
+008 onward had explicitly deferred — a new `modules/return`, additive
+extensions to `modules/payment` (`Refund.returnRequestId` + a new
+`RefundLine` child table — **exactly one refund pathway still exists,
+extended, never duplicated**) and `modules/inventory`
+(`AdjustmentService.receiveReturnedStock()`, wrapping a previously-
+uncalled `receiveStock()` primitive). A 10-state `ReturnRequest`
+lifecycle, eligibility checked against real `Fulfillment.deliveredAt`
+data (never a client-supplied flag), refund/credit-note amounts always
+derived from `OrderItem`'s own immutable snapshot
+(`lineTotal - discountAmount + taxAmount`, never live catalog/promotion
+data), a row-locked return-quantity invariant
+(`lockAndSumReturnedQuantity`, the direct analogue of Phase 009's
+over-fulfillment guard), inventory restock gated on a real
+`INSPECTING -> APPROVED_FOR_REFUND` transition (never on a mere request,
+never on a rejection, proven to collapse to exactly one restock under 20
+concurrent approve-for-refund calls), and a real, minimal credit-note
+lifecycle with server-generated sequential numbering from a Postgres
+sequence — `Invoice` itself is never mutated. All six required
+concurrency proofs ran against real PostgreSQL, never a mocked
+repository (`test/return-repository.e2e-spec.ts`). A genuine,
+pre-existing latent race in the e2e test harness itself was found and
+mitigated along the way: OTP login for the shared seed admin phone can
+lose a race across Jest's parallel per-file workers when enough spec
+files contend on it at once (`VerifyOtpUseCase` correctly honors only
+the _latest_ requested code, so two concurrent login sequences for one
+phone can invalidate each other) — fixed for this phase's own two new
+e2e files by giving them a dedicated second admin fixture rather than
+patching identity's (correct) OTP semantics; the same latent contention
+remains open for the other nine files that still share the one hot
+phone number, documented rather than silently carried forward. See
+`docs/adr/ADR-012-returns-refunds-credit-notes.md` and
+`docs/architecture/returns.md` for the full account. **Backend-only,
+same precedent**: `apps/admin`/`apps/storefront` are still untouched.
+
 **Next up** is the rest of Phase 1 (see end of blueprint doc "وضعیت
-فعلی"): the remaining real domain modules (`order`, …) beyond
-`identity`/`catalog`/`inventory`/`cart-checkout`/`payment`, each landing
-once its slice of the ERD/API contract/permission matrix/event map is
-designed — _before_ further UI/design-system work. The stated ordering
-principle: settle the database/domain skeleton first (done for identity,
-catalog, inventory, cart-checkout, and payment; the rest still pending),
-then design system + admin panel structure + web/PWA sitemap + Android
-structure.
+فعلی"): the remaining real domain modules beyond
+`identity`/`catalog`/`inventory`/`cart-checkout`/`payment`/`order`/
+`promotion`/`return`, each landing once its slice of the ERD/API
+contract/permission matrix/event map is designed — _before_ further
+UI/design-system work. The stated
+ordering principle: settle the database/domain skeleton first (done for
+identity, catalog, inventory, cart-checkout, payment, order, promotion,
+and return; the rest still pending), then design system + admin panel
+structure + web/PWA sitemap + Android structure.
 
 Treat any new architectural decision as needing to stay consistent with this document, or update it explicitly.

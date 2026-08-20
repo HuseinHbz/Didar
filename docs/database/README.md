@@ -79,6 +79,84 @@ locationId)` with a full 7-bucket quantity model, `InventoryLedger`
   placeholder `payments`/`refunds` tables at authoring time (confirmed
   directly) — `down.sql` restores that exact placeholder shape; see its
   own header comment.
+- `20260814000000_order_fulfillment_foundation` (Phase 009) — drops
+  Phase 003's placeholder `commerce.Order`/`OrderItem`/
+  `OrderStatusHistory`/`finance.Invoice`/`InvoiceLine` (a shared
+  placeholder `OrderStatus` enum, no real payment link) and replaces
+  them with the real subtree: 6 new enums, 9 new tables (`Order`,
+  `OrderItem`, `OrderStatusHistory`, `Fulfillment`, `FulfillmentItem`,
+  `Shipment`, `ShipmentEvent` in `commerce`; `Invoice`,
+  `InvoiceItem` — renamed from `InvoiceLine` — in `finance`), plus two
+  real Postgres sequences (`commerce.order_number_seq`,
+  `finance.invoice_number_seq`) hand-added after the Prisma-generated
+  DDL. Full detail: [`order-erd.md`](./order-erd.md) and
+  [`docs/adr/ADR-009-order-fulfillment.md`](../adr/ADR-009-order-fulfillment.md).
+  Not data-preserving in the Phase 008 sense — 0 rows existed in the
+  placeholder `orders`/`invoices` tables at authoring time (confirmed
+  directly) — `down.sql` restores that exact placeholder shape; see its
+  own header comment.
+- `20260819000000_promotion_pricing_foundation` (Phase 010) — drops
+  Phase 003's placeholder `marketing.Coupon`/`Promotion`/
+  `CouponRedemption`/`PromotionProduct` (a ruleless, all-or-nothing
+  discount with no eligibility engine, no coupon lifecycle, no
+  concurrency-safe redemption ledger) and replaces them with the real
+  subtree: 6 new enums, `Promotion`/`PromotionRule`/`PromotionTarget`/
+  `Coupon`/`CouponRedemption` in `marketing`, plus a new
+  `commerce.order_promotions` immutable-snapshot table. Two hand-added
+  Postgres `CHECK` constraints (`promotion_usage_within_limit`,
+  `coupon_usage_within_limit`) back a real database-enforced usage-limit
+  invariant — Prisma's schema DSL has no stable `@@check` support, same
+  limitation item 8 above already documents for inventory. Full detail:
+  [`promotion-erd.md`](./promotion-erd.md) and
+  [`docs/adr/ADR-010-promotion-engine.md`](../adr/ADR-010-promotion-engine.md).
+  Not data-preserving in the Phase 009 sense — 0 rows existed in the
+  placeholder `coupons`/`promotions`/`coupon_redemptions`/
+  `promotion_products` tables at authoring time (confirmed directly) —
+  `down.sql` restores that exact placeholder shape; see its own header
+  comment.
+- `20260819120000_order_lifecycle_hardening` (Phase 011) — purely
+  additive, no drops: `commerce.fulfillments.idempotency_key` (nullable
+  `TEXT`, `UNIQUE` index — fulfillment-creation idempotency, ADR-011
+  decision 2); `commerce.orders_payment_status_idx`/
+  `orders_fulfillment_status_idx`/`orders_placed_at_idx` (three new
+  `btree` indexes backing the new admin search/filter query patterns,
+  ADR-011 decision 6); `commerce.shipments.tracking_number` gained a
+  `UNIQUE` index (ADR-011 decision 5). Unlike every migration above,
+  this one _is_ data-preserving in the ordinary sense — real rows already
+  existed (`commerce.orders`: 108, `commerce.fulfillments`: 28,
+  `commerce.shipments`: 10 at authoring time) — and one real pre-existing
+  duplicate `tracking_number` value was found and resolved before the new
+  `UNIQUE` index could be applied; see the migration file's own header
+  comment for the exact remediation. Full detail:
+  [`order-erd.md`](./order-erd.md) and
+  [`docs/adr/ADR-011-order-lifecycle-hardening.md`](../adr/ADR-011-order-lifecycle-hardening.md).
+- `20260820000000_returns_refunds_credit_notes` (Phase 012) — purely
+  additive, no drops: `commerce.return_requests`/`return_items`/
+  `return_status_history` (the new `ReturnRequest` aggregate), a
+  nullable, real-FK `return_request_id` column on the existing
+  `commerce.refunds` table plus a new `commerce.refund_lines` child
+  table (every existing `refunds` column and row untouched — exactly one
+  refund pathway still exists), and `finance.credit_notes`/
+  `credit_note_lines` (a real, minimal credit-note lifecycle,
+  `invoice_id` a real enforced FK, `Invoice` itself never mutated). Two
+  new Postgres sequences (`commerce.return_number_seq`,
+  `finance.credit_note_number_seq`), same technique as
+  `order_number_seq`/`invoice_number_seq`. Full detail:
+  [`return-erd.md`](./return-erd.md) and
+  [`docs/adr/ADR-012-returns-refunds-credit-notes.md`](../adr/ADR-012-returns-refunds-credit-notes.md).
+  Data-preserving in the ordinary sense — real rows already existed
+  (`commerce.orders`: 545, `commerce.order_items`: 546,
+  `commerce.refunds`: 78, `finance.invoices`: 545,
+  `commerce.fulfillments`: 243 at authoring time) — round-tripped
+  UP -> DOWN -> UP with row counts identical throughout, and `prisma
+migrate diff` against a fresh shadow database confirming zero drift in
+  both directions (live vs. shadow, shadow vs. `schema.prisma`). A real
+  schema-authoring bug was caught this way: `prisma format` kept
+  silently reintroducing a `commerce -> finance` FK via a stray
+  `ReturnRequest.creditNotes` back-relation this schema's own
+  unenforced-cross-schema convention rules out — see the migration
+  file's own header comment and `return-erd.md`'s "Key design
+  decisions" for the fix.
 
 This is **not** full coverage of blueprint §57's eventual table list. See
 ["Deliberately out of scope"](#deliberately-out-of-scope) below for exactly
@@ -279,6 +357,52 @@ real local PostgreSQL:
   `payments`/`refunds` shape (0 rows either way), so the round trip is
   reproducible regardless of how many times it repeats. See
   [`payment-erd.md`](./payment-erd.md)'s own "Migration" section.
+- Phase 009: the order/fulfillment/shipment addition to `commerce` plus
+  the invoice addition to `finance` (6 new enums, 9 new tables,
+  replacing Phase 003's placeholder `Order`/`OrderItem`/
+  `OrderStatusHistory`/`Invoice`/`InvoiceLine`), round-tripped once — up
+  → down → up — with `prisma migrate diff` confirming zero drift at
+  every step and `catalog.products`/`inventory.warehouses`/
+  `commerce.carts`/`commerce.checkout_sessions`/`identity.users`/
+  `commerce.payment_intents`/`commerce.payment_transactions` row counts
+  confirmed intact throughout. The rollback restores the exact Phase 003
+  placeholder `orders`/`invoices` shape (0 rows either way), so the
+  round trip is reproducible regardless of how many times it repeats.
+  See [`order-erd.md`](./order-erd.md)'s own "Migration" section.
+- Phase 010: the promotion/coupon engine addition to `marketing` plus
+  the `order_promotions` snapshot addition to `commerce` (6 new enums,
+  5 new tables, replacing Phase 003's placeholder `Coupon`/`Promotion`/
+  `CouponRedemption`/`PromotionProduct`), round-tripped **twice** — up →
+  down → up, repeated a second time after an unrelated environment
+  rebuild — with `prisma migrate diff` confirming zero drift at every
+  step and `catalog.products`/`inventory.warehouses`/`commerce.carts`/
+  `commerce.checkout_sessions`/`commerce.orders`/payment intent/
+  transaction row counts confirmed intact throughout both rounds. The
+  rollback restores the exact Phase 003 placeholder `coupons`/
+  `promotions`/`coupon_redemptions`/`promotion_products` shape (0 rows
+  either way). See [`promotion-erd.md`](./promotion-erd.md)'s own
+  "Migration" section.
+- Phase 011: purely additive hardening on `commerce`
+  (`fulfillments.idempotency_key`, three `orders` indexes,
+  `shipments.tracking_number` UNIQUE) — no table drops, nothing to
+  replace. Round-tripped — up → down → up — against the live dev
+  database with real accumulated data (440 `commerce.orders`, 189
+  `commerce.fulfillments`, 89 `commerce.shipments` at round-trip time),
+  row counts confirmed identical before rollback, after rollback, and
+  after reapplying; `prisma migrate status` reported "up to date" after.
+  See [`order-erd.md`](./order-erd.md)'s own "Migration" section.
+- Phase 012: purely additive (`commerce.return_requests`/`return_items`/
+  `return_status_history`, `commerce.refunds.return_request_id` +
+  `commerce.refund_lines`, `finance.credit_notes`/`credit_note_lines`)
+  — no table drops, nothing to replace. Round-tripped — up -> down -> up
+  — against the live dev database with real accumulated data
+  (`commerce.orders`: 545, `commerce.order_items`: 546,
+  `commerce.refunds`: 78, `finance.invoices`: 545,
+  `commerce.fulfillments`: 243 at authoring time), row counts confirmed
+  identical throughout, and `prisma migrate diff` against a fresh shadow
+  database confirming zero drift in both directions (live vs. shadow,
+  shadow vs. `schema.prisma`) — not merely a syntax check. See
+  [`return-erd.md`](./return-erd.md)'s own "Migration" section.
 
 ## Seeding
 
@@ -287,8 +411,8 @@ pnpm --filter @iecp/database seed
 ```
 
 `prisma/seed.ts` walks one coherent slice through every schema — an admin
-user and a demo customer (identity/customer), 43 real RBAC permissions
-across identity/catalog/inventory/payment with 10 roles including a
+user and a demo customer (identity/customer), 57 real RBAC permissions
+across identity/catalog/inventory/payment/order with 12 roles including a
 deny-override (identity), three products including two
 priced/published/stocked SKUs — one with a catalog-level discount
 (catalog/finance), two warehouses/three locations with real stock, two
@@ -298,15 +422,27 @@ cart + a guest cart + a checkout-ready fixture with a real reservation + an
 expired checkout (commerce, Phase 007), a ZarinPal payment provider + three
 payment-intent chains covering a verified success with a partial refund, a
 verified-but-mismatched failure, and an unresolved reconciliation finding
-(commerce, Phase 008), a home page/menu/FAQ (cms), notification templates +
-the demo customer's channel preferences (notification), and a feature flag
-+ two settings (system). Idempotent throughout (`upsert`, keyed on each
-model's real unique constraint) — safe to run against a freshly-migrated
-database or one that already has this data. Verified idempotent (ran
-repeatedly across Phases 006-008, row counts unchanged) and verified
-runnable under `iecp_app` alone — the seed only needs DML, confirming the
-least-privilege role is sufficient for real application-style writes, not
-just raw `psql`.
+(commerce, Phase 008), four order fixtures covering paid/unpaid/cancelled/
+fulfilled — including a real DELIVERED fulfillment + shipment + tracking
+history and three issued invoices (commerce/finance, Phase 009), three
+promotions (percentage/fixed-amount/automatic-free-shipping) and five
+coupons covering active/expired/future/single-use fixtures, two new
+RBAC roles (`promotion_manager`/`promotion_editor`) (marketing, Phase
+010), a home page/menu/FAQ (cms), notification templates + the demo
+customer's channel preferences (notification), a feature flag + two
+settings (system), two full-lifecycle COMPLETED return fixtures against
+the FULFILLED order — one REFUND-resolution with a real `Refund` +
+`RefundLine`, one CREDIT_NOTE-resolution with a real ISSUED
+`CreditNote` — plus 9 new `return.*`/`credit_note.*` permissions and two
+new RBAC roles (`returns_manager`/`returns_clerk`) (commerce/finance,
+Phase 012). Idempotent throughout (`upsert`, keyed on each
+model's real unique constraint, or a `findUnique`-then-create guard
+where no natural unique key exists) — safe to run against a
+freshly-migrated database or one that already has this data. Verified
+idempotent (ran repeatedly across Phases 006-012, row counts unchanged)
+and verified runnable under `iecp_app`
+alone — the seed only needs DML, confirming the least-privilege role is
+sufficient for real application-style writes, not just raw `psql`.
 
 ## Backup/restore
 

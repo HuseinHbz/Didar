@@ -14,7 +14,6 @@ import {
 } from '../domain/ports/cart.repository.port';
 import { CartConsolidationRules } from '../domain/services/cart-consolidation-rules';
 import { CartQuantityRules } from '../domain/services/cart-quantity-rules';
-import { DiscountCalculator } from '../domain/services/discount-calculator';
 
 import { CartPricingService } from './cart-pricing.service';
 
@@ -222,10 +221,8 @@ export class CartService {
     const {
       couponId,
       code: resolvedCode,
-      rule,
-    } = await this.pricing.resolveCouponRule(code, cart.cart.customerId);
-    const subtotal = cart.items.reduce((sum, item) => sum + item.lineSubtotal, 0n);
-    const discount = DiscountCalculator.calculateTotalDiscount(subtotal, rule);
+      discount,
+    } = await this.pricing.previewCouponDiscount(code, cart.items, cart.cart.customerId);
     await this.carts.applyCoupon(cart.cart.id, {
       couponId,
       code: resolvedCode,
@@ -272,15 +269,12 @@ export class CartService {
 
   async price(cartId: string, actor: CartActor) {
     const cart = await this.getById(cartId, actor);
-    const couponRule = cart.coupon
-      ? ((
-          await this.pricing
-            .resolveCouponRule(cart.coupon.code, cart.cart.customerId)
-            .catch(() => null)
-        )?.rule ?? null)
-      : null;
     const shippingCost = cart.shippingSelection?.estimatedCost ?? 0n;
-    const resolution = await this.pricing.resolve(cart.items, couponRule, shippingCost);
+    const resolution = await this.pricing.resolve(
+      cart.items,
+      { customerId: cart.cart.customerId, couponCode: cart.coupon?.code ?? null },
+      shippingCost,
+    );
     await this.carts.recordPriceSnapshot(cart.cart.id, {
       currency: cart.cart.currency,
       subtotal: resolution.subtotal,

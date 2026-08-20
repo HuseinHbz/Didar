@@ -34,6 +34,12 @@ export interface CheckoutSessionRepositoryPort {
    * decision 3). */
   listExpirable(now: Date): Promise<CheckoutSession[]>;
 
+  /** Every `CONVERTED` session updated since `since` — reserved for
+   * Phase 009's `order_conversion` sweep (ADR-009 decision 4), the
+   * reliability backstop for a customer who never returns to trigger a
+   * synchronous conversion after paying. */
+  listConvertedSince(since: Date): Promise<CheckoutSession[]>;
+
   /** Idempotent on `idempotencyKey` — a retried call with the same key
    * returns the original session instead of creating a second one (the
    * brief's own explicit "do not create duplicate checkout session"). */

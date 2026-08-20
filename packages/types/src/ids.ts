@@ -149,3 +149,54 @@ export const asPaymentCallbackId = brandedId<'PaymentCallbackId'>('PaymentCallba
 export const asRefundId = brandedId<'RefundId'>('RefundId').as;
 export const asReconciliationRecordId =
   brandedId<'ReconciliationRecordId'>('ReconciliationRecordId').as;
+// Phase 009 — order/invoice/fulfillment/shipment (see docs/adr/ADR-009-order-fulfillment.md).
+export type OrderItemId = Brand<string, 'OrderItemId'>;
+export type OrderStatusHistoryId = Brand<string, 'OrderStatusHistoryId'>;
+export type InvoiceId = Brand<string, 'InvoiceId'>;
+export type InvoiceItemId = Brand<string, 'InvoiceItemId'>;
+export type FulfillmentId = Brand<string, 'FulfillmentId'>;
+export type FulfillmentItemId = Brand<string, 'FulfillmentItemId'>;
+export type ShipmentId = Brand<string, 'ShipmentId'>;
+export type ShipmentEventId = Brand<string, 'ShipmentEventId'>;
+
+export const asOrderItemId = brandedId<'OrderItemId'>('OrderItemId').as;
+export const asOrderStatusHistoryId = brandedId<'OrderStatusHistoryId'>('OrderStatusHistoryId').as;
+export const asInvoiceId = brandedId<'InvoiceId'>('InvoiceId').as;
+export const asInvoiceItemId = brandedId<'InvoiceItemId'>('InvoiceItemId').as;
+export const asFulfillmentId = brandedId<'FulfillmentId'>('FulfillmentId').as;
+export const asFulfillmentItemId = brandedId<'FulfillmentItemId'>('FulfillmentItemId').as;
+export const asShipmentId = brandedId<'ShipmentId'>('ShipmentId').as;
+export const asShipmentEventId = brandedId<'ShipmentEventId'>('ShipmentEventId').as;
+
+// Phase 010 — promotion/discount/coupon engine (see
+// docs/adr/ADR-010-promotion-engine.md).
+export type PromotionId = Brand<string, 'PromotionId'>;
+export type PromotionRuleId = Brand<string, 'PromotionRuleId'>;
+export type PromotionTargetId = Brand<string, 'PromotionTargetId'>;
+export type CouponId = Brand<string, 'CouponId'>;
+export type CouponRedemptionId = Brand<string, 'CouponRedemptionId'>;
+export type OrderPromotionId = Brand<string, 'OrderPromotionId'>;
+
+export const asPromotionId = brandedId<'PromotionId'>('PromotionId').as;
+export const asPromotionRuleId = brandedId<'PromotionRuleId'>('PromotionRuleId').as;
+export const asPromotionTargetId = brandedId<'PromotionTargetId'>('PromotionTargetId').as;
+export const asCouponId = brandedId<'CouponId'>('CouponId').as;
+export const asCouponRedemptionId = brandedId<'CouponRedemptionId'>('CouponRedemptionId').as;
+export const asOrderPromotionId = brandedId<'OrderPromotionId'>('OrderPromotionId').as;
+
+// Phase 012 — returns/refunds/credit notes (see
+// docs/adr/ADR-012-returns-refunds-credit-notes.md).
+export type ReturnRequestId = Brand<string, 'ReturnRequestId'>;
+export type ReturnItemId = Brand<string, 'ReturnItemId'>;
+export type ReturnStatusHistoryId = Brand<string, 'ReturnStatusHistoryId'>;
+export type RefundLineId = Brand<string, 'RefundLineId'>;
+export type CreditNoteId = Brand<string, 'CreditNoteId'>;
+export type CreditNoteLineId = Brand<string, 'CreditNoteLineId'>;
+
+export const asReturnRequestId = brandedId<'ReturnRequestId'>('ReturnRequestId').as;
+export const asReturnItemId = brandedId<'ReturnItemId'>('ReturnItemId').as;
+export const asReturnStatusHistoryId =
+  brandedId<'ReturnStatusHistoryId'>('ReturnStatusHistoryId').as;
+export const asRefundLineId = brandedId<'RefundLineId'>('RefundLineId').as;
+export const asCreditNoteId = brandedId<'CreditNoteId'>('CreditNoteId').as;
+export const asCreditNoteLineId = brandedId<'CreditNoteLineId'>('CreditNoteLineId').as;

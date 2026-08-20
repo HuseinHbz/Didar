@@ -50,6 +50,13 @@ graph LR
     commerce -. "cart_coupons.coupon_id" .-> marketing
     customer -. "payment_intents.customer_id (Phase 008)" .-> commerce
     identity -. "refunds.requested_by (Phase 008)" .-> commerce
+    inventory -. "fulfillments.warehouse_id (Phase 009)" .-> commerce
+    identity -. "order_status_history.changed_by (Phase 009)" .-> commerce
+    customer -. "invoices.customer_id (Phase 009)" .-> finance
+    inventory -. "return_requests.warehouse_id/location_id (Phase 012)" .-> commerce
+    identity -. "return_status_history.changed_by (Phase 012)" .-> commerce
+    commerce -. "credit_notes.order_id/return_request_id (Phase 012)" .-> finance
+    customer -. "credit_notes.customer_id (Phase 012)" .-> finance
     customer -. "notification_preferences.customer_id" .-> notification
     customer -. "notification_logs.customer_id" .-> notification
     customer -. "analytics_events.customer_id" .-> analytics
@@ -486,6 +493,10 @@ a database `CHECK` constraint — Prisma has no `@@check(...)` support (see
 
 ## commerce
 
+No Phase 003 placeholder remains anywhere in this schema as of Phase
+009 — every table below is real, current, and documented in full
+elsewhere; this section is only the abbreviated cross-phase summary.
+
 Phase 007 (see [`cart-checkout-erd.md`](./cart-checkout-erd.md) for the
 full diagram with every column and design rationale) extended `carts`/
 `cart_items` (`session_token` renamed `guest_token`, `configuration_hash`/
@@ -494,26 +505,42 @@ full diagram with every column and design rationale) extended `carts`/
 `shipping_methods`, `cart_shipping_selections`, and the entire
 `checkout_sessions`/`checkout_addresses`/`checkout_totals`/
 `checkout_validations`/`checkout_reservations` subtree. Phase 008 (see
-[`payment-erd.md`](./payment-erd.md) for the full diagram) then dropped
-the placeholder `payments`/`refunds`/`PaymentStatus`/`RefundStatus` shown
-below and replaced them with a real 7-table payment orchestration subtree
+[`payment-erd.md`](./payment-erd.md) for the full diagram) dropped the
+Phase 003 placeholder `payments`/`refunds`/`PaymentStatus`/`RefundStatus`
+and replaced them with a real 7-table payment orchestration subtree
 (`payment_providers`, `payment_intents`, `payment_attempts`,
 `payment_transactions`, `payment_callbacks`, `refunds`,
-`reconciliation_records`) keyed off `checkout_sessions`, not `orders`. The
-summary below is intentionally abbreviated (it still shows the Phase 003
-placeholder `payments`/`refunds` shape for historical continuity with the
-diagram beneath it, and omits every Phase 007/008 addition entirely — see
-`cart-checkout-erd.md` and `payment-erd.md` for those); both are the
-source of truth for their half of this schema going forward, same
-convention `inventory-erd.md` set above.
+`reconciliation_records`) keyed off `checkout_sessions`, not `orders`.
+Phase 009 (see [`order-erd.md`](./order-erd.md) for the full diagram)
+then dropped the last Phase 003 placeholder in this schema —
+`orders`/`order_items`/`order_status_history` — and replaced it with the
+real subtree: `orders`/`order_items`/`order_status_history` (now keyed
+off `checkout_sessions`/`payment_intents`, both real FKs) plus
+`fulfillments`/`fulfillment_items`/`shipments`/`shipment_events`. Phase
+010 (see [`promotion-erd.md`](./promotion-erd.md)) added one more table
+here — `order_promotions`, an immutable per-order snapshot of every
+promotion/coupon that discounted it, `order_id`-FK'd to `orders` with
+unenforced pointers back into `marketing` for the promotion/coupon
+identity (the same "order ≠ live product" principle `order_items`
+already established). Phase 012 (see [`return-erd.md`](./return-erd.md)
+for the full diagram) added the `return_requests`/`return_items`/
+`return_status_history` subtree — purely additive, no drops — plus a
+nullable, real-FK `return_request_id` column on the existing `refunds`
+table and a new `refund_lines` child table (the per-`ReturnItem`
+breakdown of one refund). Every existing `refunds` column and row is
+untouched; there remains exactly one refund pathway
+(`RefundService.requestRefund()`/`processRefund()`), extended, never
+duplicated. The diagram below is intentionally minimal — only
+`carts`/`cart_items`, the one part of this schema simple enough to still
+show inline — see
+`cart-checkout-erd.md`/`payment-erd.md`/`order-erd.md`/`promotion-erd.md`/
+`return-erd.md` for everything else; all five are the source of truth for
+their share of this schema going forward, same convention
+`inventory-erd.md` set above.
 
 ```mermaid
 erDiagram
     carts ||--o{ cart_items : contains
-    orders ||--o{ order_items : contains
-    orders ||--o{ order_status_history : has
-    orders ||--o{ payments : has
-    payments ||--o{ refunds : has
 
     carts {
         uuid id PK
@@ -530,93 +557,51 @@ erDiagram
         bigint unit_price_snapshot
         string configuration_hash "default ''"
     }
-    orders {
-        uuid id PK
-        string order_number UK
-        uuid customer_id "-> customer.customers.id, unenforced"
-        enum status "17-state lifecycle, see README"
-        bigint subtotal
-        bigint grand_total
-        json shipping_address_snapshot
-    }
-    order_items {
-        uuid id PK
-        uuid order_id FK
-        uuid product_sku_id "nullable, -> catalog.product_skus.id, unenforced"
-        string sku_snapshot
-        string name_snapshot
-        bigint unit_price_snapshot
-        int quantity
-    }
-    order_status_history {
-        uuid id PK
-        uuid order_id FK
-        enum from_status "nullable"
-        enum to_status
-        uuid changed_by "nullable, -> identity.users.id, unenforced"
-    }
-    payments {
-        uuid id PK
-        uuid order_id FK
-        string provider "adapter name, e.g. zarinpal"
-        enum status "PENDING|PAID|FAILED|REFUNDED"
-        bigint amount
-        string idempotency_key UK "nullable"
-    }
-    refunds {
-        uuid id PK
-        uuid payment_id FK
-        bigint amount
-        enum status "PENDING|APPROVED|REJECTED|COMPLETED"
-    }
 ```
 
-`order_items` snapshots `sku`/`name`/`unit_price` at creation — an order's
-totals never change because the live product changed later
-("order ≠ live product", see [`README.md`](./README.md#conventions)).
-
-**The `payments`/`refunds` tables shown above are the Phase 003 placeholder
-shape and no longer exist** — Phase 008 dropped them and replaced them with
-a real 7-table payment orchestration subtree keyed off `checkout_sessions`
-rather than the non-existent `Order` flow. See
-[`payment-erd.md`](./payment-erd.md) for the current, real shape; kept here
-unedited only so this diagram still matches what earlier phases' own
-diagrams referenced at the time they were written.
+`order_items` (see [`order-erd.md`](./order-erd.md)) snapshots `sku`/
+`name`/`unit_price` at creation — an order's totals never change because
+the live product changed later ("order ≠ live product", see
+[`README.md`](./README.md#conventions)).
 
 ## marketing
 
+No Phase 003 placeholder remains in this schema as of Phase 010 — the
+old ruleless, all-or-nothing `Coupon`/`Promotion`/`CouponRedemption`/
+`PromotionProduct` subtree was dropped and replaced with the real
+promotion/discount/coupon engine. See
+[`promotion-erd.md`](./promotion-erd.md) for the full diagram with every
+column, enum, and design rationale; this section is only the abbreviated
+cross-phase summary, same convention `commerce`'s own section below
+uses.
+
 ```mermaid
 erDiagram
+    promotions ||--o{ promotion_rules : has
+    promotions ||--o{ promotion_targets : has
+    promotions ||--o{ coupons : gates
     coupons ||--o{ coupon_redemptions : has
-    promotions ||--o{ promotion_products : scopes
 
-    coupons {
-        uuid id PK
-        string code UK
-        enum type "PERCENTAGE|FIXED_AMOUNT"
-        bigint value "basis points or Rial, per type"
-        int usage_limit "nullable"
-        int per_user_limit "nullable"
-        boolean is_active
-    }
-    coupon_redemptions {
-        uuid id PK
-        uuid coupon_id FK
-        uuid order_id "-> commerce.orders.id, unenforced"
-        uuid customer_id "-> customer.customers.id, unenforced"
-        bigint discount_amount
-    }
     promotions {
         uuid id PK
         string name
-        enum discount_type "PERCENTAGE|FIXED_AMOUNT"
-        bigint discount_value
-        timestamp starts_at
-        timestamp ends_at
+        enum status "DRAFT|SCHEDULED|ACTIVE|PAUSED|EXPIRED|ARCHIVED"
+        enum discount_type "PERCENTAGE|FIXED_AMOUNT|FIXED_PRICE|FREE_SHIPPING|BUY_X_GET_Y|BUNDLE_PRICE"
+        boolean requires_coupon "false = automatic, no code needed"
     }
-    promotion_products {
-        uuid promotion_id "PK, FK"
-        uuid product_id PK "-> catalog.products.id, unenforced"
+    coupons {
+        uuid id PK
+        uuid promotion_id FK
+        string code UK "normalized: trim+uppercase"
+        enum status "ACTIVE|PAUSED|EXPIRED|DISABLED"
+    }
+    coupon_redemptions {
+        uuid id PK
+        uuid promotion_id FK
+        uuid coupon_id "FK, nullable — null for automatic promotions"
+        uuid checkout_session_id "-> commerce.checkout_sessions.id, unenforced"
+        enum status "RESERVED|REDEEMED|RELEASED"
+        bigint discount_amount
     }
     campaigns {
         uuid id PK
@@ -626,10 +611,8 @@ erDiagram
     }
 ```
 
-`promotions` is a basic all-or-nothing discount scoped to specific products —
-the full condition/rule engine (segment + category + cart-total conditions)
-is deliberately out of scope for this pass. `campaigns` has no child tables
-yet (no send-log — that's `notification.notification_logs`, correlated by
+`campaigns` is untouched by Phase 010 — no child tables yet (no
+send-log — that's `notification.notification_logs`, correlated by
 convention, not FK).
 
 ## cms
@@ -691,10 +674,26 @@ have no parent table; each is independently admin-managed.
 
 ## finance
 
+Phase 009 (see [`order-erd.md`](./order-erd.md) for the full diagram)
+dropped the Phase 003 placeholder `invoices`/`invoice_lines` shown in
+earlier revisions of this document and replaced them with the real
+`invoices`/`invoice_items` subtree (`invoice_items` renamed from
+`invoice_lines`) — real `status`/`customer_id`/`issued_at`/`voided_at`
+fields, `order_id` now unique (one invoice per order), a server-generated
+`invoice_number` drawn from a real Postgres sequence. Phase 012 (see
+[`return-erd.md`](./return-erd.md)) added `credit_notes`/
+`credit_note_lines` — a real, minimal credit-note lifecycle
+(`DRAFT -> ISSUED -> APPLIED`, `VOID`), `invoice_id` a real enforced FK
+(both in `finance`), `order_id`/`return_request_id`/`customer_id` plain
+unenforced `uuid` columns matching `invoices.order_id`'s own convention.
+`Invoice` itself is never mutated when a `CreditNote` is issued against
+it — no column on `invoices` changes; the two rows together represent
+the adjustment. Only `product_prices`/`price_history` (Phase 005,
+unrelated to invoicing) are still shown inline below; see
+`order-erd.md`/`return-erd.md` for the invoice/credit-note subtrees.
+
 ```mermaid
 erDiagram
-    invoices ||--o{ invoice_lines : has
-
     product_prices {
         uuid id PK
         uuid product_sku_id UK "-> catalog.product_skus.id, unenforced"
@@ -710,20 +709,6 @@ erDiagram
         bigint old_price "nullable"
         bigint new_price
         uuid changed_by "nullable, -> identity.users.id, unenforced"
-    }
-    invoices {
-        uuid id PK
-        uuid order_id UK "-> commerce.orders.id, unenforced"
-        string invoice_number UK
-        bigint grand_total
-        string pdf_url "nullable"
-    }
-    invoice_lines {
-        uuid id PK
-        uuid invoice_id FK
-        string description
-        int quantity
-        bigint unit_price
     }
 ```
 

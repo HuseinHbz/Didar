@@ -1,16 +1,17 @@
 import { prisma } from '@iecp/database';
 import { asProductSkuId } from '@iecp/types';
-import { Inject, Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 
 import { SkusService } from '../../catalog/application/skus.service';
+import { PromotionResolutionService } from '../../promotion/application/promotion-resolution.service';
+import { CouponNotApplicableError } from '../../promotion/domain/errors/promotion-domain.errors';
 import type { CartItem } from '../domain/entities/cart-item.entity';
 import type { PriceLineBreakdown } from '../domain/entities/price-breakdown.types';
-import { COUPON_LOOKUP_PORT, type CouponLookupPort } from '../domain/ports/coupon-lookup.port';
 import {
   SHIPPING_METHOD_REPOSITORY,
   type ShippingMethodRepositoryPort,
 } from '../domain/ports/shipping-method.repository.port';
-import { CouponNotApplicableError, type CouponRule } from '../domain/services/discount-calculator';
+import type { PricingAdjustmentInput } from '../domain/services/discount-calculator';
 import { PricingResolver, type PricingResolution } from '../domain/services/pricing-resolver';
 import { ShippingCalculator } from '../domain/services/shipping-calculator';
 
@@ -24,22 +25,33 @@ const DEFAULT_MAX_QUANTITY_SETTING_KEY = 'cart.max_quantity_per_line';
 const FALLBACK_DEFAULT_TAX_RATE_BASIS_POINTS = 0;
 const FALLBACK_MAX_QUANTITY_PER_LINE = 20;
 
+export interface AppliedPromotionSnapshot {
+  promotionId: string;
+  promotionName: string;
+  couponId: string | null;
+  couponCode: string | null;
+  discountType: string;
+  discountAmount: string;
+  affectedProductSkuIds: string[];
+}
+
 /**
  * The application-layer orchestration around `PricingResolver` (pure
- * domain logic) — reads the configurable inputs (tax default, coupon
- * rules, shipping methods) from real storage and hands the resolver
- * exactly what the brief's `pricing_engine.inputs` list asks for, never
- * hardcoded. Named `CartPricingService` (not `PricingService`) to avoid
- * colliding with `modules/catalog`'s own `PricingService` when both are
- * injected in this module.
+ * domain logic) — reads the configurable inputs (tax default, shipping
+ * methods) from real storage and resolves promotions/coupons via the
+ * `promotion` module's `PromotionResolutionService` (Phase 010, ADR-010
+ * decision 7 — extends this class in place, never duplicates the
+ * pricing pipeline). Named `CartPricingService` (not `PricingService`) to
+ * avoid colliding with `modules/catalog`'s own `PricingService` when both
+ * are injected in this module.
  */
 @Injectable()
 export class CartPricingService {
   constructor(
     private readonly skus: SkusService,
-    @Inject(COUPON_LOOKUP_PORT) private readonly coupons: CouponLookupPort,
     @Inject(SHIPPING_METHOD_REPOSITORY)
     private readonly shippingMethods: ShippingMethodRepositoryPort,
+    private readonly promotionResolution: PromotionResolutionService,
   ) {}
 
   async getDefaultTaxRateBasisPoints(): Promise<number> {
@@ -58,43 +70,102 @@ export class CartPricingService {
     return Number(setting.value);
   }
 
-  /** Resolves a coupon code into `CouponRule` input, enforcing usage
-   * limits (`usageLimit`/`perUserLimit`) and the validity window
-   * (`startsAt`/`endsAt`) — the parts of "is this coupon actually usable
-   * right now" `DiscountCalculator` itself has no way to check (it only
-   * knows the amount math). */
-  async resolveCouponRule(
+  /** `CartService.applyCoupon()`'s own preview — resolves just the named
+   * code's promotion against the current cart to compute the discount
+   * cached on `CartCoupon.resolvedDiscount` at apply-time. Re-validated
+   * (never blindly re-trusted) on every subsequent `price()` call via
+   * `resolve()` below (ADR-010 decision 7), same as Phase 007's original
+   * coupon flow. */
+  async previewCouponDiscount(
     code: string,
+    items: readonly CartItem[],
     customerId: string | null,
-  ): Promise<{ couponId: string; code: string; rule: CouponRule }> {
-    const coupon = await this.coupons.findByCode(code);
-    if (!coupon?.isActive) {
-      throw new CouponNotApplicableError(`Coupon "${code}" is not active`);
-    }
-    const now = new Date();
-    if (coupon.startsAt && now < coupon.startsAt) {
-      throw new CouponNotApplicableError(`Coupon "${code}" is not yet valid`);
-    }
-    if (coupon.endsAt && now > coupon.endsAt) {
-      throw new CouponNotApplicableError(`Coupon "${code}" has expired`);
-    }
-    if (coupon.perUserLimit !== null) {
-      const redemptions = await this.coupons.countRedemptionsByCustomer(coupon.id, customerId);
-      if (redemptions >= coupon.perUserLimit) {
-        throw new CouponNotApplicableError(
-          `Coupon "${code}" usage limit reached for this customer`,
-        );
-      }
+  ): Promise<{ couponId: string; code: string; discount: bigint }> {
+    const lineInputs = items.map((item) => ({
+      productSkuId: item.productSkuId,
+      quantity: item.quantity,
+      lineSubtotal: item.lineSubtotal,
+    }));
+    const resolution = await this.promotionResolution.resolveForCart({
+      items: lineInputs,
+      customerId,
+      couponCode: code,
+    });
+    const accepted = resolution.accepted.find(
+      (adjustment) =>
+        adjustment.couponCode !== null && adjustment.couponCode === code.trim().toUpperCase(),
+    );
+    if (!accepted?.couponId) {
+      throw new CouponNotApplicableError(`Coupon "${code}" is not applicable`);
     }
     return {
-      couponId: coupon.id,
-      code: coupon.code,
-      rule: {
-        type: coupon.type,
-        value: coupon.value,
-        minOrderAmount: coupon.minOrderAmount,
-        maxDiscountAmount: coupon.maxDiscountAmount,
-      },
+      couponId: accepted.couponId,
+      code: accepted.couponCode ?? code,
+      discount: accepted.discountAmount,
+    };
+  }
+
+  /** The one place cart/checkout lines get turned into a full
+   * `PricingResolution` — reads each SKU's `taxRateBasisPoints` fresh
+   * (never trusts the cart's own snapshot for tax purposes, since a SKU's
+   * tax configuration can change after it was added to a cart), and
+   * resolves every promotion/coupon adjustment live via the `promotion`
+   * module (never a stale cached amount). */
+  async resolve(
+    items: readonly CartItem[],
+    promotionContext: { customerId: string | null; couponCode: string | null },
+    shippingCost: bigint,
+  ): Promise<PricingResolution & { appliedPromotions: AppliedPromotionSnapshot[] }> {
+    const defaultTaxRateBasisPoints = await this.getDefaultTaxRateBasisPoints();
+    const skuTaxRates = new Map<string, number | null>();
+    for (const item of items) {
+      if (!skuTaxRates.has(item.productSkuId)) {
+        const sku = await this.skus.get(asProductSkuId(item.productSkuId));
+        skuTaxRates.set(item.productSkuId, sku.taxRateBasisPoints);
+      }
+    }
+
+    const promotionResolution = await this.promotionResolution.resolveForCart({
+      items: items.map((item) => ({
+        productSkuId: item.productSkuId,
+        quantity: item.quantity,
+        lineSubtotal: item.lineSubtotal,
+      })),
+      customerId: promotionContext.customerId,
+      couponCode: promotionContext.couponCode,
+    });
+
+    const adjustments: PricingAdjustmentInput[] = promotionResolution.accepted
+      .filter((adjustment) => adjustment.discountAmount > 0n)
+      .map((adjustment) => ({
+        scope: { productSkuIds: [...adjustment.perLineDiscount.keys()] },
+        amount: adjustment.discountAmount,
+      }));
+
+    const resolution = PricingResolver.resolve({
+      lines: items.map((item) => ({
+        productSkuId: item.productSkuId,
+        quantity: item.quantity,
+        basePrice: item.unitPriceSnapshot,
+        taxRateBasisPoints: skuTaxRates.get(item.productSkuId) ?? null,
+      })),
+      adjustments,
+      freeShipping: promotionResolution.freeShipping,
+      defaultTaxRateBasisPoints,
+      shippingCost,
+    });
+
+    return {
+      ...resolution,
+      appliedPromotions: promotionResolution.accepted.map((adjustment) => ({
+        promotionId: adjustment.promotionId,
+        promotionName: adjustment.promotionName,
+        couponId: adjustment.couponId,
+        couponCode: adjustment.couponCode,
+        discountType: adjustment.discountType,
+        discountAmount: adjustment.discountAmount.toString(),
+        affectedProductSkuIds: [...adjustment.perLineDiscount.keys()],
+      })),
     };
   }
 
@@ -105,37 +176,6 @@ export class CartPricingService {
   ): Promise<bigint> {
     const methods = await this.shippingMethods.listActive();
     return ShippingCalculator.resolveCost(methods, shippingMethodId, destination, subtotal);
-  }
-
-  /** The one place cart/checkout lines get turned into a full
-   * `PricingResolution` — reads each SKU's `taxRateBasisPoints` fresh
-   * (never trusts the cart's own snapshot for tax purposes, since a SKU's
-   * tax configuration can change after it was added to a cart). */
-  async resolve(
-    items: readonly CartItem[],
-    coupon: CouponRule | null,
-    shippingCost: bigint,
-  ): Promise<PricingResolution> {
-    const defaultTaxRateBasisPoints = await this.getDefaultTaxRateBasisPoints();
-    const skuTaxRates = new Map<string, number | null>();
-    for (const item of items) {
-      if (!skuTaxRates.has(item.productSkuId)) {
-        const sku = await this.skus.get(asProductSkuId(item.productSkuId));
-        skuTaxRates.set(item.productSkuId, sku.taxRateBasisPoints);
-      }
-    }
-
-    return PricingResolver.resolve({
-      lines: items.map((item) => ({
-        productSkuId: item.productSkuId,
-        quantity: item.quantity,
-        basePrice: item.unitPriceSnapshot,
-        taxRateBasisPoints: skuTaxRates.get(item.productSkuId) ?? null,
-      })),
-      coupon,
-      defaultTaxRateBasisPoints,
-      shippingCost,
-    });
   }
 
   toJsonBreakdown(resolution: PricingResolution): {

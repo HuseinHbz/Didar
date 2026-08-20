@@ -55,6 +55,13 @@ export class PrismaCheckoutSessionRepository implements CheckoutSessionRepositor
     return rows.map(checkoutSessionToDomain);
   }
 
+  async listConvertedSince(since: Date): Promise<CheckoutSession[]> {
+    const rows = await prisma.checkoutSession.findMany({
+      where: { status: 'CONVERTED', updatedAt: { gte: since } },
+    });
+    return rows.map(checkoutSessionToDomain);
+  }
+
   /**
    * Idempotent even under raw concurrent duplicate submissions — not just
    * on a retried request one-at-a-time. `upsert()` alone is not enough:
