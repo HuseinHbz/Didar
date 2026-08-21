@@ -9,6 +9,7 @@ import { IdentityModule } from './modules/identity/identity.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { OrderModule } from './modules/order/order.module';
 import { PaymentModule } from './modules/payment/payment.module';
+import { ReturnModule } from './modules/return/return.module';
 
 /**
  * Root module. Deliberately thin: every domain gets its own module under
@@ -34,6 +35,10 @@ import { PaymentModule } from './modules/payment/payment.module';
  * composed from four prior modules at once (`cart-checkout`, `catalog`,
  * `inventory`, `payment` — `docs/adr/ADR-009-order-fulfillment.md`
  * decision 9), the deepest composition chain in this codebase so far.
+ * `return` (Phase 012) composes from `order`, `payment`, and `inventory`
+ * at once (`docs/adr/ADR-012-returns-refunds-credit-notes.md` decision
+ * 2/6) — never a second refund pathway, only the existing `RefundService`
+ * extended additively.
  */
 @Module({
   imports: [
@@ -45,6 +50,7 @@ import { PaymentModule } from './modules/payment/payment.module';
     CartCheckoutModule,
     PaymentModule,
     OrderModule,
+    ReturnModule,
   ],
 })
 export class AppModule {}

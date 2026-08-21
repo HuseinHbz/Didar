@@ -5,14 +5,23 @@ import type { RefundStatus } from '@iecp/types';
 import { Injectable } from '@nestjs/common';
 
 import type { Refund } from '../../domain/entities/refund.entity';
-import type { RefundRepositoryPort } from '../../domain/ports/refund.repository.port';
-import { refundToDomain } from '../payment.mapper';
+import type {
+  RefundRepositoryPort,
+  RefundWithLines,
+} from '../../domain/ports/refund.repository.port';
+import { refundLineToDomain, refundToDomain } from '../payment.mapper';
 
 @Injectable()
 export class PrismaRefundRepository implements RefundRepositoryPort {
   async findById(id: string): Promise<Refund | null> {
     const row = await prisma.refund.findUnique({ where: { id } });
     return row ? refundToDomain(row) : null;
+  }
+
+  async findByIdWithLines(id: string): Promise<RefundWithLines | null> {
+    const row = await prisma.refund.findUnique({ where: { id }, include: { lines: true } });
+    if (!row) return null;
+    return { refund: refundToDomain(row), lines: row.lines.map(refundLineToDomain) };
   }
 
   async findByIdempotencyKey(key: string): Promise<Refund | null> {
@@ -22,6 +31,11 @@ export class PrismaRefundRepository implements RefundRepositoryPort {
 
   async listByTransactionId(paymentTransactionId: string): Promise<Refund[]> {
     const rows = await prisma.refund.findMany({ where: { paymentTransactionId } });
+    return rows.map(refundToDomain);
+  }
+
+  async listByReturnRequestId(returnRequestId: string): Promise<Refund[]> {
+    const rows = await prisma.refund.findMany({ where: { returnRequestId } });
     return rows.map(refundToDomain);
   }
 
@@ -38,6 +52,13 @@ export class PrismaRefundRepository implements RefundRepositoryPort {
    * `PrismaPaymentIntentRepository.create()`. `RefundValidator
    * .assertRefundable()` must run before this is called; a request that
    * fails that check never reaches here.
+   *
+   * `returnRequestId`/`lines` (ADR-012 decision 8) are written as a
+   * nested create alongside the `Refund` row itself — Prisma only
+   * executes the nested `lines` write on the branch that actually
+   * inserts a new row, never on the no-op `update: {}` branch a
+   * duplicate-key retry lands on, so a retried call never doubles the
+   * `RefundLine` breakdown either.
    */
   async create(props: {
     paymentTransactionId: string;
@@ -45,6 +66,8 @@ export class PrismaRefundRepository implements RefundRepositoryPort {
     reason?: string | null;
     requestedBy?: string | null;
     idempotencyKey: string;
+    returnRequestId?: string | null;
+    lines?: readonly { returnItemId: string; amount: bigint }[];
   }): Promise<Refund> {
     try {
       const row = await prisma.refund.upsert({
@@ -56,6 +79,18 @@ export class PrismaRefundRepository implements RefundRepositoryPort {
           reason: props.reason ?? null,
           requestedBy: props.requestedBy ?? null,
           idempotencyKey: props.idempotencyKey,
+          returnRequestId: props.returnRequestId ?? null,
+          lines: props.lines?.length
+            ? {
+                createMany: {
+                  data: props.lines.map((line) => ({
+                    id: randomUUID(),
+                    returnItemId: line.returnItemId,
+                    amount: line.amount,
+                  })),
+                },
+              }
+            : undefined,
         },
         update: {},
       });

@@ -464,3 +464,62 @@ export type CouponStatus = (typeof COUPON_STATUSES)[number];
  * swept). Never deleted (ADR-010 decision 8). */
 export const REDEMPTION_STATUSES = ['RESERVED', 'REDEEMED', 'RELEASED'] as const;
 export type RedemptionStatus = (typeof REDEMPTION_STATUSES)[number];
+
+/**
+ * Return lifecycle (Phase 012 — see
+ * docs/adr/ADR-012-returns-refunds-credit-notes.md decision 1).
+ * `REJECTED` only reachable from `REQUESTED`/`APPROVED`; `CANCELLED`
+ * only from `REQUESTED`/`APPROVED`/`CUSTOMER_SHIPPING` — never once the
+ * warehouse has physically received the goods. `COMPLETED` is a derived
+ * fact, set only once the linked `Refund`/`CreditNote` actually settles.
+ */
+export const RETURN_STATUSES = [
+  'REQUESTED',
+  'APPROVED',
+  'CUSTOMER_SHIPPING',
+  'RECEIVED',
+  'INSPECTING',
+  'APPROVED_FOR_REFUND',
+  'REFUNDED',
+  'COMPLETED',
+  'REJECTED',
+  'CANCELLED',
+] as const;
+export type ReturnStatus = (typeof RETURN_STATUSES)[number];
+
+/** `ReturnRequest.reason` — the customer-supplied (or admin-recorded)
+ * reason category, never free-form beyond `OTHER` + `reasonNote`. */
+export const RETURN_REASONS = [
+  'DAMAGED',
+  'DEFECTIVE',
+  'WRONG_ITEM',
+  'NOT_AS_DESCRIBED',
+  'CHANGED_MIND',
+  'SIZE_FIT_ISSUE',
+  'OTHER',
+] as const;
+export type ReturnReason = (typeof RETURN_REASONS)[number];
+
+/** `ReturnRequest.resolution` — what the return settles into: a real
+ * refund through the one existing `RefundService` pathway, or a
+ * `CreditNote` (ADR-012 decision 7). No exchange/replacement resolution
+ * this phase. */
+export const RETURN_RESOLUTIONS = ['REFUND', 'CREDIT_NOTE'] as const;
+export type ReturnResolution = (typeof RETURN_RESOLUTIONS)[number];
+
+/** `ReturnItem.condition` — recorded at the `INSPECTING` step; never set
+ * before inspection has actually happened. */
+export const RETURN_ITEM_CONDITIONS = [
+  'UNOPENED',
+  'OPENED_UNUSED',
+  'USED',
+  'DAMAGED',
+  'DEFECTIVE',
+] as const;
+export type ReturnItemCondition = (typeof RETURN_ITEM_CONDITIONS)[number];
+
+/** Credit-note lifecycle (ADR-012 decision 7) — mirrors `InvoiceStatus`'s
+ * own shape. Never a historical-`Invoice` rewrite: `Invoice` +
+ * `CreditNote` together represent the adjustment. */
+export const CREDIT_NOTE_STATUSES = ['DRAFT', 'ISSUED', 'APPLIED', 'VOID'] as const;
+export type CreditNoteStatus = (typeof CREDIT_NOTE_STATUSES)[number];

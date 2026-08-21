@@ -119,11 +119,17 @@ multi-warehouse inventory/ledger/reservation module, Phase 007's
 cart/checkout/pricing-resolution/reservation-integration module,
 Phase 008's payment orchestration/Iranian gateway integration module,
 Phase 009's order/invoice/fulfillment module, Phase 010's promotion/
-discount/coupon engine, and Phase 011's order lifecycle/fulfillment/
+discount/coupon engine, Phase 011's order lifecycle/fulfillment/
 shipping hardening (concurrency fixes, server-derived order completion,
-dedicated delivery RBAC, idempotency, database-backed admin search) are
-done — see `CLAUDE.md`'s "Current status" for exactly what each does and
-doesn't include. Next up: the remaining Phase 1 domain modules.
+dedicated delivery RBAC, idempotency, database-backed admin search), and
+Phase 012's returns/refunds/credit-notes subsystem (eligibility gated on
+real fulfillment/delivery data, refund math derived only from immutable
+order-item snapshots, row-locked return-quantity invariant, restock
+exactly once and only after physical verification, server-generated
+credit-note numbering, exactly one refund pathway extended never
+duplicated) are done — see `CLAUDE.md`'s "Current status" for exactly
+what each does and doesn't include. Next up: the remaining Phase 1
+domain modules.
 
 ## License
 

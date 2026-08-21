@@ -183,3 +183,20 @@ export const asPromotionTargetId = brandedId<'PromotionTargetId'>('PromotionTarg
 export const asCouponId = brandedId<'CouponId'>('CouponId').as;
 export const asCouponRedemptionId = brandedId<'CouponRedemptionId'>('CouponRedemptionId').as;
 export const asOrderPromotionId = brandedId<'OrderPromotionId'>('OrderPromotionId').as;
+
+// Phase 012 — returns/refunds/credit notes (see
+// docs/adr/ADR-012-returns-refunds-credit-notes.md).
+export type ReturnRequestId = Brand<string, 'ReturnRequestId'>;
+export type ReturnItemId = Brand<string, 'ReturnItemId'>;
+export type ReturnStatusHistoryId = Brand<string, 'ReturnStatusHistoryId'>;
+export type RefundLineId = Brand<string, 'RefundLineId'>;
+export type CreditNoteId = Brand<string, 'CreditNoteId'>;
+export type CreditNoteLineId = Brand<string, 'CreditNoteLineId'>;
+
+export const asReturnRequestId = brandedId<'ReturnRequestId'>('ReturnRequestId').as;
+export const asReturnItemId = brandedId<'ReturnItemId'>('ReturnItemId').as;
+export const asReturnStatusHistoryId =
+  brandedId<'ReturnStatusHistoryId'>('ReturnStatusHistoryId').as;
+export const asRefundLineId = brandedId<'RefundLineId'>('RefundLineId').as;
+export const asCreditNoteId = brandedId<'CreditNoteId'>('CreditNoteId').as;
+export const asCreditNoteLineId = brandedId<'CreditNoteLineId'>('CreditNoteLineId').as;

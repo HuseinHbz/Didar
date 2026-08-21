@@ -1837,6 +1837,7 @@ model Order {
   statusHistory   OrderStatusHistory[]
   fulfillments    Fulfillment[]
   promotions      OrderPromotion[]
+  returnRequests  ReturnRequest[]
 
   @@index([customerId])
   @@index([guestToken])
@@ -1871,6 +1872,7 @@ model OrderItem {
 
   order            Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
   fulfillmentItems FulfillmentItem[]
+  returnItems      ReturnItem[]
 
   @@index([orderId])
   @@map("order_items")
@@ -2051,6 +2053,177 @@ model ShipmentEvent {
 
   @@index([shipmentId])
   @@map("shipment_events")
+  @@schema("commerce")
+}
+
+// =============================================================================
+// returns / refunds / credit notes (Phase 012 — see
+// docs/adr/ADR-012-returns-refunds-credit-notes.md). Closes the
+// "post-delivery returns/RMA" gap every phase from 008 onward explicitly
+// deferred. Refund itself (below, in the payment block) is only
+// additively extended, never duplicated.
+// =============================================================================
+
+/// The 8-state lifecycle ADR-012 decision 1 defines. `REJECTED` is only
+/// reachable from `REQUESTED`/`APPROVED` (never after physical goods are
+/// in hand); `CANCELLED` only from `REQUESTED`/`APPROVED`/
+/// `CUSTOMER_SHIPPING` (the customer's own withdrawal option, gone once
+/// the warehouse has physically received the goods). `COMPLETED` is a
+/// derived fact, set only once the linked `Refund`/`CreditNote` actually
+/// settles — never trusted as a flag.
+enum ReturnStatus {
+  REQUESTED
+  APPROVED
+  CUSTOMER_SHIPPING
+  RECEIVED
+  INSPECTING
+  APPROVED_FOR_REFUND
+  REFUNDED
+  COMPLETED
+  REJECTED
+  CANCELLED
+
+  @@schema("commerce")
+}
+
+enum ReturnReason {
+  DAMAGED
+  DEFECTIVE
+  WRONG_ITEM
+  NOT_AS_DESCRIBED
+  CHANGED_MIND
+  SIZE_FIT_ISSUE
+  OTHER
+
+  @@schema("commerce")
+}
+
+/// What the return settles into — a real refund via the one existing
+/// `RefundService` pathway, or a `CreditNote` (ADR-012 decision 7). No
+/// exchange/replacement resolution this phase.
+enum ReturnResolution {
+  REFUND
+  CREDIT_NOTE
+
+  @@schema("commerce")
+}
+
+/// Recorded per `ReturnItem` at the `INSPECTING` step — never blank once
+/// inspection has happened, always null before it.
+enum ReturnItemCondition {
+  UNOPENED
+  OPENED_UNUSED
+  USED
+  DAMAGED
+  DEFECTIVE
+
+  @@schema("commerce")
+}
+
+/// `orderId`/`customerId`/`guestToken` mirror `Order`'s own
+/// ownership fields exactly (same actor-resolution shape
+/// `OrderService.assertOwnership()` already uses) rather than requiring
+/// a join back to `Order` just to check who owns this return.
+/// `warehouseId`/`locationId` are set at the `RECEIVED` step — the real,
+/// present-tense physical receiving location (ADR-012 decision 6), never
+/// a guess. `idempotencyKey` guards the customer-facing create route
+/// only (a genuine retry risk); every subsequent transition is
+/// idempotent by construction via `ReturnStateMachine.isNoOp` plus the
+/// row lock, same as Phase 011's fulfillment/shipment transitions.
+model ReturnRequest {
+  id              String           @id @default(uuid()) @db.Uuid
+  returnNumber    String           @unique @map("return_number") // RET-YYYYMMDD-NNNNNN, commerce.return_number_seq
+  orderId         String           @map("order_id") @db.Uuid
+  customerId      String?          @map("customer_id") @db.Uuid // nullable — guest order; -> customer.customers.id, unenforced
+  guestToken      String?          @map("guest_token")
+  status          ReturnStatus     @default(REQUESTED)
+  reason          ReturnReason
+  reasonNote      String?          @map("reason_note")
+  resolution      ReturnResolution @default(REFUND)
+  warehouseId     String?          @map("warehouse_id") @db.Uuid // -> inventory.warehouses.id, unenforced; set at RECEIVED
+  locationId      String?          @map("location_id") @db.Uuid // -> inventory.warehouse_locations.id, unenforced
+  rejectionReason String?          @map("rejection_reason")
+  idempotencyKey  String?          @unique @map("idempotency_key")
+  requestedAt     DateTime         @default(now()) @map("requested_at")
+  approvedAt      DateTime?        @map("approved_at")
+  receivedAt      DateTime?        @map("received_at")
+  inspectedAt     DateTime?        @map("inspected_at")
+  refundedAt      DateTime?        @map("refunded_at")
+  completedAt     DateTime?        @map("completed_at")
+  rejectedAt      DateTime?        @map("rejected_at")
+  cancelledAt     DateTime?        @map("cancelled_at")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  order         Order                 @relation(fields: [orderId], references: [id])
+  items         ReturnItem[]
+  statusHistory ReturnStatusHistory[]
+  refunds       Refund[]
+  // Deliberately no `creditNotes CreditNote[]` back-relation field here
+  // — `CreditNote` lives in `finance`, this model in `commerce`; Prisma
+  // auto-completes any such array relation field into a real, enforced
+  // cross-schema FK on the other side the moment `prisma format`/
+  // `validate` runs (verified directly, reproducibly, while authoring
+  // this migration), which `docs/database/README.md`'s "Cross-schema
+  // references are intentionally unenforced" section rules out on
+  // principle. `CreditNote.returnRequestId` stays a plain, unrelated
+  // UUID column — reachable only by an explicit query, never a Prisma
+  // `include`.
+
+  @@index([orderId])
+  @@index([customerId])
+  @@index([guestToken])
+  @@index([status])
+  @@map("return_requests")
+  @@schema("commerce")
+}
+
+/// References a concrete `OrderItem`, never a bare SKU (same discipline
+/// `FulfillmentItem` already uses). `quantity` here plus every sibling
+/// `ReturnItem` across every non-`REJECTED`/non-`CANCELLED`
+/// `ReturnRequest` for the same `orderItemId` can never exceed
+/// `OrderItem.quantity` minus what fulfillment already delivered against
+/// it — enforced in the infrastructure layer via a row-locked re-sum at
+/// write time (`lockAndSumReturnedQuantity`, the direct analogue of
+/// `lockAndSumFulfilled`), not a database constraint (Postgres `CHECK` is
+/// single-row only). `refundAmount` is computed once, server-side, by
+/// `RefundAmountCalculator` from `OrderItem`'s own immutable snapshot —
+/// never client-supplied, never recomputed from the live catalog.
+model ReturnItem {
+  id              String               @id @default(uuid()) @db.Uuid
+  returnRequestId String               @map("return_request_id") @db.Uuid
+  orderItemId     String               @map("order_item_id") @db.Uuid
+  quantity        Int
+  condition       ReturnItemCondition? // set at INSPECTING
+  refundAmount    BigInt?              @map("refund_amount") // set at APPROVED_FOR_REFUND
+  createdAt       DateTime             @default(now()) @map("created_at")
+
+  returnRequest ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+  orderItem     OrderItem     @relation(fields: [orderItemId], references: [id])
+  refundLines   RefundLine[]
+
+  @@index([returnRequestId])
+  @@index([orderItemId])
+  @@map("return_items")
+  @@schema("commerce")
+}
+
+/// Append-only — same convention `OrderStatusHistory` already uses;
+/// `changedBy = null` means system-generated (e.g. the
+/// `return_settlement_sync` sweep's own `REFUNDED -> COMPLETED` step).
+model ReturnStatusHistory {
+  id              String        @id @default(uuid()) @db.Uuid
+  returnRequestId String        @map("return_request_id") @db.Uuid
+  fromStatus      ReturnStatus? @map("from_status")
+  toStatus        ReturnStatus  @map("to_status")
+  changedBy       String?       @map("changed_by") @db.Uuid // nullable — null means system-generated; -> identity.users.id, unenforced
+  note            String?
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  returnRequest ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+
+  @@index([returnRequestId])
+  @@map("return_status_history")
   @@schema("commerce")
 }
 
@@ -2249,10 +2422,16 @@ model PaymentCallback {
 
 /// Against an immutable `VERIFIED` transaction — validated to never
 /// exceed the transaction's own amount across every prior non-rejected
-/// refund (ADR-008 decision 6).
+/// refund (ADR-008 decision 6). `returnRequestId` is Phase 012's own
+/// additive extension (ADR-012 decision 8) — nullable, since a refund
+/// can still be requested directly (`POST admin/payments/refunds`) or by
+/// `OrderService.cancel()`/`.requestPartialRefund()`, neither of which
+/// originates from a return. This remains the one and only refund
+/// pathway — no second implementation.
 model Refund {
   id                      String       @id @default(uuid()) @db.Uuid
   paymentTransactionId    String       @map("payment_transaction_id") @db.Uuid
+  returnRequestId         String?      @map("return_request_id") @db.Uuid
   amount                  BigInt
   reason                  String?
   status                  RefundStatus @default(PENDING)
@@ -2263,10 +2442,34 @@ model Refund {
   updatedAt               DateTime     @updatedAt @map("updated_at")
 
   paymentTransaction PaymentTransaction @relation(fields: [paymentTransactionId], references: [id])
+  returnRequest      ReturnRequest?     @relation(fields: [returnRequestId], references: [id])
+  lines              RefundLine[]
 
   @@index([paymentTransactionId])
   @@index([status])
+  @@index([returnRequestId])
   @@map("refunds")
+  @@schema("commerce")
+}
+
+/// The per-`ReturnItem` breakdown of one `Refund`'s total `amount` —
+/// child entity, no independent lifecycle, same shape `OrderItem`/
+/// `FulfillmentItem` already use. Only ever written (in the same
+/// transaction as the `Refund` row) for a return-triggered refund; a
+/// direct/order-level refund has no lines.
+model RefundLine {
+  id           String   @id @default(uuid()) @db.Uuid
+  refundId     String   @map("refund_id") @db.Uuid
+  returnItemId String   @map("return_item_id") @db.Uuid
+  amount       BigInt
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  refund     Refund     @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  returnItem ReturnItem @relation(fields: [returnItemId], references: [id])
+
+  @@index([refundId])
+  @@index([returnItemId])
+  @@map("refund_lines")
   @@schema("commerce")
 }
 
@@ -2770,7 +2973,8 @@ model Invoice {
   createdAt     DateTime      @default(now()) @map("created_at")
   updatedAt     DateTime      @updatedAt @map("updated_at")
 
-  items InvoiceItem[]
+  items       InvoiceItem[]
+  creditNotes CreditNote[]
 
   @@index([orderId])
   @@map("invoices")
@@ -2789,6 +2993,73 @@ model InvoiceItem {
 
   @@index([invoiceId])
   @@map("invoice_items")
+  @@schema("finance")
+}
+
+/// `DRAFT -> ISSUED -> APPLIED`, `VOID` from `DRAFT`/`ISSUED` (ADR-012
+/// decision 7) — a real, minimal credit-note lifecycle, mirroring
+/// `InvoiceStatus`'s own shape. Never a historical-`Invoice` rewrite:
+/// `Invoice` itself gains no new column here, no method mutates its
+/// totals — `Invoice` + `CreditNote` together represent the adjustment.
+enum CreditNoteStatus {
+  DRAFT
+  ISSUED
+  APPLIED
+  VOID
+
+  @@schema("finance")
+}
+
+/// `orderId`/`returnRequestId` are unenforced cross-schema pointers into
+/// `commerce` — same convention `Invoice.orderId` already uses, kept
+/// consistent rather than making this one row's `returnRequestId` a
+/// real FK just because both happen to live in the same schema.
+/// `invoiceId` is a real, enforced FK (both rows live in `finance`).
+/// `creditNoteNumber` is server-generated from
+/// `finance.credit_note_number_seq`, drawn inside the same transaction
+/// as the insert — identical technique to `order_number_seq`/
+/// `invoice_number_seq`, never client-supplied.
+model CreditNote {
+  id               String           @id @default(uuid()) @db.Uuid
+  creditNoteNumber String           @unique @map("credit_note_number")
+  orderId          String           @map("order_id") @db.Uuid // -> commerce.orders.id, unenforced
+  returnRequestId  String?          @map("return_request_id") @db.Uuid // -> commerce.return_requests.id, unenforced — no Prisma relation (see ReturnRequest's own comment on why one is never declared either direction)
+  invoiceId        String?          @map("invoice_id") @db.Uuid
+  customerId       String?          @map("customer_id") @db.Uuid // -> customer.customers.id, unenforced
+  status           CreditNoteStatus @default(DRAFT)
+  currency         String           @default("IRR")
+  subtotal         BigInt
+  discountTotal    BigInt           @default(0) @map("discount_total")
+  taxTotal         BigInt           @default(0) @map("tax_total")
+  grandTotal       BigInt           @map("grand_total")
+  issuedAt         DateTime?        @map("issued_at")
+  appliedAt        DateTime?        @map("applied_at")
+  voidedAt         DateTime?        @map("voided_at")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  invoice Invoice?         @relation(fields: [invoiceId], references: [id])
+  items   CreditNoteLine[]
+
+  @@index([orderId])
+  @@index([returnRequestId])
+  @@index([invoiceId])
+  @@map("credit_notes")
+  @@schema("finance")
+}
+
+model CreditNoteLine {
+  id           String @id @default(uuid()) @db.Uuid
+  creditNoteId String @map("credit_note_id") @db.Uuid
+  description  String
+  quantity     Int
+  unitPrice    BigInt @map("unit_price")
+  lineTotal    BigInt @map("line_total")
+
+  creditNote CreditNote @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
+
+  @@index([creditNoteId])
+  @@map("credit_note_lines")
   @@schema("finance")
 }
 

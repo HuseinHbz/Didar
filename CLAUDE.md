@@ -129,11 +129,12 @@ by a `quality-gate` job. Branch protection requiring that check is still a
 manual GitHub-admin step (not configurable from inside the repo) — see that
 doc. Every phase's `feature/*` branch is merged to `main` once its PR lands
 (all of Phase 001-009's PRs are merged as of Phase 009; `develop` tracks the
-same tip, with Phase 010's own branch pushed and pending) — see
+same tip, with later phases' own branches pushed and pending) — see
 `docs/deployment/ci-pipeline.md`'s "Numbered branch naming" section for the
 two-digit prefix (`01-feature-foundation-monorepo`, …,
-`10-feature-promotion-pricing`) every phase branch carries from Phase 001
-onward, and for the naming rule to keep following on every future branch.
+`12-feature-returns-refunds-credit-notes`) every phase branch carries from
+Phase 001 onward, and for the naming rule to keep following on every
+future branch.
 
 Phase 003 built the real PostgreSQL foundation (blueprint's "settle the
 database/domain skeleton first" ordering principle): the full ERD across all
@@ -388,15 +389,50 @@ See `docs/architecture/order.md`'s "Phase 011" section for the full
 account. **Backend-only, same precedent**: `apps/admin`/`apps/storefront`
 are still untouched.
 
+Phase 012 closed the returns/refunds/credit-notes gap every phase from
+008 onward had explicitly deferred — a new `modules/return`, additive
+extensions to `modules/payment` (`Refund.returnRequestId` + a new
+`RefundLine` child table — **exactly one refund pathway still exists,
+extended, never duplicated**) and `modules/inventory`
+(`AdjustmentService.receiveReturnedStock()`, wrapping a previously-
+uncalled `receiveStock()` primitive). A 10-state `ReturnRequest`
+lifecycle, eligibility checked against real `Fulfillment.deliveredAt`
+data (never a client-supplied flag), refund/credit-note amounts always
+derived from `OrderItem`'s own immutable snapshot
+(`lineTotal - discountAmount + taxAmount`, never live catalog/promotion
+data), a row-locked return-quantity invariant
+(`lockAndSumReturnedQuantity`, the direct analogue of Phase 009's
+over-fulfillment guard), inventory restock gated on a real
+`INSPECTING -> APPROVED_FOR_REFUND` transition (never on a mere request,
+never on a rejection, proven to collapse to exactly one restock under 20
+concurrent approve-for-refund calls), and a real, minimal credit-note
+lifecycle with server-generated sequential numbering from a Postgres
+sequence — `Invoice` itself is never mutated. All six required
+concurrency proofs ran against real PostgreSQL, never a mocked
+repository (`test/return-repository.e2e-spec.ts`). A genuine,
+pre-existing latent race in the e2e test harness itself was found and
+mitigated along the way: OTP login for the shared seed admin phone can
+lose a race across Jest's parallel per-file workers when enough spec
+files contend on it at once (`VerifyOtpUseCase` correctly honors only
+the _latest_ requested code, so two concurrent login sequences for one
+phone can invalidate each other) — fixed for this phase's own two new
+e2e files by giving them a dedicated second admin fixture rather than
+patching identity's (correct) OTP semantics; the same latent contention
+remains open for the other nine files that still share the one hot
+phone number, documented rather than silently carried forward. See
+`docs/adr/ADR-012-returns-refunds-credit-notes.md` and
+`docs/architecture/returns.md` for the full account. **Backend-only,
+same precedent**: `apps/admin`/`apps/storefront` are still untouched.
+
 **Next up** is the rest of Phase 1 (see end of blueprint doc "وضعیت
 فعلی"): the remaining real domain modules beyond
 `identity`/`catalog`/`inventory`/`cart-checkout`/`payment`/`order`/
-`promotion`, each landing once its slice of the ERD/API contract/
-permission matrix/event map is designed — _before_ further UI/design-
-system work. The stated
+`promotion`/`return`, each landing once its slice of the ERD/API
+contract/permission matrix/event map is designed — _before_ further
+UI/design-system work. The stated
 ordering principle: settle the database/domain skeleton first (done for
-identity, catalog, inventory, cart-checkout, payment, order, and
-promotion; the rest still pending), then design system + admin panel
+identity, catalog, inventory, cart-checkout, payment, order, promotion,
+and return; the rest still pending), then design system + admin panel
 structure + web/PWA sitemap + Android structure.
 
 Treat any new architectural decision as needing to stay consistent with this document, or update it explicitly.

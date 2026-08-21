@@ -65,9 +65,16 @@ direction always inward toward `domain/`. See
 `services/api/src/modules/identity/README.md` for the concrete, working example —
 it's the template every future domain module should copy.
 
-Only `health` (fully real) and `identity` (structurally real, backed by a
-placeholder model) exist so far. Everything else in blueprint §2's domain list
-lands once its slice of the Phase 1 ERD is designed.
+Twelve phases in: `health`, `identity`, `catalog`, `inventory`,
+`cart-checkout`, `payment`, `order` (order/invoice/fulfillment/shipment),
+`promotion`, and `return` (returns/refunds/credit notes) are all real,
+each with its own short architecture doc —
+[`identity`](../security/README.md) is covered by the security doc set;
+[`catalog.md`](catalog.md), [`inventory.md`](inventory.md),
+[`cart-checkout.md`](cart-checkout.md), [`payment.md`](payment.md),
+[`order.md`](order.md), [`promotion-engine.md`](promotion-engine.md), and
+[`returns.md`](returns.md) cover the rest. Everything else in blueprint
+§2's domain list lands once its slice of the ERD is designed.
 
 ## Four backend services, not one
 

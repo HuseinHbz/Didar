@@ -82,5 +82,14 @@ import { OrderDomainExceptionFilter } from './presentation/filters/order-domain-
     FulfillmentService,
     { provide: APP_FILTER, useClass: OrderDomainExceptionFilter },
   ],
+  // Phase 012 (ADR-012 decision 2) — additive: `OrderService`/
+  // `InvoiceService`/`FulfillmentService` exported so `ReturnModule` can
+  // import this module directly and inject them, the same
+  // reach-through-exports shape `PaymentModule`/`InventoryModule` already
+  // use for their own consumers, rather than `ReturnModule` re-binding
+  // `ORDER_REPOSITORY`/`INVOICE_REPOSITORY`/`FULFILLMENT_REPOSITORY`
+  // locally. Nothing removed, nothing renamed — every existing consumer
+  // of this module is unaffected.
+  exports: [OrderService, InvoiceService, FulfillmentService],
 })
 export class OrderModule {}
