@@ -20,6 +20,7 @@
     "clean": "turbo run clean && rm -rf node_modules",
     "validate:structure": "node scripts/validate-structure.mjs",
     "validate": "pnpm validate:structure && pnpm typecheck && pnpm lint",
+    "roadmap:audit": "node scripts/roadmap-audit.mjs",
     "prepare": "husky"
   },
   "devDependencies": {
