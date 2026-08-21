@@ -25,22 +25,18 @@ describe('waitForRedis', () => {
   // real ECONNREFUSED from the OS, not a simulated one.
   const UNREACHABLE_URL = 'redis://127.0.0.1:1';
 
-  it(
-    'throws a bounded, descriptive error instead of hanging when Redis is never reachable',
-    async () => {
-      const startedAt = Date.now();
+  it('throws a bounded, descriptive error instead of hanging when Redis is never reachable', async () => {
+    const startedAt = Date.now();
 
-      await expect(waitForRedis(UNREACHABLE_URL)).rejects.toThrow(
-        /still unreachable at 127\.0\.0\.1:1 after 5 attempts — refusing to boot/,
-      );
+    await expect(waitForRedis(UNREACHABLE_URL)).rejects.toThrow(
+      /still unreachable at 127\.0\.0\.1:1 after 5 attempts — refusing to boot/,
+    );
 
-      // This is the actual regression this test exists to pin: CP-014's
-      // audit found a real boot against a killed Redis produce an
-      // unbroken retry loop for 2+ minutes with no resolution.
-      expect(Date.now() - startedAt).toBeLessThan(20_000);
-    },
-    25_000,
-  );
+    // This is the actual regression this test exists to pin: CP-014's
+    // audit found a real boot against a killed Redis produce an
+    // unbroken retry loop for 2+ minutes with no resolution.
+    expect(Date.now() - startedAt).toBeLessThan(20_000);
+  }, 25_000);
 
   it('resolves on the very first attempt once Redis is reachable', async () => {
     const server = createServer((socket) => {

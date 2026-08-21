@@ -20,6 +20,7 @@ Three additions, all in the `test` job:
 
 1. **A `redis:7.4-alpine` service container**, alongside the existing
    `postgres:17-alpine` one:
+
    ```yaml
    redis:
      image: redis:7.4-alpine
@@ -31,6 +32,7 @@ Three additions, all in the `test` job:
        --health-timeout 5s
        --health-retries 10
    ```
+
    GitHub Actions' own service-container semantics guarantee every step
    in the job waits until **both** the Postgres and Redis containers
    report healthy before running — this ordering is enforced by the
@@ -38,10 +40,12 @@ Three additions, all in the `test` job:
 
 2. **An explicit connectivity-verification step**, after the database
    seed step and before the e2e test step:
+
    ```yaml
    - name: Verify Redis connectivity
      run: node scripts/verify-redis.mjs
    ```
+
    [`scripts/verify-redis.mjs`](../../scripts/verify-redis.mjs) is a
    zero-dependency script (matching this repo's existing root-`scripts/`
    convention — `validate-structure.mjs`, `roadmap-audit.mjs` — since a
@@ -66,7 +70,7 @@ interval gives the container up to 50s to become ready before GitHub
 Actions will route traffic to it — generous enough for a cold pull of the
 `redis:7.4-alpine` image on a fresh runner, while still bounded (unlike
 the application-level defect this phase fixes, an unhealthy service
-container that never passes its health check causes the *step* that
+container that never passes its health check causes the _step_ that
 needs it to fail with a clear "service unhealthy" message, not a silent
 hang).
 

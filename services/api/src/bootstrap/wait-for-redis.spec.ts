@@ -34,7 +34,8 @@ describe('waitForRedis / pingRedisOnce', () => {
       });
       await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
       const address = server.address();
-      if (address === null || typeof address === 'string') throw new Error('expected an AddressInfo');
+      if (address === null || typeof address === 'string')
+        throw new Error('expected an AddressInfo');
 
       try {
         await expect(pingRedisOnce(`redis://127.0.0.1:${address.port}`)).resolves.toBeUndefined();
@@ -49,24 +50,20 @@ describe('waitForRedis / pingRedisOnce', () => {
   });
 
   describe('waitForRedis (bounded retry — used at process startup)', () => {
-    it(
-      'throws a bounded, descriptive error instead of hanging when Redis is never reachable',
-      async () => {
-        const startedAt = Date.now();
+    it('throws a bounded, descriptive error instead of hanging when Redis is never reachable', async () => {
+      const startedAt = Date.now();
 
-        await expect(waitForRedis(UNREACHABLE_URL)).rejects.toThrow(
-          /still unreachable at 127\.0\.0\.1:1 after 5 attempts — refusing to boot/,
-        );
+      await expect(waitForRedis(UNREACHABLE_URL)).rejects.toThrow(
+        /still unreachable at 127\.0\.0\.1:1 after 5 attempts — refusing to boot/,
+      );
 
-        // The whole bounded retry loop (5 attempts, 1s+2s+3s+4s backoff
-        // between them) must terminate well under a generous ceiling —
-        // this is the actual regression this test exists to pin: CP-014's
-        // audit found a real boot against a killed Redis produce an
-        // unbroken retry loop for 2+ minutes with no resolution.
-        expect(Date.now() - startedAt).toBeLessThan(20_000);
-      },
-      25_000,
-    );
+      // The whole bounded retry loop (5 attempts, 1s+2s+3s+4s backoff
+      // between them) must terminate well under a generous ceiling —
+      // this is the actual regression this test exists to pin: CP-014's
+      // audit found a real boot against a killed Redis produce an
+      // unbroken retry loop for 2+ minutes with no resolution.
+      expect(Date.now() - startedAt).toBeLessThan(20_000);
+    }, 25_000);
 
     it('resolves on the very first attempt once Redis is reachable', async () => {
       const server = createServer((socket) => {
@@ -76,7 +73,8 @@ describe('waitForRedis / pingRedisOnce', () => {
       });
       await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
       const address = server.address();
-      if (address === null || typeof address === 'string') throw new Error('expected an AddressInfo');
+      if (address === null || typeof address === 'string')
+        throw new Error('expected an AddressInfo');
 
       const startedAt = Date.now();
       try {

@@ -85,7 +85,9 @@ export async function waitForRedis(redisUrl: string): Promise<void> {
       // No credential/URL-with-password ever appears in these log lines —
       // only the resolved host/port, never `url.toString()` or `redisUrl`
       // itself (which could carry auth in `redis://user:pass@host` form).
-      logger.warn(`Redis unreachable at ${host}:${port} (attempt ${attempt}/${MAX_ATTEMPTS}): ${message}`);
+      logger.warn(
+        `Redis unreachable at ${host}:${port} (attempt ${attempt}/${MAX_ATTEMPTS}): ${message}`,
+      );
       if (attempt === MAX_ATTEMPTS) {
         throw new Error(
           `Redis still unreachable at ${host}:${port} after ${MAX_ATTEMPTS} attempts — refusing to boot. ` +

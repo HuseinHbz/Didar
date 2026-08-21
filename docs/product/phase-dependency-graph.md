@@ -29,7 +29,7 @@ CP-000 (blueprint)
 CP-014 (roadmap audit & governance) ─▶ reads all of the above, blocks nothing, gates everything downstream
 
 CP-015 (integration reconciliation) ── depends on: CP-012, CP-013 existing (done) ── **DONE**, unblocked everything below
-  └─▶ CP-016 (platform reliability foundation)
+  └─▶ CP-016 (platform reliability foundation) ── **DONE** (P0-2 resolved; P1-1/P1-5's full form explicitly deferred, not blocking) ── unblocks everything below
         ├─▶ CP-017 (real notification delivery)
         ├─▶ CP-018 (admin panel)
         │     ├─▶ CP-023 (CMS)
@@ -81,6 +81,7 @@ CP-018 + CP-019 ─▶ CP-020 (storefront)
 CP-015 → CP-016 (the two gates, in that order — see
 [`../roadmap/critical-path.md`](../roadmap/critical-path.md) for why
 Gate 2 should land before or alongside Gate 1's merge, not after).
+Both gates are now closed — see `docs/product/phase-016-audit.md`.
 CP-012 → CP-013 (013 is a hardening pass on 012's own schema, its
 migration literally depends on 012's migration existing first — this
 is already true in git history and is preserved exactly by CP-015's

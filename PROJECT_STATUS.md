@@ -1,10 +1,11 @@
 # Project Status
 
-**Overall Progress:** 16 of 30 canonical phases Completed, 0 Partial,
-0 in progress, 14 Planned.
-**Current Phase:** CP-015 — Integration Reconciliation (complete).
-**Next Phase:** CP-016 — Platform Reliability Foundation.
-**Last Audit:** 2026-08-21 (`docs/product/phase-015-audit.md`).
+**Overall Progress:** 17 of 30 canonical phases Completed, 0 Partial,
+0 in progress, 13 Planned.
+**Current Phase:** CP-016 — Platform Reliability Foundation (complete).
+**Next Phase:** CP-017 — Real Notification Delivery (or CP-018/CP-021,
+which have no dependency on CP-017 — see `docs/product/phase-dependency-graph.md`).
+**Last Audit:** 2026-08-21 (`docs/product/phase-016-audit.md`).
 
 This file is a human-readable summary. The source of truth is
 [`docs/product/roadmap.json`](docs/product/roadmap.json), kept in sync by
@@ -36,13 +37,10 @@ Legend: `[x]` Completed · `[~]` In progress / Partial · `[ ]` Planned ·
 ## Governance & integration
 
 - [x] CP-014 — Roadmap Audit & Governance
-- [x] CP-015 — Integration Reconciliation _(this phase — merged CP-012/013/014, fresh-DB zero-drift proven, 195/195 e2e twice consecutively)_
+- [x] CP-015 — Integration Reconciliation _(merged CP-012/013/014, fresh-DB zero-drift proven, 195/195 e2e twice consecutively)_
+- [x] CP-016 — Platform Reliability Foundation _(this phase — real Redis CI service, bounded startup preflight in all 3 Redis-dependent services, `/health/ready` split, all live-proven twice against a real Redis; rate limiting (P1-1) and full observability (P1-5) explicitly deferred by this phase's own non-goals)_
 
-## Planned — gate (must close before anything below starts)
-
-- [ ] CP-016 — Platform Reliability Foundation **(P0, next phase)**
-
-## Planned — active tracks (once the gate closes)
+## Planned — active tracks (the gate is closed)
 
 - [ ] CP-017 — Real Notification Delivery
 - [ ] CP-018 — Admin Panel MVP
@@ -63,10 +61,11 @@ Legend: `[x]` Completed · `[~]` In progress / Partial · `[ ]` Planned ·
 
 ## P0 blockers open right now
 
-1. **CI has no Redis service; no fail-fast on Redis loss** (empirically
-   reproduced, re-verified unchanged by CP-015) — owned by CP-016.
+None. Both P0s the Phase 014 audit found are resolved:
 
-`CP-012/013 not on develop` (the other P0 from the Phase 014 audit) is
-**resolved** — see `docs/product/integration-reconciliation.md`.
+- `CP-012/013 not on develop` — resolved by CP-015, see
+  `docs/product/integration-reconciliation.md`.
+- `CI has no Redis service; no fail-fast on Redis loss` — resolved by
+  CP-016, see `docs/product/phase-016-audit.md`.
 
 Full gap list with priorities and owners: [`docs/product/gap-priority-matrix.md`](docs/product/gap-priority-matrix.md).

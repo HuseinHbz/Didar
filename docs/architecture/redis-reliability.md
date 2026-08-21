@@ -17,21 +17,21 @@ business-critical staleness implications.** Verified by grep across
 every service: zero `new Redis(...)` client outside a `BullModule`
 registration, zero direct `ioredis`/`createClient` usage anywhere. This
 was already true before CP-016 and this phase does not change it — it
-only makes the platform behave correctly when the one thing Redis *is*
+only makes the platform behave correctly when the one thing Redis _is_
 used for (queue scheduling) is unavailable.
 
 ## Every Redis consumer, enumerated
 
-| Service | Registration | Queues |
-| --- | --- | --- |
-| `services/api` (`cart-checkout` module) | `cart-checkout-queue.module.ts` | `checkout_expiration`, `cart_abandonment` |
-| `services/api` (`inventory` module) | `inventory-queue.module.ts` | `reservation_expiration`, `low_stock_notification`, `inventory_event_processing` |
-| `services/api` (`order` module) | `order-queue.module.ts` | `order_conversion`, `invoice_generation` |
-| `services/api` (`payment` module) | `payment-queue.module.ts` | `payment_verification_retry`, `reconciliation`, `refund_status_sync` |
-| `services/api` (`promotion` module) | `promotion-queue.module.ts` | `promotion_expiration`, `coupon_reservation_cleanup` |
-| `services/api` (`return` module) | `return-queue.module.ts` | `return_settlement_sync`, `return_settlement_recovery`, `return_reconciliation` |
-| `services/worker` | `app.module.ts` | `example` (scaffold queue — no real production queue lives here yet) |
-| `services/notification-worker` | `app.module.ts` | one queue, dispatches to the 6 channel adapters (5 stubbed, `in-app` real) |
+| Service                                 | Registration                    | Queues                                                                           |
+| --------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------- |
+| `services/api` (`cart-checkout` module) | `cart-checkout-queue.module.ts` | `checkout_expiration`, `cart_abandonment`                                        |
+| `services/api` (`inventory` module)     | `inventory-queue.module.ts`     | `reservation_expiration`, `low_stock_notification`, `inventory_event_processing` |
+| `services/api` (`order` module)         | `order-queue.module.ts`         | `order_conversion`, `invoice_generation`                                         |
+| `services/api` (`payment` module)       | `payment-queue.module.ts`       | `payment_verification_retry`, `reconciliation`, `refund_status_sync`             |
+| `services/api` (`promotion` module)     | `promotion-queue.module.ts`     | `promotion_expiration`, `coupon_reservation_cleanup`                             |
+| `services/api` (`return` module)        | `return-queue.module.ts`        | `return_settlement_sync`, `return_settlement_recovery`, `return_reconciliation`  |
+| `services/worker`                       | `app.module.ts`                 | `example` (scaffold queue — no real production queue lives here yet)             |
+| `services/notification-worker`          | `app.module.ts`                 | one queue, dispatches to the 6 channel adapters (5 stubbed, `in-app` real)       |
 
 **15 real BullMQ queues in `services/api`** (one process, one Redis
 connection pool via 6 separate `BullModule.forRootAsync` registrations —
@@ -141,8 +141,8 @@ they have no health endpoint at all to expose the stuck state through.
   infrastructure technology — the fix is entirely in application
   bootstrap code and the existing GitHub Actions workflow.
 - Does not make Redis a business-critical source of truth anywhere —
-  the fix closes an *availability* gap (fail fast, don't hang), not a
-  *correctness* gap (Redis was never storing business state to begin
+  the fix closes an _availability_ gap (fail fast, don't hang), not a
+  _correctness_ gap (Redis was never storing business state to begin
   with).
 
 ## Live evidence (real Redis, no mocks)
@@ -157,14 +157,14 @@ run, per this phase's own `stability_rule`.
 production entrypoint, not `nest start --watch`, which is a long-lived
 dev supervisor with different lifecycle semantics):**
 
-| Service | Redis state | Result |
-| --- | --- | --- |
-| `services/worker` | down (round 1) | 5 logged attempts, `process.exit(1)` at **11s** |
-| `services/notification-worker` | down (round 1) | 5 logged attempts, `process.exit(1)` at **11s** |
-| `services/worker` | down (round 2) | 5 logged attempts, `process.exit(1)` at **10s** |
-| `services/notification-worker` | down (round 2) | 5 logged attempts, `process.exit(1)` at **10s** |
-| `services/worker` | up (round 1 & 2) | boots and reaches "worker started, processors listening" on the first attempt, both times |
-| `services/notification-worker` | up (round 1 & 2) | same |
+| Service                        | Redis state      | Result                                                                                    |
+| ------------------------------ | ---------------- | ----------------------------------------------------------------------------------------- |
+| `services/worker`              | down (round 1)   | 5 logged attempts, `process.exit(1)` at **11s**                                           |
+| `services/notification-worker` | down (round 1)   | 5 logged attempts, `process.exit(1)` at **11s**                                           |
+| `services/worker`              | down (round 2)   | 5 logged attempts, `process.exit(1)` at **10s**                                           |
+| `services/notification-worker` | down (round 2)   | 5 logged attempts, `process.exit(1)` at **10s**                                           |
+| `services/worker`              | up (round 1 & 2) | boots and reaches "worker started, processors listening" on the first attempt, both times |
+| `services/notification-worker` | up (round 1 & 2) | same                                                                                      |
 
 This is the direct fix for the CP-014-reproduced defect (previously: 2+
 minutes of unbroken `ECONNREFUSED` retries with no resolution). Now:
@@ -173,13 +173,13 @@ bounded, ~10-11s, deterministic, logged, non-zero exit.
 **Liveness/readiness split, `services/api`, live HTTP requests against a
 running instance:**
 
-| Redis state | `GET /health` | `GET /health/ready` |
-| --- | --- | --- |
-| up | `200 {"status":"ok",...}` | `200`, `info.redis.status: "up"` |
-| down (round 1) | `200` (unchanged — DB-only) | `503`, `error.redis.status: "down"`, message = `connect ECONNREFUSED 127.0.0.1:6379` (host:port only, no credentials) |
-| up again (round 1) | `200` | `200`, recovered with no restart |
-| down (round 2) | `200` | `503` |
-| up again (round 2) | `200` | `200`, recovered with no restart |
+| Redis state        | `GET /health`               | `GET /health/ready`                                                                                                   |
+| ------------------ | --------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| up                 | `200 {"status":"ok",...}`   | `200`, `info.redis.status: "up"`                                                                                      |
+| down (round 1)     | `200` (unchanged — DB-only) | `503`, `error.redis.status: "down"`, message = `connect ECONNREFUSED 127.0.0.1:6379` (host:port only, no credentials) |
+| up again (round 1) | `200`                       | `200`, recovered with no restart                                                                                      |
+| down (round 2)     | `200`                       | `503`                                                                                                                 |
+| up again (round 2) | `200`                       | `200`, recovered with no restart                                                                                      |
 
 Automated regression coverage for this exact behavior lives in
 `services/api/test/redis-reliability.e2e-spec.ts` (7 cases, all passing,
@@ -193,7 +193,7 @@ without killing the process or losing already-persisted data):**
 1. Baseline: 3 jobs enqueued against a healthy Redis via the real
    `ExampleQueueService`/`bullmq` `Queue.add()` API — all 3 processed by
    the real `services/worker` process within the same second.
-2. `CLIENT PAUSE 6000 ALL` issued first, *then* `queue.add()` called with
+2. `CLIENT PAUSE 6000 ALL` issued first, _then_ `queue.add()` called with
    no client-side timeout: the call **genuinely blocked for the full 6s**
    pause window (ioredis queues the command rather than either failing
    silently or falsely reporting success), then completed and the worker

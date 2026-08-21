@@ -35,7 +35,9 @@ function pingOnce() {
     };
 
     socket.setTimeout(CONNECT_TIMEOUT_MS);
-    socket.once('timeout', () => fail(`connection to ${host}:${port} timed out after ${CONNECT_TIMEOUT_MS}ms`));
+    socket.once('timeout', () =>
+      fail(`connection to ${host}:${port} timed out after ${CONNECT_TIMEOUT_MS}ms`),
+    );
     socket.once('error', (err) => fail(err.message));
 
     socket.connect(port, host, () => {

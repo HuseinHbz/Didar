@@ -31,7 +31,10 @@ function getRedisUrl(): string | undefined {
   return process.env['REDIS_URL'];
 }
 
-function detail(record: Record<string, HealthIndicatorDetail> | undefined, key: string): HealthIndicatorDetail {
+function detail(
+  record: Record<string, HealthIndicatorDetail> | undefined,
+  key: string,
+): HealthIndicatorDetail {
   const found = record?.[key];
   if (found === undefined) throw new Error(`expected a "${key}" health indicator in the response`);
   return found;

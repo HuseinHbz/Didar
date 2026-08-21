@@ -2,7 +2,7 @@
   "schemaVersion": "1.0.0",
   "generatedBy": "CP-015 (Integration Reconciliation), on top of CP-014 (Roadmap Audit & Governance)",
   "generatedAt": "2026-08-21T00:00:00Z",
-  "sourceOfTruthNote": "This file is the one machine-readable source of truth for phase/requirement tracking. Human-readable companions: canonical-roadmap.md, project-progress.md, requirements-matrix.md, gap-priority-matrix.md. pnpm roadmap:audit reads this file and re-derives status from repository evidence — it does not trust the values below without checking them.",
+  "sourceOfTruthNote": "This file is the one machine-readable source of truth for phase/requirement tracking. Human-readable companions: canonical-roadmap.md, project-progress.md, requirements-matrix.md, gap-priority-matrix.md. pnpm roadmap:audit reads this file and re-derives status from repository evidence \u2014 it does not trust the values below without checking them.",
   "statusEnum": [
     "NOT_STARTED",
     "PLANNED",
@@ -219,14 +219,14 @@
     {
       "id": "CP-016",
       "name": "Platform Reliability Foundation",
-      "gitPhase": null,
+      "gitPhase": "16",
       "blueprintPhase": "PHASE 1 (remainder); PHASE 13 (remainder)",
-      "status": "NOT_STARTED",
-      "completionPercent": 0,
+      "status": "VALIDATED",
+      "completionPercent": 90,
       "dependencies": ["CP-015"],
-      "gitBranch": null,
-      "latestCommit": null,
-      "blockingIssues": ["P0-2", "P1-1", "P1-5"],
+      "gitBranch": "16-feature-platform-reliability",
+      "latestCommit": "bffb55d",
+      "blockingIssues": ["P1-1", "P1-5-remainder"],
       "priority": "P0"
     },
     {
@@ -545,7 +545,7 @@
       "phase": "CP-016",
       "domain": "platform",
       "userType": "system",
-      "status": "PLANNED"
+      "status": "DONE"
     },
     {
       "id": "REQ-PLAT-03",
@@ -590,19 +590,22 @@
       "description": "CP-012/013 not merged into develop",
       "ownerPhase": "CP-015",
       "status": "RESOLVED",
-      "resolvedBy": "CP-015 — merged into 15-feature-integration-reconciliation, fast-forwarded onto develop"
+      "resolvedBy": "CP-015 \u2014 merged into 15-feature-integration-reconciliation, fast-forwarded onto develop"
     },
     {
       "id": "P0-2",
       "priority": "P0",
       "description": "CI has no Redis service; no fail-fast on Redis unreachability",
-      "ownerPhase": "CP-016"
+      "ownerPhase": "CP-016",
+      "status": "RESOLVED",
+      "resolvedBy": "CP-016 \u2014 redis:7.4-alpine CI service + bounded startup preflight in all 3 Redis-dependent services, live-proven twice each"
     },
     {
       "id": "P1-1",
       "priority": "P1",
       "description": "No rate limiting anywhere in services/api",
-      "ownerPhase": "CP-016"
+      "ownerPhase": null,
+      "note": "Explicitly deferred by CP-016s own non-goals (out of scope for a Redis-reliability fix) \u2014 not yet reassigned to a specific future phase"
     },
     {
       "id": "P1-2",
@@ -702,7 +705,12 @@
       "description": "No Store/POS/omnichannel capability",
       "ownerPhase": "CP-025"
     },
-    { "id": "P2-11", "priority": "P2", "description": "No AI capability", "ownerPhase": "CP-026" },
+    {
+      "id": "P2-11",
+      "priority": "P2",
+      "description": "No AI capability",
+      "ownerPhase": "CP-026"
+    },
     {
       "id": "P2-12",
       "priority": "P2",
@@ -710,12 +718,12 @@
       "ownerPhase": "CP-027"
     }
   ],
-  "nextPhase": "CP-016",
+  "nextPhase": "CP-017 (or CP-018/CP-021 \u2014 see phase-dependency-graph.md)",
   "aggregate": {
-    "completedPhases": 16,
+    "completedPhases": 17,
     "partialPhases": 0,
     "inProgressPhases": 0,
-    "plannedPhases": 14,
+    "plannedPhases": 13,
     "totalPhases": 30
   }
 }
