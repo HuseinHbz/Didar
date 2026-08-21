@@ -70,14 +70,29 @@ a `type` claim `JwtTokenService` checks on every verify — proven directly: a
 real tokens. `POST /auth/2fa/verify` exchanges that pending token + a TOTP (or
 recovery) code for the real ones.
 
-**OTP codes never go out over SMS in this pass.** `services/notification-worker`
-is still stub adapters (see that service's README) — there's no real SMS
-provider wired up yet. `RequestOtpUseCase` always computes the code and returns
-it internally; the _controller_ only puts it on the HTTP response
+**OTP codes go out over real SMS as of CP-017.** `RequestOtpUseCase` enqueues a
+real dispatch onto `services/notification-worker`'s `notifications` queue
+(`OTP_NOTIFICATION_PORT` -> `BullmqOtpNotificationAdapter`), fire-and-forget —
+a dispatch failure is logged, never thrown, and never changes the HTTP
+response, because the code itself is already durably created by the time
+dispatch is attempted. The use case still always computes the code and
+returns it internally; the _controller_ only puts it on the HTTP response
 (`devOnlyCode`) when `IdentityConfig.exposeOtpCodeForTesting` is true (anything
-but `NODE_ENV=production`). This is what lets e2e tests and local dev complete
-a real login without a real SMS provider, without the use case itself ever
-pretending a message was delivered.
+but `NODE_ENV=production`) — unchanged from before this phase, and still what
+lets e2e tests and local dev complete a real login without depending on a
+real SMS provider or its network reachability.
+
+A repeat request for the same `(phone, purpose)` within
+`OTP_NOTIFICATION_COOLDOWN_SECONDS` (60s default) of a still-usable prior
+request skips the SMS dispatch only — never the code itself, every call still
+gets a fresh, valid code — see `OtpRequest.shouldSkipNotification`'s own doc
+comment and `docs/adr/ADR-014-real-notification-delivery.md` for the full
+reasoning, including the one known remaining gap: the cooldown is keyed on
+`(phone, purpose)`, so a caller alternating `purpose` (`LOGIN`/`REGISTER`/
+`RESET_PASSWORD`) for the same phone can still trigger up to 3 real sends per
+window rather than 1 — a real, documented, bounded gap, not a silent one;
+fully closing it needs P1-1's broader rate-limiting work, explicitly out of
+this phase's own scope.
 
 ### Authorization — RBAC (blueprint §53)
 
@@ -198,7 +213,11 @@ changes nothing about production; only Jest reads it.
 
 See `services/api/.env.example` and `src/config/env.ts`:
 `JWT_ACCESS_TTL_SECONDS` (900), `JWT_REFRESH_TTL_SECONDS` (2,592,000 = 30d),
-`OTP_TTL_SECONDS` (300), `ENCRYPTION_KEY` (base64, must decode to exactly 32
+`OTP_TTL_SECONDS` (300), `OTP_NOTIFICATION_COOLDOWN_SECONDS` (60, CP-017 — see
+above), `ENCRYPTION_KEY` (base64, must decode to exactly 32
 bytes — AES-256-GCM key for `TwoFactorCredential.secretEncrypted`, no key
 rotation/versioning/KMS yet — a real environment needs that before handling
-real user 2FA secrets).
+real user 2FA secrets). The real SMS provider's own credential
+(`SMS_API_KEY`) lives in `services/notification-worker/.env.example`, not
+here — this service only ever enqueues a job, it never talks to Kavenegar
+directly.
