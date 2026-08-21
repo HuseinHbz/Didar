@@ -1,11 +1,16 @@
 # Project Status
 
-**Overall Progress:** 17 of 30 canonical phases Completed, 0 Partial,
-0 in progress, 13 Planned.
-**Current Phase:** CP-016 — Platform Reliability Foundation (complete).
-**Next Phase:** CP-017 — Real Notification Delivery (or CP-018/CP-021,
-which have no dependency on CP-017 — see `docs/product/phase-dependency-graph.md`).
-**Last Audit:** 2026-08-21 (`docs/product/phase-016-audit.md`).
+**Overall Progress:** 18 of 30 canonical phases Completed, 0 Partial,
+0 in progress, 12 Planned.
+**Current Phase:** CP-018 — Admin Panel MVP (VALIDATED).
+**Next Phase:** CP-021 — Procurement (depends only on CP-015, genuinely
+unblocked) unless CP-019's domain-expert review gate clears first, in
+which case CP-019/CP-020 become available too — see
+`docs/product/phase-dependency-graph.md`. CP-017's own status is
+unchanged here — its real implementation lives on the sibling branch
+`17-feature-real-notification-delivery`, not yet merged (see
+`docs/product/phase-018-audit.md` §18/§21).
+**Last Audit:** 2026-08-21 (`docs/product/phase-018-audit.md`).
 
 This file is a human-readable summary. The source of truth is
 [`docs/product/roadmap.json`](docs/product/roadmap.json), kept in sync by
@@ -38,15 +43,18 @@ Legend: `[x]` Completed · `[~]` In progress / Partial · `[ ]` Planned ·
 
 - [x] CP-014 — Roadmap Audit & Governance
 - [x] CP-015 — Integration Reconciliation _(merged CP-012/013/014, fresh-DB zero-drift proven, 195/195 e2e twice consecutively)_
-- [x] CP-016 — Platform Reliability Foundation _(this phase — real Redis CI service, bounded startup preflight in all 3 Redis-dependent services, `/health/ready` split, all live-proven twice against a real Redis; rate limiting (P1-1) and full observability (P1-5) explicitly deferred by this phase's own non-goals)_
+- [x] CP-016 — Platform Reliability Foundation _(real Redis CI service, bounded startup preflight in all 3 Redis-dependent services, `/health/ready` split, all live-proven twice against a real Redis; rate limiting (P1-1) and full observability (P1-5) explicitly deferred by this phase's own non-goals)_
+
+## Client applications
+
+- [x] CP-018 — Admin Panel MVP _(this phase — real operator UI over the pre-existing, RBAC-gated backend: auth, permission-aware nav, catalog/inventory/order/return operator views; zero new backend business logic beyond a CORS config widening; 12/12 e2e + 16/16 unit tests, run twice; see `docs/product/phase-018-audit.md`)_
 
 ## Planned — active tracks (the gate is closed)
 
-- [ ] CP-017 — Real Notification Delivery
-- [ ] CP-018 — Admin Panel MVP
+- [ ] CP-017 — Real Notification Delivery _(real implementation exists on sibling branch `17-feature-real-notification-delivery`, not yet reflected here — see `docs/product/phase-018-audit.md` §18)_
 - [!] CP-019 — Customer Domain & Prescription _(blocked on domain-expert review)_
-- [ ] CP-020 — Storefront MVP
-- [ ] CP-021 — Procurement
+- [ ] CP-020 — Storefront MVP _(needs CP-019, still blocked)_
+- [ ] CP-021 — Procurement _(depends only on CP-015 — unblocked)_
 
 ## Planned — deferred tracks
 

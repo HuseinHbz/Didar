@@ -32,8 +32,8 @@ Two documents describe "the admin panel" at very different sizes:
    canonical, current phase definition CP-014 established and every
    phase since has been built against): a narrower MVP —
    `deliverables: [Auth flow (login, 2FA), Permission-aware navigation,
-   Order/fulfillment/return operator views, Inventory adjustment/transfer
-   views, Catalog product/variant/SKU management views]`.
+Order/fulfillment/return operator views, Inventory adjustment/transfer
+views, Catalog product/variant/SKU management views]`.
 
 `blueprint.md` is the original, superseded full-product vision (CP-000);
 `master-roadmap-v2.md` is what CP-014's audit and every phase since
@@ -101,12 +101,12 @@ does not conflict with "never trust hidden client state."
 Every one of `P018`'s five deliverables maps onto an already-implemented,
 already-RBAC-gated, already-tested route:
 
-| Deliverable | Backend surface (all pre-existing, CP-004/005/006/009/011/012/013) |
-| --- | --- |
-| Auth (login, 2FA) | `AuthController`, `TwoFactorController` |
-| Permission-aware nav | `PermissionsController#mine` (`GET /me/permissions`) |
-| Catalog product/variant/SKU | `ProductController`, `VariantSkuController` (`admin/catalog/*`) |
-| Inventory adjustment/transfer | `AdjustmentController`, `TransferController`, `StockController` |
+| Deliverable                             | Backend surface (all pre-existing, CP-004/005/006/009/011/012/013)                                               |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Auth (login, 2FA)                       | `AuthController`, `TwoFactorController`                                                                          |
+| Permission-aware nav                    | `PermissionsController#mine` (`GET /me/permissions`)                                                             |
+| Catalog product/variant/SKU             | `ProductController`, `VariantSkuController` (`admin/catalog/*`)                                                  |
+| Inventory adjustment/transfer           | `AdjustmentController`, `TransferController`, `StockController`                                                  |
 | Order/fulfillment/return operator views | `OrderAdminController`, `FulfillmentAdminController`, `ReturnAdminController`, `ReturnSettlementAdminController` |
 
 No migration, no new DTO on the backend, no new use case. This satisfies
@@ -199,8 +199,8 @@ based implementation that never logs tokens/passwords/OTP codes/PII
 beyond the current route — and documents wiring a real provider (Sentry
 or equivalent) behind that same interface as a staging task, the same
 "real code, unverified live network path" pattern already established
-for ZarinPal (P1-6) and Kavenegar (P1-8). This is recorded as a new gap,
-not silently treated as done.
+for ZarinPal (`P1-6`). Recorded as new gap `P1-9`
+(`docs/product/gap-priority-matrix.md`), not silently treated as done.
 
 ## Non-goals (explicit)
 
@@ -229,8 +229,8 @@ not silently treated as done.
   first frontend test suite in this repository; its shape (Playwright
   for e2e, matching `docs/product/phase-governance.md`'s "no mocks for
   infrastructure behavior" applied to the frontend — a real running API
-  + real Postgres/Redis behind the smoke tests, not a mocked fetch) is
-  the template CP-020/CP-022 inherit.
+  - real Postgres/Redis behind the smoke tests, not a mocked fetch) is
+    the template CP-020/CP-022 inherit.
 - The RBAC-administration gap this ADR documents needs an owner —
   recorded in `docs/product/gap-priority-matrix.md` as a new item this
   phase's own audit adds, not assigned to a phase without evidence that

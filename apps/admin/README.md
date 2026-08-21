@@ -38,7 +38,7 @@ Built:
   origin (`http://localhost:3001`) — infrastructure config, not a new endpoint.
 - **Server-side authorization only.** `useAuth().hasPermission()` /
   `hasModuleAccess()` (backed by the real `GET /me/permissions`) decide what to
-  *show*. They decide nothing about what the backend *allows* — every mutation
+  _show_. They decide nothing about what the backend _allows_ — every mutation
   is re-checked by the same `AuthorizationGuard` / `@RequirePermission` /
   `@RequireModule` decorators every other client already goes through. See
   `docs/security/admin-panel-security.md` and `e2e/authorization.spec.ts`

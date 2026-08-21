@@ -245,13 +245,13 @@
     {
       "id": "CP-018",
       "name": "Admin Panel MVP",
-      "gitPhase": null,
+      "gitPhase": "18",
       "blueprintPhase": null,
-      "status": "NOT_STARTED",
-      "completionPercent": 0,
+      "status": "VALIDATED",
+      "completionPercent": 95,
       "dependencies": ["CP-015", "CP-016"],
-      "gitBranch": null,
-      "latestCommit": null,
+      "gitBranch": "18-feature-admin-panel-mvp",
+      "latestCommit": "5d40ef2",
       "blockingIssues": ["P1-3"],
       "priority": "P1"
     },
@@ -573,7 +573,7 @@
       "phase": "CP-018",
       "domain": "frontend",
       "userType": "admin",
-      "status": "PLANNED"
+      "status": "VALIDATED"
     },
     {
       "id": "REQ-FE-02",
@@ -616,8 +616,8 @@
     {
       "id": "P1-3",
       "priority": "P1",
-      "description": "Zero client-application business features",
-      "ownerPhase": "CP-018,CP-020,CP-022"
+      "description": "Zero client-application business features (CP-018 resolved this for apps/admin; apps/storefront/pwa/mobile remain unmodified scaffolds)",
+      "ownerPhase": "CP-020,CP-022"
     },
     {
       "id": "P1-4",
@@ -718,12 +718,12 @@
       "ownerPhase": "CP-027"
     }
   ],
-  "nextPhase": "CP-017 (or CP-018/CP-021 \u2014 see phase-dependency-graph.md)",
+  "nextPhase": "CP-018 is now VALIDATED. CP-020 needs both CP-018 and CP-019, and CP-019 remains BLOCKED (domain-expert review gate) \u2014 not yet available. CP-021 depends only on CP-015 and is genuinely unblocked now; recommended next unless CP-019's gate clears first. CP-017's own status is unchanged by this file \u2014 its real implementation lives on the sibling branch 17-feature-real-notification-delivery, not yet reflected here (see phase-018-audit.md \u00a721/\u00a718). See phase-dependency-graph.md for the full graph.",
   "aggregate": {
-    "completedPhases": 17,
+    "completedPhases": 18,
     "partialPhases": 0,
     "inProgressPhases": 0,
-    "plannedPhases": 13,
+    "plannedPhases": 12,
     "totalPhases": 30
   }
 }

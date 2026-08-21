@@ -11,7 +11,7 @@ account) and `docs/product/admin-panel.md` (scope).
 **Frontend visibility is not authorization.** `apps/admin`'s
 `useAuth().hasPermission()` / `hasModuleAccess()` — backed by a real call to
 `GET /me/permissions` — decide only what the sidebar and page-level "New …"
-buttons *render*. They decide nothing about what `services/api` *allows*.
+buttons _render_. They decide nothing about what `services/api` _allows_.
 Every mutation this app can trigger passes through the exact same
 `AuthorizationGuard` / `@RequirePermission(...)` / `@RequireModule(...)`
 decorators any other client (a future mobile app, a direct API caller, a
@@ -25,9 +25,9 @@ issued directly, with or without a button in front of it.
 
 ## Proof, not assertion: `e2e/authorization.spec.ts`
 
-`testing_requirements`'s own rule, applied literally: *"a test that only
+`testing_requirements`'s own rule, applied literally: _"a test that only
 checks that a button is hidden is NOT an authorization test. Test the API
-directly."* This suite never opens a browser page — it uses Playwright's
+directly."_ This suite never opens a browser page — it uses Playwright's
 `request` fixture to call `services/api` directly, bypassing the UI
 entirely:
 
@@ -35,12 +35,12 @@ entirely:
 - A garbage/malformed bearer token → `401`, not a `500` or a silent
   pass-through.
 - **Vertical privilege escalation**: the `catalog_editor` fixture (confirmed,
-  via its own real `GET /me/permissions` call in the same test, to *not*
+  via its own real `GET /me/permissions` call in the same test, to _not_
   hold `catalog.products.publish`) gets a real `403` from
   `POST /admin/catalog/products/:id/publish` — never a `200`.
 - **Module-level bypass**: the same fixture (no order/return module access)
   gets `403` from `GET /admin/orders` and `GET /admin/returns`.
-- **Not a global lockout**: the `admin` fixture (which *does* hold
+- **Not a global lockout**: the `admin` fixture (which _does_ hold
   `order.read`) gets a real `200` from the identical route — proving the
   403s above are a permission check, not every non-superuser being rejected.
 
@@ -56,7 +56,7 @@ entirely:
   and matched against a `Session` row — not JWTs, not self-verifying, and
   fully revocable server-side (logout, or an operator revoking a session).
   A stolen refresh token from `localStorage` (via XSS) is a real risk this
-  doesn't eliminate, but it's a *revocable* one, not a standing forged
+  doesn't eliminate, but it's a _revocable_ one, not a standing forged
   credential — the same tradeoff `services/api`'s own identity module
   already made for every other client before this phase existed.
 
@@ -71,7 +71,7 @@ async call resolves. The first implementation of `AuthProvider`'s
 session-restore effect fired **two concurrent `/auth/refresh` calls** with
 the identical stored token on every full page load. Whichever the server
 processed second hit the now-revoked token, threw, and its `catch` branch
-unconditionally called `clearTokens()` — wiping out the *other* call's
+unconditionally called `clearTokens()` — wiping out the _other_ call's
 freshly-established, valid session, regardless of which one "won" the
 client-side race. Caught by the real e2e suite (a hard page navigation
 after login reliably left the session stuck on `status: 'loading'` or
@@ -116,7 +116,7 @@ route produces. This phase adds no second logging framework and
 introduces no path that bypasses it: there is no direct-database write,
 no admin-only shortcut route, anywhere in `apps/admin`'s API layer.
 
-## What this phase does *not* cover
+## What this phase does _not_ cover
 
 - **Role/permission/user/session/API-key/audit-log administration UI.**
   The backend for all of it exists and is RBAC-gated (CP-004); no admin
@@ -132,5 +132,7 @@ no admin-only shortcut route, anywhere in `apps/admin`'s API layer.
 - **A reachable third-party error-reporting provider.** `error-reporter.ts`
   defines a real `reportError()` interface and a real `ErrorBoundary` that
   calls it, but no live provider (Sentry or equivalent) is reachable from
-  this sandbox — same class of gap ADR-018 decision 7 documents, and the
-  same one earlier phases (P1-6/P1-8) already carry.
+  this sandbox — recorded as new gap `P1-9`
+  (`docs/product/gap-priority-matrix.md`), the same category as `P1-6`'s
+  ZarinPal-reachability gap: a real integration blocked by this sandbox's
+  network policy, not missing code.
