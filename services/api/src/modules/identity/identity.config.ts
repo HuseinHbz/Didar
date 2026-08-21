@@ -7,4 +7,6 @@ export interface IdentityConfig {
   /** Only ever true outside production — gates whether an OTP response is
    * allowed to echo the raw code (see RequestOtpUseCase). */
   exposeOtpCodeForTesting: boolean;
+  /** CP-017 — see OtpRequest.shouldSkipNotification's own doc comment. */
+  otpNotificationCooldownSeconds: number;
 }

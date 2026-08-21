@@ -1,6 +1,10 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
-import type { OtpPurpose } from '../../domain/entities/otp-request.entity';
+import { OtpRequest, type OtpPurpose } from '../../domain/entities/otp-request.entity';
+import {
+  OTP_NOTIFICATION_PORT,
+  type OtpNotificationPort,
+} from '../../domain/ports/otp-notification.port';
 import { OTP_REPOSITORY, type OtpRepositoryPort } from '../../domain/ports/otp.repository.port';
 import {
   SECURITY_EVENT_REPOSITORY,
@@ -19,21 +23,33 @@ export interface RequestOtpResult {
 /**
  * blueprint §56: mobile OTP is the primary auth mechanism.
  *
- * Delivery is NOT wired here — `services/notification-worker` is still a
- * stub adapter set (see that service's README), so there's no real SMS
- * provider to call yet. Rather than fabricate a "delivered" response this
- * use case always returns the generated code on `devOnlyCode`, and the
- * *controller* decides whether to actually put it in the HTTP response,
- * gated on `IdentityConfig.exposeOtpCodeForTesting` (true outside
- * production). That keeps this class itself honest and testable — it never
- * pretends an SMS went out — while still letting e2e tests and local dev
- * complete a real OTP login without a real SMS provider.
+ * CP-017: delivery is real (see `OTP_NOTIFICATION_PORT` ->
+ * `BullmqOtpNotificationAdapter` -> `services/notification-worker`'s real
+ * `SmsAdapter`) — but this use case still always returns the generated
+ * code on `devOnlyCode` (gated on `IdentityConfig.exposeOtpCodeForTesting`,
+ * true outside production only) rather than trusting dispatch to have
+ * succeeded: notification dispatch is fire-and-forget from here (see the
+ * try/catch below) precisely because a transient dispatch failure must
+ * never fail — or silently lie about — the OTP-issuance response itself.
+ * That keeps this class honest and testable exactly as it was pre-CP-017,
+ * while still letting e2e tests and local dev complete a real OTP login
+ * without depending on a real SMS provider or its network reachability.
+ *
+ * A repeat request for the same `(phone, purpose)` within
+ * `otpNotificationCooldownSeconds` of a still-usable prior request skips
+ * the SMS dispatch (never the code itself — every call still gets a
+ * fresh, valid code) — see `OtpRequest.shouldSkipNotification`'s own doc
+ * comment for the full reasoning and why this is safe for every existing
+ * caller of this use case.
  */
 @Injectable()
 export class RequestOtpUseCase {
+  private readonly logger = new Logger(RequestOtpUseCase.name);
+
   constructor(
     @Inject(OTP_REPOSITORY) private readonly otpRequests: OtpRepositoryPort,
     @Inject(SECURITY_EVENT_REPOSITORY) private readonly securityEvents: SecurityEventRepositoryPort,
+    @Inject(OTP_NOTIFICATION_PORT) private readonly otpNotifications: OtpNotificationPort,
     @Inject(IDENTITY_CONFIG) private readonly config: IdentityConfig,
     private readonly otpCode: OtpCodeService,
   ) {}
@@ -43,8 +59,11 @@ export class RequestOtpUseCase {
     purpose: OtpPurpose;
     ipAddress?: string | null;
   }): Promise<RequestOtpResult> {
+    const now = new Date();
+    const previous = await this.otpRequests.findLatest(props.phone, props.purpose);
+
     const { code, codeHash } = this.otpCode.generate();
-    const expiresAt = new Date(Date.now() + this.config.otpTtlSeconds * 1000);
+    const expiresAt = new Date(now.getTime() + this.config.otpTtlSeconds * 1000);
 
     await this.otpRequests.create({
       phone: props.phone,
@@ -57,6 +76,26 @@ export class RequestOtpUseCase {
       ipAddress: props.ipAddress,
       metadata: { phone: props.phone, purpose: props.purpose },
     });
+
+    const skipDispatch = OtpRequest.shouldSkipNotification(
+      previous,
+      now,
+      this.config.otpNotificationCooldownSeconds,
+    );
+    if (!skipDispatch) {
+      // Fire-and-forget by design (see this class's own doc comment) — a
+      // dispatch failure is logged, never thrown: the code already exists
+      // and is already usable via `devOnlyCode` outside production, and a
+      // production caller's HTTP response must reflect that the code was
+      // *issued*, which already happened above, not that an SMS provider
+      // round-trip succeeded.
+      this.otpNotifications
+        .sendOtpSms({ phone: props.phone, code, purpose: props.purpose })
+        .catch((error: unknown) => {
+          const reason = error instanceof Error ? error.message : 'unknown error';
+          this.logger.warn(`OTP notification dispatch failed for ${props.phone}: ${reason}`);
+        });
+    }
 
     return { expiresAt, devOnlyCode: this.config.exposeOtpCodeForTesting ? code : null };
   }
