@@ -1,0 +1,714 @@
+{
+  "schemaVersion": "1.0.0",
+  "generatedBy": "CP-014 (Roadmap Audit & Governance)",
+  "generatedAt": "2026-08-21T00:00:00Z",
+  "sourceOfTruthNote": "This file is the one machine-readable source of truth for phase/requirement tracking. Human-readable companions: canonical-roadmap.md, project-progress.md, requirements-matrix.md, gap-priority-matrix.md. pnpm roadmap:audit reads this file and re-derives status from repository evidence — it does not trust the values below without checking them.",
+  "statusEnum": [
+    "NOT_STARTED",
+    "PLANNED",
+    "SCAFFOLDED",
+    "PARTIAL",
+    "IMPLEMENTED",
+    "VALIDATED",
+    "PRODUCTION_READY",
+    "BLOCKED",
+    "DEPRECATED",
+    "UNKNOWN",
+    "IN_PROGRESS"
+  ],
+  "priorityEnum": ["P0", "P1", "P2"],
+  "phases": [
+    {
+      "id": "CP-000",
+      "name": "Product/architecture definition",
+      "gitPhase": null,
+      "blueprintPhase": "PHASE 0",
+      "status": "VALIDATED",
+      "completionPercent": 90,
+      "dependencies": [],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": []
+    },
+    {
+      "id": "CP-001",
+      "name": "Monorepo foundation",
+      "gitPhase": "01",
+      "blueprintPhase": "PHASE 1 (partial)",
+      "status": "PRODUCTION_READY",
+      "completionPercent": 95,
+      "dependencies": ["CP-000"],
+      "gitBranch": "01-feature-foundation-monorepo",
+      "latestCommit": "0585858",
+      "blockingIssues": []
+    },
+    {
+      "id": "CP-002",
+      "name": "CI/CD quality gate",
+      "gitPhase": "02",
+      "blueprintPhase": "PHASE 1 (CI/CD)",
+      "status": "IMPLEMENTED",
+      "completionPercent": 70,
+      "dependencies": ["CP-001"],
+      "gitBranch": "02-feature-ci-pipeline",
+      "latestCommit": "8bb4ea9",
+      "blockingIssues": ["P0-2"]
+    },
+    {
+      "id": "CP-003",
+      "name": "Database foundation",
+      "gitPhase": "03",
+      "blueprintPhase": "PHASE 1 (PostgreSQL); PHASE 14 (Backup, partial)",
+      "status": "VALIDATED",
+      "completionPercent": 80,
+      "dependencies": ["CP-001"],
+      "gitBranch": "03-feature-database-foundation",
+      "latestCommit": "3f7e013",
+      "blockingIssues": []
+    },
+    {
+      "id": "CP-004",
+      "name": "Identity/RBAC/2FA/audit",
+      "gitPhase": "04",
+      "blueprintPhase": "PHASE 1 (Auth); PHASE 5 (Account, partial); PHASE 13 (RBAC/2FA/Audit)",
+      "status": "PRODUCTION_READY",
+      "completionPercent": 90,
+      "dependencies": ["CP-003"],
+      "gitBranch": "04-feature-identity-authz",
+      "latestCommit": "07490ed",
+      "blockingIssues": []
+    },
+    {
+      "id": "CP-005",
+      "name": "Catalog",
+      "gitPhase": "05",
+      "blueprintPhase": "PHASE 2",
+      "status": "VALIDATED",
+      "completionPercent": 88,
+      "dependencies": ["CP-003", "CP-004"],
+      "gitBranch": "05-feature-catalog-commerce",
+      "latestCommit": "354daa2",
+      "blockingIssues": []
+    },
+    {
+      "id": "CP-006",
+      "name": "Inventory core",
+      "gitPhase": "06",
+      "blueprintPhase": "PHASE 4 (partial)",
+      "status": "VALIDATED",
+      "completionPercent": 78,
+      "dependencies": ["CP-003", "CP-004", "CP-005"],
+      "gitBranch": "06-feature-inventory-warehouse",
+      "latestCommit": "db80dd7",
+      "blockingIssues": ["P1-owned-by-CP-021"]
+    },
+    {
+      "id": "CP-007",
+      "name": "Cart/checkout",
+      "gitPhase": "07",
+      "blueprintPhase": "PHASE 3 (Cart, Checkout)",
+      "status": "VALIDATED",
+      "completionPercent": 88,
+      "dependencies": ["CP-005", "CP-006"],
+      "gitBranch": "07-feature-cart-checkout",
+      "latestCommit": "75bdee3",
+      "blockingIssues": []
+    },
+    {
+      "id": "CP-008",
+      "name": "Payment orchestration",
+      "gitPhase": "08",
+      "blueprintPhase": "PHASE 3 (Payments)",
+      "status": "IMPLEMENTED",
+      "completionPercent": 75,
+      "dependencies": ["CP-007"],
+      "gitBranch": "08-feature-payment-orchestration",
+      "latestCommit": "a7c81a2",
+      "blockingIssues": ["P1-6"]
+    },
+    {
+      "id": "CP-009",
+      "name": "Order/invoice/fulfillment",
+      "gitPhase": "09",
+      "blueprintPhase": "PHASE 3 (Orders, Shipping, Invoice)",
+      "status": "VALIDATED",
+      "completionPercent": 85,
+      "dependencies": ["CP-005", "CP-006", "CP-007", "CP-008"],
+      "gitBranch": "09-feature-order-fulfillment",
+      "latestCommit": "09b99e9",
+      "blockingIssues": []
+    },
+    {
+      "id": "CP-010",
+      "name": "Promotion/coupon engine",
+      "gitPhase": "10",
+      "blueprintPhase": "PHASE 7 (coupon only)",
+      "status": "VALIDATED",
+      "completionPercent": 85,
+      "dependencies": ["CP-007", "CP-009"],
+      "gitBranch": "10-feature-promotion-pricing",
+      "latestCommit": "7bef754",
+      "blockingIssues": ["P2-9-owned-by-CP-024"]
+    },
+    {
+      "id": "CP-011",
+      "name": "Order lifecycle hardening",
+      "gitPhase": "11",
+      "blueprintPhase": null,
+      "status": "VALIDATED",
+      "completionPercent": 88,
+      "dependencies": ["CP-009"],
+      "gitBranch": "11-feature-order-lifecycle-shipping",
+      "latestCommit": "39f5a7b",
+      "blockingIssues": []
+    },
+    {
+      "id": "CP-012",
+      "name": "Returns/refunds/credit notes",
+      "gitPhase": "12",
+      "blueprintPhase": null,
+      "status": "BLOCKED",
+      "completionPercent": 82,
+      "integrationPercent": 0,
+      "dependencies": ["CP-009"],
+      "gitBranch": "12-feature-returns-refunds-credit-notes",
+      "latestCommit": "0d5f913",
+      "blockingIssues": ["P0-1"]
+    },
+    {
+      "id": "CP-013",
+      "name": "Return settlement recovery/reconciliation",
+      "gitPhase": "13",
+      "blueprintPhase": null,
+      "status": "BLOCKED",
+      "completionPercent": 85,
+      "integrationPercent": 0,
+      "dependencies": ["CP-012"],
+      "gitBranch": "13-feature-return-settlement-reconciliation",
+      "latestCommit": "443be06",
+      "blockingIssues": ["P0-1"]
+    },
+    {
+      "id": "CP-014",
+      "name": "Roadmap Audit & Governance",
+      "gitPhase": "014 (audit) / 14 (governance)",
+      "blueprintPhase": null,
+      "status": "IN_PROGRESS",
+      "completionPercent": null,
+      "dependencies": [],
+      "gitBranch": "14-feature-roadmap-reconciliation",
+      "latestCommit": null,
+      "blockingIssues": []
+    },
+    {
+      "id": "CP-015",
+      "name": "Integration Reconciliation",
+      "gitPhase": null,
+      "blueprintPhase": null,
+      "status": "NOT_STARTED",
+      "completionPercent": 0,
+      "dependencies": [],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P0-1"],
+      "priority": "P0"
+    },
+    {
+      "id": "CP-016",
+      "name": "Platform Reliability Foundation",
+      "gitPhase": null,
+      "blueprintPhase": "PHASE 1 (remainder); PHASE 13 (remainder)",
+      "status": "NOT_STARTED",
+      "completionPercent": 0,
+      "dependencies": ["CP-015"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P0-2", "P1-1", "P1-5"],
+      "priority": "P0"
+    },
+    {
+      "id": "CP-017",
+      "name": "Real Notification Delivery",
+      "gitPhase": null,
+      "blueprintPhase": "PHASE 11 (remainder)",
+      "status": "NOT_STARTED",
+      "completionPercent": 0,
+      "dependencies": ["CP-016"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P1-2"],
+      "priority": "P1"
+    },
+    {
+      "id": "CP-018",
+      "name": "Admin Panel MVP",
+      "gitPhase": null,
+      "blueprintPhase": null,
+      "status": "NOT_STARTED",
+      "completionPercent": 0,
+      "dependencies": ["CP-015", "CP-016"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P1-3"],
+      "priority": "P1"
+    },
+    {
+      "id": "CP-019",
+      "name": "Customer Domain & Prescription",
+      "gitPhase": null,
+      "blueprintPhase": "PHASE 5 (remainder)",
+      "status": "BLOCKED",
+      "completionPercent": 0,
+      "dependencies": ["CP-015", "CP-016"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P1-4"],
+      "priority": "P1"
+    },
+    {
+      "id": "CP-020",
+      "name": "Storefront MVP",
+      "gitPhase": null,
+      "blueprintPhase": "PHASE 9 (partial)",
+      "status": "NOT_STARTED",
+      "completionPercent": 0,
+      "dependencies": ["CP-016", "CP-018", "CP-019"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P1-3"],
+      "priority": "P1"
+    },
+    {
+      "id": "CP-021",
+      "name": "Procurement",
+      "gitPhase": null,
+      "blueprintPhase": "PHASE 4 (remainder)",
+      "status": "NOT_STARTED",
+      "completionPercent": 0,
+      "dependencies": ["CP-015"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P2-1"],
+      "priority": "P2"
+    },
+    {
+      "id": "CP-022",
+      "name": "Mobile real features",
+      "gitPhase": null,
+      "blueprintPhase": "PHASE 9 (remainder)",
+      "status": "NOT_STARTED",
+      "completionPercent": 0,
+      "dependencies": ["CP-018", "CP-020"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": [],
+      "priority": "P2"
+    },
+    {
+      "id": "CP-023",
+      "name": "CMS",
+      "gitPhase": null,
+      "blueprintPhase": "PHASE 6",
+      "status": "NOT_STARTED",
+      "completionPercent": 0,
+      "dependencies": ["CP-018"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P2-4"],
+      "priority": "P2"
+    },
+    {
+      "id": "CP-024",
+      "name": "CRM beyond coupons",
+      "gitPhase": null,
+      "blueprintPhase": "PHASE 7 (remainder)",
+      "status": "NOT_STARTED",
+      "completionPercent": 0,
+      "dependencies": ["CP-019", "CP-020"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P2-9"],
+      "priority": "P2"
+    },
+    {
+      "id": "CP-025",
+      "name": "Store/POS/omnichannel",
+      "gitPhase": null,
+      "blueprintPhase": "PHASE 8",
+      "status": "NOT_STARTED",
+      "completionPercent": 0,
+      "dependencies": ["CP-018", "CP-021"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P2-10"],
+      "priority": "P2"
+    },
+    {
+      "id": "CP-026",
+      "name": "AI",
+      "gitPhase": null,
+      "blueprintPhase": "PHASE 10",
+      "status": "NOT_STARTED",
+      "completionPercent": 0,
+      "dependencies": ["CP-020"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P2-11"],
+      "priority": "P2"
+    },
+    {
+      "id": "CP-027",
+      "name": "Advanced Analytics",
+      "gitPhase": null,
+      "blueprintPhase": "PHASE 12",
+      "status": "NOT_STARTED",
+      "completionPercent": 0,
+      "dependencies": ["CP-020"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P2-12"],
+      "priority": "P2"
+    },
+    {
+      "id": "CP-028",
+      "name": "Security Hardening completion",
+      "gitPhase": null,
+      "blueprintPhase": "PHASE 13 (remainder)",
+      "status": "NOT_STARTED",
+      "completionPercent": 0,
+      "dependencies": ["CP-016"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P1-7", "P2-6", "P2-7"],
+      "priority": "P1"
+    },
+    {
+      "id": "CP-029",
+      "name": "Production Readiness completion",
+      "gitPhase": null,
+      "blueprintPhase": "PHASE 14 (remainder)",
+      "status": "NOT_STARTED",
+      "completionPercent": 0,
+      "dependencies": ["CP-016"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P1-5"],
+      "priority": "P1"
+    }
+  ],
+  "requirements": [
+    {
+      "id": "REQ-ID-01",
+      "phase": "CP-004",
+      "domain": "identity",
+      "userType": "customer",
+      "status": "DONE"
+    },
+    {
+      "id": "REQ-ID-02",
+      "phase": "CP-004",
+      "domain": "identity",
+      "userType": "admin",
+      "status": "DONE"
+    },
+    {
+      "id": "REQ-ID-03",
+      "phase": "CP-004",
+      "domain": "identity",
+      "userType": "admin",
+      "status": "DONE"
+    },
+    {
+      "id": "REQ-CAT-01",
+      "phase": "CP-005",
+      "domain": "catalog",
+      "userType": "admin",
+      "status": "DONE"
+    },
+    {
+      "id": "REQ-CAT-02",
+      "phase": "CP-005",
+      "domain": "catalog",
+      "userType": "customer",
+      "status": "DONE"
+    },
+    {
+      "id": "REQ-INV-01",
+      "phase": "CP-006",
+      "domain": "inventory",
+      "userType": "system",
+      "status": "DONE"
+    },
+    {
+      "id": "REQ-INV-02",
+      "phase": "CP-006",
+      "domain": "inventory",
+      "userType": "admin",
+      "status": "DONE"
+    },
+    {
+      "id": "REQ-PROC-01",
+      "phase": "CP-021",
+      "domain": "inventory",
+      "userType": "admin",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-CHK-01",
+      "phase": "CP-007",
+      "domain": "cart-checkout",
+      "userType": "customer",
+      "status": "DONE"
+    },
+    {
+      "id": "REQ-PAY-01",
+      "phase": "CP-008",
+      "domain": "payment",
+      "userType": "system",
+      "status": "DONE"
+    },
+    {
+      "id": "REQ-PAY-02",
+      "phase": "CP-008",
+      "domain": "payment",
+      "userType": "customer",
+      "status": "PARTIAL"
+    },
+    {
+      "id": "REQ-ORD-01",
+      "phase": "CP-009",
+      "domain": "order",
+      "userType": "customer",
+      "status": "DONE"
+    },
+    {
+      "id": "REQ-ORD-02",
+      "phase": "CP-009",
+      "domain": "order",
+      "userType": "admin",
+      "status": "DONE"
+    },
+    {
+      "id": "REQ-PROMO-01",
+      "phase": "CP-010",
+      "domain": "promotion",
+      "userType": "customer",
+      "status": "DONE"
+    },
+    {
+      "id": "REQ-PROMO-02",
+      "phase": "CP-010",
+      "domain": "promotion",
+      "userType": "customer",
+      "status": "DONE"
+    },
+    {
+      "id": "REQ-RET-01",
+      "phase": "CP-012",
+      "domain": "return",
+      "userType": "customer",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "REQ-RET-02",
+      "phase": "CP-012",
+      "domain": "return",
+      "userType": "system",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "REQ-SET-01",
+      "phase": "CP-013",
+      "domain": "return",
+      "userType": "system",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "REQ-SET-02",
+      "phase": "CP-013",
+      "domain": "return",
+      "userType": "admin",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "REQ-PLAT-01",
+      "phase": "CP-015",
+      "domain": "platform",
+      "userType": "system",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-PLAT-02",
+      "phase": "CP-016",
+      "domain": "platform",
+      "userType": "system",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-PLAT-03",
+      "phase": "CP-016",
+      "domain": "platform",
+      "userType": "system",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-NOTIF-01",
+      "phase": "CP-017",
+      "domain": "notification",
+      "userType": "customer",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-CUST-01",
+      "phase": "CP-019",
+      "domain": "customer",
+      "userType": "customer",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-FE-01",
+      "phase": "CP-018",
+      "domain": "frontend",
+      "userType": "admin",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-FE-02",
+      "phase": "CP-020",
+      "domain": "frontend",
+      "userType": "customer",
+      "status": "PLANNED"
+    }
+  ],
+  "gaps": [
+    {
+      "id": "P0-1",
+      "priority": "P0",
+      "description": "CP-012/013 not merged into develop",
+      "ownerPhase": "CP-015"
+    },
+    {
+      "id": "P0-2",
+      "priority": "P0",
+      "description": "CI has no Redis service; no fail-fast on Redis unreachability",
+      "ownerPhase": "CP-016"
+    },
+    {
+      "id": "P1-1",
+      "priority": "P1",
+      "description": "No rate limiting anywhere in services/api",
+      "ownerPhase": "CP-016"
+    },
+    {
+      "id": "P1-2",
+      "priority": "P1",
+      "description": "Every notification-channel adapter is a stub",
+      "ownerPhase": "CP-017"
+    },
+    {
+      "id": "P1-3",
+      "priority": "P1",
+      "description": "Zero client-application business features",
+      "ownerPhase": "CP-018,CP-020,CP-022"
+    },
+    {
+      "id": "P1-4",
+      "priority": "P1",
+      "description": "No Prescription domain model",
+      "ownerPhase": "CP-019"
+    },
+    {
+      "id": "P1-5",
+      "priority": "P1",
+      "description": "No production observability",
+      "ownerPhase": "CP-016,CP-029"
+    },
+    {
+      "id": "P1-6",
+      "priority": "P1",
+      "description": "Live ZarinPal gateway network path never verified",
+      "ownerPhase": "CP-008"
+    },
+    {
+      "id": "P1-7",
+      "priority": "P1",
+      "description": "No penetration test / threat model / OWASP pass",
+      "ownerPhase": "CP-028"
+    },
+    {
+      "id": "P2-1",
+      "priority": "P2",
+      "description": "No Purchase Order / Supplier model",
+      "ownerPhase": "CP-021"
+    },
+    {
+      "id": "P2-2",
+      "priority": "P2",
+      "description": "8 stale duplicate git branch refs",
+      "ownerPhase": null
+    },
+    {
+      "id": "P2-3",
+      "priority": "P2",
+      "description": "Husky installed, no hook files configured",
+      "ownerPhase": "CP-016"
+    },
+    {
+      "id": "P2-4",
+      "priority": "P2",
+      "description": "~40% of schema has zero application code",
+      "ownerPhase": "CP-019,CP-023,CP-024,CP-027"
+    },
+    {
+      "id": "P2-5",
+      "priority": "P2",
+      "description": "No Jalali calendar support",
+      "ownerPhase": "CP-020"
+    },
+    {
+      "id": "P2-6",
+      "priority": "P2",
+      "description": "API keys issuable but not usable to authenticate a request",
+      "ownerPhase": "CP-028"
+    },
+    {
+      "id": "P2-7",
+      "priority": "P2",
+      "description": "No KMS-backed key rotation",
+      "ownerPhase": "CP-028"
+    },
+    {
+      "id": "P2-8",
+      "priority": "P2",
+      "description": "10 unaudited eslint-disable occurrences",
+      "ownerPhase": null
+    },
+    {
+      "id": "P2-9",
+      "priority": "P2",
+      "description": "No CRM beyond coupons",
+      "ownerPhase": "CP-024"
+    },
+    {
+      "id": "P2-10",
+      "priority": "P2",
+      "description": "No Store/POS/omnichannel capability",
+      "ownerPhase": "CP-025"
+    },
+    { "id": "P2-11", "priority": "P2", "description": "No AI capability", "ownerPhase": "CP-026" },
+    {
+      "id": "P2-12",
+      "priority": "P2",
+      "description": "No Advanced Analytics beyond one event-sink table",
+      "ownerPhase": "CP-027"
+    }
+  ],
+  "nextPhase": "CP-015",
+  "aggregate": {
+    "completedPhases": 12,
+    "partialPhases": 2,
+    "inProgressPhases": 1,
+    "plannedPhases": 15,
+    "totalPhases": 30
+  }
+}
