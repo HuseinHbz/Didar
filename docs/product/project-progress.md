@@ -183,19 +183,28 @@ for the underlying commands/greps/live reproductions.
 - **Git branch:** `16-feature-platform-reliability` · **Latest commit:** see this phase's completion report
 - **Next action:** CP-017 (or whichever phase picks up P1-1/P1-5's remainder — see `next-phase-decision.md`)
 
-## Planned phases (CP-017 – CP-029) — zero implementation, defined scope
+### CP-017 — Real Notification Delivery
+
+- **Completion:** 80% (same "real provider adapter, unverified live network path" shape as CP-008 — see below)
+- **Database:** N/A (no schema change) · **Backend/API:** 100 (real Kavenegar `SmsAdapter`; `services/api` now a real BullMQ producer onto `notifications`) · **Security:** 90 (credential-handling verified by a live test assertion; narrow, documented `(phone, purpose)` cooldown — full rate limiting stays P1-1's) · **Testing:** 100 (17 new unit tests + 4 real-Redis e2e tests, all passing twice consecutively; zero regression across all 12 pre-existing e2e files that call `POST /auth/otp/request`) · **Integration:** 75 (on its own branch, not yet merged to `develop` — same situation CP-012/013 were in before CP-015; full e2e suite run twice against this branch) · **Documentation:** 100 (ADR-014 + product/security docs + 2 module README updates + this entry) · **CI/CD:** N/A (no CI change) · **Production Readiness:** 70 (real for OTP; live network path unverified — see P1-8; other 5 channels still stubbed, by design)
+- **Audit status:** IMPLEMENTED — see [`phase-017-audit.md`](phase-017-audit.md)
+- **Blocking issues:** **P1-8** (live Kavenegar network path never verified — staging task, not a code gap, same class as CP-008's own P1-6). **P1-1** (repo-wide rate limiting) remains open beyond this phase's own narrow OTP-dispatch cooldown.
+- **Dependencies:** CP-016
+- **Git branch:** `17-feature-real-notification-delivery` (cut from `16-feature-platform-reliability`'s tip, not `develop` — `develop` was still at CP-015's tip when this phase started; per `phase-governance.md`, a dependency only needs to be ≥`IMPLEMENTED`, which CP-016 exceeded) · **Latest commit:** see this phase's completion report
+- **Next action:** CP-018 (or CP-019/CP-021, which have no dependency on CP-017 — see `phase-dependency-graph.md`)
+
+## Planned phases (CP-018 – CP-029) — zero implementation, defined scope
 
 All of the following score **0% on every dimension** — none has any code,
 test, or documentation of its own implementation yet (their _planning_
 documentation exists in `master-roadmap-v2.md`/`canonical-roadmap.md`,
 which is CP-014's output, not theirs). Full objective/deliverables/
 acceptance criteria for each: [`../roadmap/master-roadmap-v2.md`](../roadmap/master-roadmap-v2.md)
-(as `P016`–`P021`, renumbered `CP-` here) and
+(as `P018`–`P021`, renumbered `CP-` here) and
 [`canonical-roadmap.md`](canonical-roadmap.md) (`CP-022`–`CP-029`).
 
 | CP ID  | Name                            | Priority | Dependencies           | Status      | Next action                                                |
 | ------ | ------------------------------- | -------- | ---------------------- | ----------- | ---------------------------------------------------------- |
-| CP-017 | Real Notification Delivery      | P1       | CP-016                 | NOT_STARTED | Wire one real SMS provider                                 |
 | CP-018 | Admin Panel MVP                 | P1       | CP-015, CP-016         | NOT_STARTED | First real frontend features                               |
 | CP-019 | Customer Domain & Prescription  | P1       | CP-015, CP-016         | BLOCKED     | Needs optometry-domain-expert review before implementation |
 | CP-020 | Storefront MVP                  | P1       | CP-016, CP-018, CP-019 | NOT_STARTED | First real customer-facing surface                         |
@@ -212,10 +221,13 @@ acceptance criteria for each: [`../roadmap/master-roadmap-v2.md`](../roadmap/mas
 ## Aggregate
 
 - **Completed (Implementation+Test+Integration+Docs all met, or the
-  design-only equivalent for CP-000):** 17 (CP-000–CP-016)
+  design-only equivalent for CP-000; CP-008 and CP-017 count here despite
+  each carrying one open "live network path unverified" gap — same
+  precedent both entries document explicitly rather than silently
+  inflating):** 18 (CP-000–CP-017)
 - **Partial:** 0
 - **In progress:** 0
-- **Planned (zero implementation):** 13 (CP-017–CP-029)
+- **Planned (zero implementation):** 12 (CP-018–CP-029)
 - **Total canonical phases tracked:** 30
 
 This count is the authoritative input to the "Number of completed/

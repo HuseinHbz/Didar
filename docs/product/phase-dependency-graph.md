@@ -30,7 +30,7 @@ CP-014 (roadmap audit & governance) ─▶ reads all of the above, blocks nothin
 
 CP-015 (integration reconciliation) ── depends on: CP-012, CP-013 existing (done) ── **DONE**, unblocked everything below
   └─▶ CP-016 (platform reliability foundation) ── **DONE** (P0-2 resolved; P1-1/P1-5's full form explicitly deferred, not blocking) ── unblocks everything below
-        ├─▶ CP-017 (real notification delivery)
+        ├─▶ CP-017 (real notification delivery) ── **DONE** (SMS; P1-2 resolved for SMS, live network path unverified — P1-8, same class as CP-008/P1-6)
         ├─▶ CP-018 (admin panel)
         │     ├─▶ CP-023 (CMS)
         │     └─▶ CP-025 (store/POS) [also needs CP-021]

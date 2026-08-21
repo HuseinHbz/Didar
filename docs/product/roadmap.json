@@ -232,14 +232,14 @@
     {
       "id": "CP-017",
       "name": "Real Notification Delivery",
-      "gitPhase": null,
+      "gitPhase": "17",
       "blueprintPhase": "PHASE 11 (remainder)",
-      "status": "NOT_STARTED",
-      "completionPercent": 0,
+      "status": "IMPLEMENTED",
+      "completionPercent": 80,
       "dependencies": ["CP-016"],
-      "gitBranch": null,
-      "latestCommit": null,
-      "blockingIssues": ["P1-2"],
+      "gitBranch": "17-feature-real-notification-delivery",
+      "latestCommit": "aa5e22a",
+      "blockingIssues": ["P1-8"],
       "priority": "P1"
     },
     {
@@ -559,7 +559,7 @@
       "phase": "CP-017",
       "domain": "notification",
       "userType": "customer",
-      "status": "PLANNED"
+      "status": "PARTIAL"
     },
     {
       "id": "REQ-CUST-01",
@@ -605,13 +605,15 @@
       "priority": "P1",
       "description": "No rate limiting anywhere in services/api",
       "ownerPhase": null,
-      "note": "Explicitly deferred by CP-016s own non-goals (out of scope for a Redis-reliability fix) \u2014 not yet reassigned to a specific future phase"
+      "note": "CP-017 added a narrow, non-exhaustive (phone,purpose)-keyed SMS-dispatch cooldown on POST /auth/otp/request only \u2014 real but partial; full repo-wide rate limiting still unassigned to a specific future phase"
     },
     {
       "id": "P1-2",
       "priority": "P1",
       "description": "Every notification-channel adapter is a stub",
-      "ownerPhase": "CP-017"
+      "ownerPhase": "CP-017",
+      "status": "RESOLVED",
+      "resolvedBy": "CP-017 \u2014 real Kavenegar SmsAdapter behind the existing NotificationChannelPort; Telegram/WhatsApp/Email/Push remain stubs by explicit non-goal"
     },
     {
       "id": "P1-3",
@@ -716,14 +718,22 @@
       "priority": "P2",
       "description": "No Advanced Analytics beyond one event-sink table",
       "ownerPhase": "CP-027"
+    },
+    {
+      "id": "P1-8",
+      "priority": "P1",
+      "description": "Live Kavenegar SMS gateway network path never verified",
+      "ownerPhase": "CP-017",
+      "status": "OPEN",
+      "note": "Staging verification task, not new code \u2014 same class as P1-6 (ZarinPal)"
     }
   ],
-  "nextPhase": "CP-017 (or CP-018/CP-021 \u2014 see phase-dependency-graph.md)",
+  "nextPhase": "CP-018 (or CP-019/CP-021 \u2014 see phase-dependency-graph.md)",
   "aggregate": {
-    "completedPhases": 17,
+    "completedPhases": 18,
     "partialPhases": 0,
     "inProgressPhases": 0,
-    "plannedPhases": 13,
+    "plannedPhases": 12,
     "totalPhases": 30
   }
 }
