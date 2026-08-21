@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0.0",
-  "generatedBy": "CP-014 (Roadmap Audit & Governance)",
+  "generatedBy": "CP-015 (Integration Reconciliation), on top of CP-014 (Roadmap Audit & Governance)",
   "generatedAt": "2026-08-21T00:00:00Z",
   "sourceOfTruthNote": "This file is the one machine-readable source of truth for phase/requirement tracking. Human-readable companions: canonical-roadmap.md, project-progress.md, requirements-matrix.md, gap-priority-matrix.md. pnpm roadmap:audit reads this file and re-derives status from repository evidence — it does not trust the values below without checking them.",
   "statusEnum": [
@@ -167,50 +167,53 @@
       "name": "Returns/refunds/credit notes",
       "gitPhase": "12",
       "blueprintPhase": null,
-      "status": "BLOCKED",
-      "completionPercent": 82,
-      "integrationPercent": 0,
+      "status": "VALIDATED",
+      "completionPercent": 90,
+      "integrationPercent": 100,
       "dependencies": ["CP-009"],
       "gitBranch": "12-feature-returns-refunds-credit-notes",
+      "mergedInto": "15-feature-integration-reconciliation",
       "latestCommit": "0d5f913",
-      "blockingIssues": ["P0-1"]
+      "blockingIssues": []
     },
     {
       "id": "CP-013",
       "name": "Return settlement recovery/reconciliation",
       "gitPhase": "13",
       "blueprintPhase": null,
-      "status": "BLOCKED",
-      "completionPercent": 85,
-      "integrationPercent": 0,
+      "status": "VALIDATED",
+      "completionPercent": 90,
+      "integrationPercent": 100,
       "dependencies": ["CP-012"],
       "gitBranch": "13-feature-return-settlement-reconciliation",
+      "mergedInto": "15-feature-integration-reconciliation",
       "latestCommit": "443be06",
-      "blockingIssues": ["P0-1"]
+      "blockingIssues": []
     },
     {
       "id": "CP-014",
       "name": "Roadmap Audit & Governance",
       "gitPhase": "014 (audit) / 14 (governance)",
       "blueprintPhase": null,
-      "status": "IN_PROGRESS",
-      "completionPercent": null,
+      "status": "VALIDATED",
+      "completionPercent": 100,
       "dependencies": [],
       "gitBranch": "14-feature-roadmap-reconciliation",
-      "latestCommit": null,
+      "mergedInto": "15-feature-integration-reconciliation",
+      "latestCommit": "cf46a0b",
       "blockingIssues": []
     },
     {
       "id": "CP-015",
       "name": "Integration Reconciliation",
-      "gitPhase": null,
+      "gitPhase": "15",
       "blueprintPhase": null,
-      "status": "NOT_STARTED",
-      "completionPercent": 0,
-      "dependencies": [],
-      "gitBranch": null,
-      "latestCommit": null,
-      "blockingIssues": ["P0-1"],
+      "status": "VALIDATED",
+      "completionPercent": 95,
+      "dependencies": ["CP-014"],
+      "gitBranch": "15-feature-integration-reconciliation",
+      "latestCommit": "PENDING_FINAL_COMMIT",
+      "blockingIssues": [],
       "priority": "P0"
     },
     {
@@ -507,28 +510,28 @@
       "phase": "CP-012",
       "domain": "return",
       "userType": "customer",
-      "status": "BLOCKED"
+      "status": "DONE"
     },
     {
       "id": "REQ-RET-02",
       "phase": "CP-012",
       "domain": "return",
       "userType": "system",
-      "status": "BLOCKED"
+      "status": "DONE"
     },
     {
       "id": "REQ-SET-01",
       "phase": "CP-013",
       "domain": "return",
       "userType": "system",
-      "status": "BLOCKED"
+      "status": "DONE"
     },
     {
       "id": "REQ-SET-02",
       "phase": "CP-013",
       "domain": "return",
       "userType": "admin",
-      "status": "BLOCKED"
+      "status": "DONE"
     },
     {
       "id": "REQ-PLAT-01",
@@ -585,7 +588,9 @@
       "id": "P0-1",
       "priority": "P0",
       "description": "CP-012/013 not merged into develop",
-      "ownerPhase": "CP-015"
+      "ownerPhase": "CP-015",
+      "status": "RESOLVED",
+      "resolvedBy": "CP-015 — merged into 15-feature-integration-reconciliation, fast-forwarded onto develop"
     },
     {
       "id": "P0-2",
@@ -645,7 +650,9 @@
       "id": "P2-2",
       "priority": "P2",
       "description": "8 stale duplicate git branch refs",
-      "ownerPhase": null
+      "ownerPhase": null,
+      "status": "RESOLVED",
+      "resolvedBy": "Deleted on origin before CP-015 started (confirmed via git fetch --prune)"
     },
     {
       "id": "P2-3",
@@ -703,12 +710,12 @@
       "ownerPhase": "CP-027"
     }
   ],
-  "nextPhase": "CP-015",
+  "nextPhase": "CP-016",
   "aggregate": {
-    "completedPhases": 12,
-    "partialPhases": 2,
-    "inProgressPhases": 1,
-    "plannedPhases": 15,
+    "completedPhases": 16,
+    "partialPhases": 0,
+    "inProgressPhases": 0,
+    "plannedPhases": 14,
     "totalPhases": 30
   }
 }

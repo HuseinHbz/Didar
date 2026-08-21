@@ -1,10 +1,10 @@
 # Project Status
 
-**Overall Progress:** 12 of 30 canonical phases Completed, 2 Partial
-(blocked on integration only, not quality), 1 in progress, 15 Planned.
-**Current Phase:** CP-014 — Roadmap Audit & Governance.
-**Next Phase:** CP-015 — Integration Reconciliation.
-**Last Audit:** 2026-08-21 (`docs/product/phase-014-audit.md`).
+**Overall Progress:** 16 of 30 canonical phases Completed, 0 Partial,
+0 in progress, 14 Planned.
+**Current Phase:** CP-015 — Integration Reconciliation (complete).
+**Next Phase:** CP-016 — Platform Reliability Foundation.
+**Last Audit:** 2026-08-21 (`docs/product/phase-015-audit.md`).
 
 This file is a human-readable summary. The source of truth is
 [`docs/product/roadmap.json`](docs/product/roadmap.json), kept in sync by
@@ -30,19 +30,19 @@ Legend: `[x]` Completed · `[~]` In progress / Partial · `[ ]` Planned ·
 - [x] CP-009 — Order/invoice/fulfillment
 - [x] CP-010 — Promotion/coupon engine
 - [x] CP-011 — Order lifecycle hardening
-- [!] CP-012 — Returns/refunds/credit notes _(implemented, not merged to `develop`)_
-- [!] CP-013 — Return settlement recovery/reconciliation _(implemented, not merged to `develop`)_
+- [x] CP-012 — Returns/refunds/credit notes _(integrated by CP-015)_
+- [x] CP-013 — Return settlement recovery/reconciliation _(integrated by CP-015)_
 
-## Governance
+## Governance & integration
 
-- [~] CP-014 — Roadmap Audit & Governance _(this phase)_
+- [x] CP-014 — Roadmap Audit & Governance
+- [x] CP-015 — Integration Reconciliation _(this phase — merged CP-012/013/014, fresh-DB zero-drift proven, 195/195 e2e twice consecutively)_
 
-## Planned — gates (must close before anything below starts)
+## Planned — gate (must close before anything below starts)
 
-- [ ] CP-015 — Integration Reconciliation **(P0, next phase)**
-- [ ] CP-016 — Platform Reliability Foundation **(P0)**
+- [ ] CP-016 — Platform Reliability Foundation **(P0, next phase)**
 
-## Planned — active tracks (once the gates close)
+## Planned — active tracks (once the gate closes)
 
 - [ ] CP-017 — Real Notification Delivery
 - [ ] CP-018 — Admin Panel MVP
@@ -63,8 +63,10 @@ Legend: `[x]` Completed · `[~]` In progress / Partial · `[ ]` Planned ·
 
 ## P0 blockers open right now
 
-1. **CP-012/013 not on `develop`** — owned by CP-015.
-2. **CI has no Redis service; no fail-fast on Redis loss** (empirically
-   reproduced) — owned by CP-016.
+1. **CI has no Redis service; no fail-fast on Redis loss** (empirically
+   reproduced, re-verified unchanged by CP-015) — owned by CP-016.
+
+`CP-012/013 not on develop` (the other P0 from the Phase 014 audit) is
+**resolved** — see `docs/product/integration-reconciliation.md`.
 
 Full gap list with priorities and owners: [`docs/product/gap-priority-matrix.md`](docs/product/gap-priority-matrix.md).

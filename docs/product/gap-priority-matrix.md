@@ -13,10 +13,10 @@ reclassified here under this phase's own priority definitions:
 
 ## P0 — architecture / security / data / financial / production blockers
 
-| ID   | Gap                                                                                                                                                                 | Evidence                              | Owner phase |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ----------- |
-| P0-1 | Phases 012/013 (returns/refunds/settlement — a financial-integrity subsystem) not merged into `develop`                                                             | `git merge-base` proof, audit §3      | **CP-015**  |
-| P0-2 | CI has no Redis service; app has no fail-fast when Redis is unreachable — empirically reproduced (indefinite `ECONNREFUSED` retry loop, no crash, no timeout bound) | Live reproduction, audit §7 / risk R2 | **CP-016**  |
+| ID   | Gap                                                                                                                                                                 | Evidence                              | Owner phase | Status                                                                                                |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------- |
+| P0-1 | Phases 012/013 (returns/refunds/settlement — a financial-integrity subsystem) not merged into `develop`                                                             | `git merge-base` proof, audit §3      | **CP-015**  | **RESOLVED** — merged into `15-feature-integration-reconciliation`, fresh-database-proven, zero drift |
+| P0-2 | CI has no Redis service; app has no fail-fast when Redis is unreachable — empirically reproduced (indefinite `ECONNREFUSED` retry loop, no crash, no timeout bound) | Live reproduction, audit §7 / risk R2 | **CP-016**  | Open                                                                                                  |
 
 Both P0s are cheap, bounded, non-architectural fixes — neither requires a
 redesign of anything already built. Both must close before any P1/P2 item

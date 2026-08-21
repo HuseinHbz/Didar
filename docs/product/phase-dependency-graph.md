@@ -28,7 +28,7 @@ CP-000 (blueprint)
 
 CP-014 (roadmap audit & governance) ─▶ reads all of the above, blocks nothing, gates everything downstream
 
-CP-015 (integration reconciliation) ── depends on: CP-012, CP-013 existing (done) ── unblocks: everything below
+CP-015 (integration reconciliation) ── depends on: CP-012, CP-013 existing (done) ── **DONE**, unblocked everything below
   └─▶ CP-016 (platform reliability foundation)
         ├─▶ CP-017 (real notification delivery)
         ├─▶ CP-018 (admin panel)

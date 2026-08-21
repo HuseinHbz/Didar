@@ -134,49 +134,57 @@ for the underlying commands/greps/live reproductions.
 - **Git branch:** `11-feature-order-lifecycle-shipping` · **Latest commit:** `39f5a7b` (= current `develop` HEAD)
 - **Next action:** none
 
-## Partial phases (blocked on integration, not on quality)
+## Integrated phases — completed by CP-015
 
 ### CP-012 — Returns/refunds/credit notes
 
-- **Completion:** 82% (implementation) / **0% (integration — not on `develop`)**
-- **Database:** 100 · **Backend/API:** 100 · **Security:** 90 · **Testing:** 100 · **Integration:** **0 (blocking)** · **Documentation:** 100 · **CI/CD:** 0 (never run through real CI, since unmerged) · **Production Readiness:** 50
-- **Audit status:** IMPLEMENTED, **BLOCKED on integration**
-- **Blocking issues:** **P0 — not merged into `develop`** (owned by CP-015)
+- **Completion:** 90% (implementation + integration)
+- **Database:** 100 · **Backend/API:** 100 · **Security:** 90 · **Testing:** 100 · **Integration:** **100 — merged into `15-feature-integration-reconciliation`, fresh-database-proven** · **Documentation:** 100 · **CI/CD:** 100 (this session's own real validation gate; a real GitHub Actions run still follows once this branch reaches `develop`) · **Production Readiness:** 60
+- **Audit status:** VALIDATED
+- **Blocking issues:** none (P0-1 resolved by CP-015)
 - **Dependencies:** CP-009
-- **Git branch:** `12-feature-returns-refunds-credit-notes` · **Latest commit:** `0d5f913`
-- **Next action:** merge into `develop` (CP-015)
+- **Git branch:** `12-feature-returns-refunds-credit-notes` (historical source) → merged into `15-feature-integration-reconciliation` · **Latest commit:** `0d5f913`
+- **Next action:** none
 
 ### CP-013 — Return settlement recovery/reconciliation
 
-- **Completion:** 85% (implementation) / **0% (integration — not on `develop`)**
-- Same shape as CP-012.
-- **Blocking issues:** **P0 — not merged into `develop`** (owned by CP-015, same merge as CP-012, in order)
+- **Completion:** 90% (implementation + integration)
+- Same shape as CP-012 — integrated in the same merge chain, immediately after it.
+- **Blocking issues:** none (P0-1 resolved by CP-015)
 - **Dependencies:** CP-012
-- **Git branch:** `13-feature-return-settlement-reconciliation` · **Latest commit:** `443be06`
-- **Next action:** merge into `develop` (CP-015)
+- **Git branch:** `13-feature-return-settlement-reconciliation` (historical source) → merged into `15-feature-integration-reconciliation` · **Latest commit:** `443be06`
+- **Next action:** none
 
-### CP-014 — Roadmap Audit & Governance (this phase)
+### CP-014 — Roadmap Audit & Governance
 
-- **Completion:** in progress
-- **Audit status:** the audit sub-branch (`014-feature-master-roadmap-audit`) is complete and pushed; this governance sub-branch (`14-feature-roadmap-reconciliation`) is the current work
-- **Blocking issues:** none — this phase's own output is what unblocks everything else
-- **Dependencies:** none (reads everything, changes nothing outside `docs/`, `PROJECT_STATUS.md`, and `pnpm roadmap:audit` tooling)
-- **Git branch:** `14-feature-roadmap-reconciliation` · **Latest commit:** (this phase's own commits, see final report)
-- **Next action:** produce `phase-014-audit.md`, validate, commit, push, hand off to CP-015
+- **Completion:** 100%
+- **Audit status:** VALIDATED — both sub-branches (`014-feature-master-roadmap-audit`, `14-feature-roadmap-reconciliation`) complete, pushed, and now also merged into `15-feature-integration-reconciliation` (CP-015 needs CP-014's own tooling to fulfill its own roadmap-update requirement)
+- **Blocking issues:** none
+- **Dependencies:** none
+- **Git branch:** `14-feature-roadmap-reconciliation` (historical source) → merged into `15-feature-integration-reconciliation` · **Latest commit:** `cf46a0b`
+- **Next action:** none
 
-## Planned phases (CP-015 – CP-029) — zero implementation, defined scope
+### CP-015 — Integration Reconciliation (this phase)
+
+- **Completion:** 95%
+- **Audit status:** VALIDATED — CP-012+CP-013+CP-014 merged with zero textual conflicts (`develop` was a strict git ancestor of CP-013's tip before this phase started), a genuinely fresh PostgreSQL database proved zero schema drift end to end, the full e2e suite passed twice consecutively (195/195, one fully diagnosed non-regression timing finding — see `docs/architecture/integration-reconciliation.md`), no RBAC/security regression found
+- **Blocking issues:** none
+- **Dependencies:** CP-014
+- **Git branch:** `15-feature-integration-reconciliation` · **Latest commit:** see this phase's completion report
+- **Next action:** hand off to CP-016
+
+## Planned phases (CP-016 – CP-029) — zero implementation, defined scope
 
 All of the following score **0% on every dimension** — none has any code,
 test, or documentation of its own implementation yet (their _planning_
 documentation exists in `master-roadmap-v2.md`/`canonical-roadmap.md`,
 which is CP-014's output, not theirs). Full objective/deliverables/
 acceptance criteria for each: [`../roadmap/master-roadmap-v2.md`](../roadmap/master-roadmap-v2.md)
-(as `P015`–`P021`, renumbered `CP-` here) and
+(as `P016`–`P021`, renumbered `CP-` here) and
 [`canonical-roadmap.md`](canonical-roadmap.md) (`CP-022`–`CP-029`).
 
 | CP ID  | Name                            | Priority | Dependencies           | Status      | Next action                                                        |
 | ------ | ------------------------------- | -------- | ---------------------- | ----------- | ------------------------------------------------------------------ |
-| CP-015 | Integration Reconciliation      | P0       | none                   | NOT_STARTED | Merge CP-012, then CP-013, into `develop`                          |
 | CP-016 | Platform Reliability Foundation | P0       | CP-015                 | NOT_STARTED | Redis CI service + fail-fast + rate limit + observability minimums |
 | CP-017 | Real Notification Delivery      | P1       | CP-016                 | NOT_STARTED | Wire one real SMS provider                                         |
 | CP-018 | Admin Panel MVP                 | P1       | CP-015, CP-016         | NOT_STARTED | First real frontend features                                       |
@@ -195,10 +203,10 @@ acceptance criteria for each: [`../roadmap/master-roadmap-v2.md`](../roadmap/mas
 ## Aggregate
 
 - **Completed (Implementation+Test+Integration+Docs all met, or the
-  design-only equivalent for CP-000):** 12 (CP-000–CP-011)
-- **Partial (Implementation+Test+Docs met, Integration missing):** 2 (CP-012, CP-013)
-- **In progress:** 1 (CP-014)
-- **Planned (zero implementation):** 15 (CP-015–CP-029)
+  design-only equivalent for CP-000):** 16 (CP-000–CP-015)
+- **Partial:** 0
+- **In progress:** 0
+- **Planned (zero implementation):** 14 (CP-016–CP-029)
 - **Total canonical phases tracked:** 30
 
 This count is the authoritative input to the "Number of completed/
