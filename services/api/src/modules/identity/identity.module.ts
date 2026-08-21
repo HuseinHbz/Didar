@@ -55,6 +55,7 @@ import { JwtTokenService } from './infrastructure/crypto/jwt-token.service';
 import { OtpCodeService } from './infrastructure/crypto/otp-code.service';
 import { PasswordHasherService } from './infrastructure/crypto/password-hasher.service';
 import { TotpService } from './infrastructure/crypto/totp.service';
+import { IdentityNotificationQueueModule } from './infrastructure/queues/identity-notification-queue.module';
 import { PrismaApiKeyRepository } from './infrastructure/repositories/prisma-api-key.repository';
 import { PrismaAuditLogRepository } from './infrastructure/repositories/prisma-audit-log.repository';
 import { PrismaDeviceRepository } from './infrastructure/repositories/prisma-device.repository';
@@ -97,6 +98,8 @@ import { FieldPermissionInterceptor } from './presentation/interceptors/field-pe
         secret: config.get('JWT_SECRET', { infer: true }),
       }),
     }),
+    // CP-017 — see OTP_NOTIFICATION_PORT / BullmqOtpNotificationAdapter.
+    IdentityNotificationQueueModule,
   ],
   controllers: [
     IdentityController,
@@ -139,6 +142,9 @@ import { FieldPermissionInterceptor } from './presentation/interceptors/field-pe
         jwtRefreshTtlSeconds: config.get('JWT_REFRESH_TTL_SECONDS', { infer: true }),
         otpTtlSeconds: config.get('OTP_TTL_SECONDS', { infer: true }),
         exposeOtpCodeForTesting: config.get('NODE_ENV', { infer: true }) !== 'production',
+        otpNotificationCooldownSeconds: config.get('OTP_NOTIFICATION_COOLDOWN_SECONDS', {
+          infer: true,
+        }),
       }),
     },
     {

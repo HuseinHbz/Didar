@@ -12,6 +12,13 @@ const envSchema = z.object({
   JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().positive().default(900), // 15 min
   JWT_REFRESH_TTL_SECONDS: z.coerce.number().int().positive().default(2_592_000), // 30 days
   OTP_TTL_SECONDS: z.coerce.number().int().positive().default(300), // 5 min
+  // CP-017 — how long after a still-usable OTP request a repeat request
+  // for the same (phone, purpose) skips dispatching *another* real SMS
+  // (code issuance itself is never throttled — see
+  // OtpRequest.shouldSkipNotification's own doc comment). 60s is enough
+  // to absorb a real user's own accidental double-tap on "resend" without
+  // meaningfully weakening the cost/abuse protection this exists for.
+  OTP_NOTIFICATION_COOLDOWN_SECONDS: z.coerce.number().int().nonnegative().default(60),
   // AES-256-GCM key for TwoFactorCredential.secretEncrypted — base64, must
   // decode to exactly 32 bytes. No default: a real environment must set its
   // own; see identity/README.md for what "real" needs beyond this env var.
