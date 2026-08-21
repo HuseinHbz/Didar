@@ -99,8 +99,13 @@ export class CreditNoteService {
 
   /** `DRAFT -> ISSUED` — the moment the credit note becomes real/usable.
    * Idempotent via `CreditNoteStateMachine.isNoOp`: a retried call on an
-   * already-`ISSUED` note is a safe no-op, no duplicate audit entry. */
-  async issue(id: string, actorUserId: string): Promise<CreditNote> {
+   * already-`ISSUED` note is a safe no-op, no duplicate audit entry.
+   * `actorUserId` may be `null` (ADR-013) — called by the
+   * `return_settlement_recovery` sweep as well as the synchronous admin
+   * path, same "null means system-generated" convention
+   * `ReturnStatusHistory.changedBy`/`system.AuditLog.actorId` already
+   * use elsewhere in this codebase. */
+  async issue(id: string, actorUserId: string | null): Promise<CreditNote> {
     const result = await this.creditNotes.updateStatus(id, 'ISSUED', { issuedAt: new Date() });
     if (result.transitioned) {
       await this.auditLog.record({

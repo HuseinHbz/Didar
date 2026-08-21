@@ -3,6 +3,7 @@ import type {
   CreditNoteLine as PrismaCreditNoteLine,
   ReturnItem as PrismaReturnItem,
   ReturnRequest as PrismaReturnRequest,
+  ReturnSettlement as PrismaReturnSettlement,
   ReturnStatusHistory as PrismaReturnStatusHistory,
 } from '@iecp/database';
 
@@ -10,6 +11,7 @@ import { CreditNoteLine } from '../domain/entities/credit-note-line.entity';
 import { CreditNote } from '../domain/entities/credit-note.entity';
 import { ReturnItem } from '../domain/entities/return-item.entity';
 import { ReturnRequest } from '../domain/entities/return-request.entity';
+import { ReturnSettlement } from '../domain/entities/return-settlement.entity';
 import { ReturnStatusHistory } from '../domain/entities/return-status-history.entity';
 
 export function returnRequestToDomain(row: PrismaReturnRequest): ReturnRequest {
@@ -48,6 +50,7 @@ export function returnItemToDomain(row: PrismaReturnItem): ReturnItem {
     quantity: row.quantity,
     condition: row.condition,
     refundAmount: row.refundAmount,
+    restockedAt: row.restockedAt,
     createdAt: row.createdAt,
   });
 }
@@ -61,6 +64,24 @@ export function returnStatusHistoryToDomain(row: PrismaReturnStatusHistory): Ret
     changedBy: row.changedBy,
     note: row.note,
     createdAt: row.createdAt,
+  });
+}
+
+export function returnSettlementToDomain(row: PrismaReturnSettlement): ReturnSettlement {
+  return ReturnSettlement.create({
+    id: row.id,
+    returnRequestId: row.returnRequestId,
+    status: row.status,
+    restockCompletedAt: row.restockCompletedAt,
+    refundRequestedAt: row.refundRequestedAt,
+    refundRecordedAt: row.refundRecordedAt,
+    settledAt: row.settledAt,
+    completedAt: row.completedAt,
+    attempts: row.attempts,
+    lastError: row.lastError,
+    lastAttemptAt: row.lastAttemptAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   });
 }
 

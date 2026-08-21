@@ -127,9 +127,16 @@ real fulfillment/delivery data, refund math derived only from immutable
 order-item snapshots, row-locked return-quantity invariant, restock
 exactly once and only after physical verification, server-generated
 credit-note numbering, exactly one refund pathway extended never
-duplicated) are done — see `CLAUDE.md`'s "Current status" for exactly
-what each does and doesn't include. Next up: the remaining Phase 1
-domain modules.
+duplicated), and Phase 013's return settlement recovery/reconciliation
+hardening (a durable `ReturnSettlement` state machine closing the
+restock/settlement crash windows Phase 012 documented, database-enforced
+idempotency proven under real 20-way concurrency and 5 named
+crash-window failure-injection tests, a read-heavy reconciliation
+engine that never guesses at a financial repair, and two genuine
+pre-existing concurrency bugs found and fixed by this phase's own
+reconnaissance) are done — see `CLAUDE.md`'s "Current status" for
+exactly what each does and doesn't include. Next up: the remaining
+Phase 1 domain modules.
 
 ## License
 

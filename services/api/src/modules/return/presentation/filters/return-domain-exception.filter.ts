@@ -13,6 +13,11 @@ import {
   NonPositiveReturnQuantityError,
   OverReturnedError,
 } from '../../domain/services/return-quantity-validator';
+import {
+  MissingImmutableSnapshotError,
+  NonPositiveRestockQuantityError,
+} from '../../domain/services/return-settlement-invariants';
+import { InvalidReturnSettlementTransitionError } from '../../domain/services/return-settlement-state-machine';
 import { InvalidReturnTransitionError } from '../../domain/services/return-state-machine';
 
 /**
@@ -31,6 +36,15 @@ import { InvalidReturnTransitionError } from '../../domain/services/return-state
  * errors are 500 — they only ever fire against server-computed values
  * (never client input), so if one ever throws it means a genuine
  * internal-consistency bug, not a bad request.
+ *
+ * ADR-013 additions: `InvalidReturnSettlementTransitionError` is 409 —
+ * a premature settlement action (e.g. requesting the refund before
+ * restock has completed), the same "real conflict, not a bad request"
+ * shape every other transition error here already gets.
+ * `MissingImmutableSnapshotError`/`NonPositiveRestockQuantityError` are
+ * 500, same reasoning as the `CreditNoteValidator` errors: both only
+ * ever fire against already-validated server data (a `ReturnItem`'s
+ * own snapshot/quantity), never fresh client input.
  */
 @Catch(
   InvalidReturnTransitionError,
@@ -42,6 +56,9 @@ import { InvalidReturnTransitionError } from '../../domain/services/return-state
   CreditNoteGrandTotalMismatchError,
   CreditNoteExceedsRefundableAmountError,
   NonPositiveCreditNoteAmountError,
+  InvalidReturnSettlementTransitionError,
+  MissingImmutableSnapshotError,
+  NonPositiveRestockQuantityError,
 )
 export class ReturnDomainExceptionFilter implements ExceptionFilter {
   catch(exception: Error, host: ArgumentsHost): void {
@@ -59,7 +76,8 @@ export class ReturnDomainExceptionFilter implements ExceptionFilter {
       exception instanceof InvalidReturnTransitionError ||
       exception instanceof OverReturnedError ||
       exception instanceof ReturnNotEligibleError ||
-      exception instanceof InvalidCreditNoteTransitionError
+      exception instanceof InvalidCreditNoteTransitionError ||
+      exception instanceof InvalidReturnSettlementTransitionError
     ) {
       return HttpStatus.CONFLICT;
     }
@@ -67,7 +85,9 @@ export class ReturnDomainExceptionFilter implements ExceptionFilter {
       exception instanceof CreditNoteLineSumMismatchError ||
       exception instanceof CreditNoteGrandTotalMismatchError ||
       exception instanceof CreditNoteExceedsRefundableAmountError ||
-      exception instanceof NonPositiveCreditNoteAmountError
+      exception instanceof NonPositiveCreditNoteAmountError ||
+      exception instanceof MissingImmutableSnapshotError ||
+      exception instanceof NonPositiveRestockQuantityError
     ) {
       return HttpStatus.INTERNAL_SERVER_ERROR;
     }

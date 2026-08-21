@@ -157,6 +157,24 @@ migrate diff` against a fresh shadow database confirming zero drift in
   unenforced-cross-schema convention rules out — see the migration
   file's own header comment and `return-erd.md`'s "Key design
   decisions" for the fix.
+- `20260821000000_return_settlement_reconciliation` (Phase 013) —
+  purely additive: `commerce.return_settlements` (one row per
+  `ReturnRequest`, the new durable settlement-execution record),
+  `commerce.return_items.restocked_at`,
+  `inventory.inventory_ledger.idempotency_key` (nullable `UNIQUE` —
+  every pre-Phase-013 ledger row unaffected), and a real `UNIQUE` index
+  on `finance.credit_notes.return_request_id` (closing a gap that was
+  structural-only before this phase). Also includes a real, verified
+  historical-data backfill (section 5) setting `restocked_at` for every
+  item a pre-Phase-013 return had already physically restocked under
+  the old, non-idempotent code path — found empirically (18 duplicate
+  `inventory_ledger` rows on a first boot before the backfill existed,
+  manually reversed, backfill added, re-verified). Full detail:
+  [`return-erd.md`](./return-erd.md)'s own Phase 013 section and
+  [`docs/adr/ADR-013-return-settlement-reconciliation.md`](../adr/ADR-013-return-settlement-reconciliation.md).
+  Round-tripped UP -> DOWN -> UP with row counts identical on every
+  unrelated table throughout, and `prisma migrate diff` against a fresh
+  shadow database confirming zero drift.
 
 This is **not** full coverage of blueprint §57's eventual table list. See
 ["Deliberately out of scope"](#deliberately-out-of-scope) below for exactly
@@ -403,6 +421,17 @@ real local PostgreSQL:
   database confirming zero drift in both directions (live vs. shadow,
   shadow vs. `schema.prisma`) — not merely a syntax check. See
   [`return-erd.md`](./return-erd.md)'s own "Migration" section.
+- Phase 013: purely additive (`commerce.return_settlements`,
+  `commerce.return_items.restocked_at`,
+  `inventory.inventory_ledger.idempotency_key`, a real `UNIQUE` index on
+  `finance.credit_notes.return_request_id`) plus one verified historical
+  backfill — no table drops. Round-tripped — up -> down -> up — against
+  the live dev database with real accumulated data, row counts
+  confirmed identical on every unrelated table throughout (the backfill
+  itself is idempotent — re-running it against already-backfilled rows
+  is a safe no-op, verified via two consecutive seed runs), and `prisma
+migrate diff` against a fresh shadow database confirming zero drift.
+  See [`return-erd.md`](./return-erd.md)'s own Phase 013 section.
 
 ## Seeding
 
@@ -435,11 +464,17 @@ the FULFILLED order — one REFUND-resolution with a real `Refund` +
 `RefundLine`, one CREDIT_NOTE-resolution with a real ISSUED
 `CreditNote` — plus 9 new `return.*`/`credit_note.*` permissions and two
 new RBAC roles (`returns_manager`/`returns_clerk`) (commerce/finance,
-Phase 012). Idempotent throughout (`upsert`, keyed on each
+Phase 012), a real `ReturnSettlement` row (status `COMPLETED`, every
+timestamp populated) for each of those two return fixtures plus 3 new
+`return.settlement.*` permissions (commerce, Phase 013 — deliberately
+not seeding `PENDING_RESTOCK`/`MANUAL_REVIEW`/`FAILED_TERMINAL` example
+rows, since those are crash/stuck states with no honest one-shot-seed
+story; exercised by the e2e suite's own fixture setup instead).
+Idempotent throughout (`upsert`, keyed on each
 model's real unique constraint, or a `findUnique`-then-create guard
 where no natural unique key exists) — safe to run against a
 freshly-migrated database or one that already has this data. Verified
-idempotent (ran repeatedly across Phases 006-012, row counts unchanged)
+idempotent (ran repeatedly across Phases 006-013, row counts unchanged)
 and verified runnable under `iecp_app`
 alone — the seed only needs DML, confirming the least-privilege role is
 sufficient for real application-style writes, not just raw `psql`.

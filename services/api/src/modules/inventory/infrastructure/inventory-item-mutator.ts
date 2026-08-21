@@ -79,6 +79,16 @@ export async function mutateInventoryItem(
     reason?: string | null;
     actorUserId?: string | null;
     correlationId: string;
+    /** ADR-013 decision 6 — a deterministic, caller-supplied key
+     * written onto the new `InventoryLedger` row's own `@unique`
+     * `idempotencyKey` column. Optional: every pre-Phase-013 call site
+     * omits it, unaffected. The one caller that supplies it
+     * (`AdjustmentService.receiveReturnedStock()`) relies on the
+     * caller catching this insert's `P2002` and re-reading the
+     * existing row rather than mutating a second time — see
+     * `PrismaInventoryItemRepository.receiveStock()`'s own doc
+     * comment. */
+    idempotencyKey?: string | null;
   },
 ): Promise<MutationResult> {
   const rows = await tx.$queryRaw<LockedRow[]>(
@@ -136,6 +146,7 @@ export async function mutateInventoryItem(
       afterReserved: projected.reservedQuantity,
       referenceType: meta.referenceType ?? null,
       referenceId: meta.referenceId ?? null,
+      idempotencyKey: meta.idempotencyKey ?? null,
       reason: meta.reason ?? null,
       actorUserId: meta.actorUserId ?? null,
       correlationId: meta.correlationId,

@@ -424,6 +424,50 @@ phone number, documented rather than silently carried forward. See
 `docs/architecture/returns.md` for the full account. **Backend-only,
 same precedent**: `apps/admin`/`apps/storefront` are still untouched.
 
+Phase 013 closed the two crash windows Phase 012 honestly documented —
+the restock crash window, and a `Refund`/`CreditNote` created but the
+`ReturnRequest` never advancing — with a real, tested, durable
+mechanism: a new `commerce.return_settlements` table (one row per
+`ReturnRequest`, `PENDING_RESTOCK -> RESTOCKED -> REFUND_REQUESTED ->
+SETTLED -> COMPLETED`, plus `FAILED_TERMINAL`/`MANUAL_REVIEW`),
+extending the exact "periodic sweep re-drives through the same
+idempotent method" precedent `RefundStatusSyncProcessor`/
+`ReturnSettlementSyncProcessor` already established rather than
+inventing a per-event job framework. `ReturnSettlementService`'s
+methods are the one implementation of each step, called identically
+from the synchronous admin path, a new `return_settlement_recovery`
+sweep, and `ReturnReconciliationService.reconcileAll()`
+(missing-settlement backfill, active-settlement re-drive, stuck-
+settlement escalation to `MANUAL_REVIEW`, duplicate detection — never
+auto-repaired). No "force complete" endpoint exists or will ever exist
+— `retry()` only re-invokes the same idempotent, row-locked, audited
+methods, real HTTP 409 on `FAILED_TERMINAL`.
+
+Two genuine, previously-undetected concurrency bugs were found and
+fixed by this phase's own reconnaissance, not a production incident:
+`OrderService.recordReturnRefund()` could double-add to
+`Order.refundedTotal` under concurrent/retried `refund()` calls (fixed
+via a single atomic `UPDATE ... WHERE refund_recorded_at IS NULL`
+claim primitive), and `RefundService.requestRefund()`'s pre-flight
+validation could reject a genuinely idempotent retry as "would exceed
+the transaction amount" if a concurrent winner committed between its
+own idempotency check and its validation read (fixed by giving the
+idempotency key the final word before any validation error surfaces).
+Both proven closed under real 20-way concurrency. All 10 required
+concurrency proofs plus the 5 named crash-window failure-injection
+tests ran against real PostgreSQL, never a mocked repository
+(`test/return-settlement-repository.e2e-spec.ts`,
+`test/return-settlement-failure-injection.e2e-spec.ts`). A real
+historical-data backfill in the migration itself was required and
+verified empirically: an app boot against this repository's own real
+accumulated dev data, before the backfill existed, produced 18
+duplicate inventory-ledger rows for returns already restocked under the
+old pre-Phase-013 code path — reversed by hand, backfill added,
+re-verified. See `docs/adr/ADR-013-return-settlement-reconciliation.md`
+and `docs/architecture/returns.md`'s own Phase 013 section for the full
+account. **Backend-only, same precedent**:
+`apps/admin`/`apps/storefront` are still untouched.
+
 **Next up** is the rest of Phase 1 (see end of blueprint doc "وضعیت
 فعلی"): the remaining real domain modules beyond
 `identity`/`catalog`/`inventory`/`cart-checkout`/`payment`/`order`/

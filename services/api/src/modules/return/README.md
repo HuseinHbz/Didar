@@ -2,21 +2,24 @@
 
 Phase 012's clean-architecture module for returns, refunds, and credit
 notes: the post-delivery lifecycle every phase from 008 onward
-explicitly deferred. Same layering convention every prior module
-established:
+explicitly deferred. Phase 013 extends it with a durable settlement
+state machine, crash recovery, and reconciliation — see the "Phase 013"
+section below. Same layering convention every prior module established:
 
 ```
 return/
 ├── domain/
 │   ├── entities/    — plain TS classes: ReturnRequest, ReturnItem,
-│   │                  ReturnStatusHistory, CreditNote, CreditNoteLine.
-│   │                  No Prisma/NestJS dependency.
+│   │                  ReturnStatusHistory, CreditNote, CreditNoteLine,
+│   │                  ReturnSettlement (Phase 013). No Prisma/NestJS
+│   │                  dependency.
 │   ├── ports/       — ReturnRepositoryPort (aggregate root over items/
-│   │                  history), CreditNoteRepositoryPort — same
+│   │                  history), CreditNoteRepositoryPort,
+│   │                  ReturnSettlementRepositoryPort (Phase 013) — same
 │   │                  "child entities, no independent lifecycle"
 │   │                  reasoning OrderRepositoryPort uses.
 │   └── services/    — pure business logic, zero I/O, unit-tested without
-│                      a database (55 tests across 6 spec files):
+│                      a database (76 tests across 8 spec files):
 │                        ReturnStateMachine          — REQUESTED -> ... ->
 │                                                       {REJECTED|CANCELLED|
 │                                                        COMPLETED}
@@ -33,15 +36,21 @@ return/
 │                        CreditNoteValidator           — line-sum/grand-total/
 │                                                         refundable-ceiling
 │                                                         consistency
-├── application/     — ReturnService, CreditNoteService.
+│                        ReturnSettlementStateMachine  — Phase 013, see below
+│                        ReturnSettlementInvariants    — Phase 013, see below
+├── application/     — ReturnService, CreditNoteService,
+│                      ReturnSettlementService, ReturnReconciliationService
+│                      (Phase 013).
 ├── infrastructure/
-│   ├── repositories/   — PrismaReturnRepository, PrismaCreditNoteRepository.
+│   ├── repositories/   — PrismaReturnRepository, PrismaCreditNoteRepository,
+│   │                      PrismaReturnSettlementRepository (Phase 013).
 │   ├── return.mapper.ts — Prisma-row -> domain-entity mappers.
-│   └── queues/          — BullMQ producer/consumer (see "Queues").
+│   └── queues/          — BullMQ producers/consumers (see "Queues").
 └── presentation/
     ├── controllers/  — ReturnController (/returns/*),
     │                   ReturnAdminController (/admin/returns/*),
-    │                   CreditNoteAdminController (/admin/credit-notes/*).
+    │                   CreditNoteAdminController (/admin/credit-notes/*),
+    │                   ReturnSettlementAdminController (Phase 013).
     ├── dto/           — request/response DTOs, class-validator + @nestjs/swagger.
     └── filters/       — ReturnDomainExceptionFilter.
 ```
@@ -136,25 +145,70 @@ safely retryable regardless of which step a crash interrupted:
 
 ## Queues
 
-One BullMQ queue, registered in-process inside `services/api` via
+Three BullMQ queues, registered in-process inside `services/api` via
 `infrastructure/queues/return-queue.module.ts`:
 
-- **`return_settlement_sync`** — periodically: every `ReturnRequest`
-  still `REFUNDED` whose linked `Refund.status` has reached `COMPLETED`
-  (or `CreditNote.status === 'ISSUED'` for a credit-note resolution) is
-  driven to `COMPLETED`. A `Refund` that resolves to `FAILED`/
-  `REJECTED` leaves its `ReturnRequest` at `REFUNDED` with a logged
-  warning for admin follow-up — no automatic retry-forever loop.
+- **`return_settlement_sync`** (Phase 012) — periodically: every
+  `ReturnRequest` still `REFUNDED` whose linked `Refund.status` has
+  reached `COMPLETED` (or `CreditNote.status === 'ISSUED'` for a
+  credit-note resolution) is driven to `COMPLETED`. A `Refund` that
+  resolves to `FAILED`/`REJECTED` leaves its `ReturnRequest` at
+  `REFUNDED` with a logged warning for admin follow-up — no automatic
+  retry-forever loop. **Phase 013 addition**: also completes the linked
+  `ReturnSettlement` row (`SETTLED -> COMPLETED`) at the same moment —
+  nothing else in the codebase ever did before this fix, since
+  `ReturnSettlementService.requestSettlement()` only ever reaches
+  `SETTLED` by design.
+- **`return_settlement_recovery`** (Phase 013, 2 minute cadence) —
+  every active (`PENDING_RESTOCK`/`REFUND_REQUESTED`) settlement is
+  re-driven through `ReturnSettlementService.beginRestock()`/
+  `.requestSettlement()`, the exact same idempotent methods the
+  synchronous admin HTTP path calls.
+- **`return_reconciliation`** (Phase 013, 10 minute cadence) —
+  `ReturnReconciliationService.reconcileAll()`, see below.
 
 Cannot import `ReturnModule` (would create a cycle), so it re-declares
 its own repository-port bindings and application services as fresh
 instances, same precedent `OrderQueueModule`/`PaymentQueueModule`
-already established.
+already established. Imports `OrderModule`/`PaymentModule`/
+`InventoryModule` directly (the same three `ReturnModule` itself
+imports) since `ReturnSettlementService` needs the identical dependency
+graph here as in the synchronous path.
 
-## Deliberately out of scope this phase
+## Phase 013 — settlement recovery & reconciliation
+
+Full design rationale: [`docs/adr/ADR-013-return-settlement-reconciliation.md`](../../../../../docs/adr/ADR-013-return-settlement-reconciliation.md).
+Architecture overview: [`docs/architecture/returns.md`](../../../../../docs/architecture/returns.md)'s
+own Phase 013 section. Security: [`docs/security/returns-security.md`](../../../../../docs/security/returns-security.md)'s
+own Phase 013 section.
+
+**`ReturnSettlementService`** — the one durable orchestration layer:
+`ensureSettlement()`/`beginRestock()`/`requestSettlement()`/`retry()`,
+every method idempotent, callable any number of times from the
+synchronous admin path or any sweep. `beginRestock()` restocks every
+eligible `ReturnItem` (guarded by `restocked_at` plus the underlying
+`InventoryLedger.idempotencyKey` unique constraint) and drafts a
+`CreditNote` for a `CREDIT_NOTE`-resolution return before transitioning
+`PENDING_RESTOCK -> RESTOCKED`. `requestSettlement()` requests the real
+`Refund`/issues the `CreditNote`, claims `Order.refundedTotal` update
+via a single atomic `UPDATE ... WHERE refund_recorded_at IS NULL`
+(closing a genuine double-counting bug found by this phase's own
+reconnaissance), and transitions `REFUND_REQUESTED -> SETTLED`. A
+premature call is rejected as a real `409` _before_ the method's own
+try/catch, so a legitimate "not ready yet" business state is never
+misclassified as a settlement failure.
+
+**`ReturnReconciliationService`** — four ordered, read-heavy passes
+(missing-settlement backfill, active-settlement re-drive,
+stuck-settlement escalation to `MANUAL_REVIEW`, duplicate-refund/
+credit-note detection), calling only the same idempotent methods above
+— never a distinct repair code path. One audit-log entry per non-empty
+run.
+
+## Deliberately out of scope
 
 Same list as [`docs/product/returns-refunds.md`](../../../../../docs/product/returns-refunds.md)
-and the ADR's own "What is explicitly not touched" section:
+and the ADRs' own "deliberately deferred" sections:
 
 - Inventory restock on cancellation — unchanged from ADR-011 decision 8,
   a structurally different, better-defined problem than this module's
@@ -162,27 +216,52 @@ and the ADR's own "What is explicitly not touched" section:
 - A return-shipment/tracking-number sub-model — `CUSTOMER_SHIPPING` is a
   plain status, no courier integration for return logistics.
 - Automatic retry of a `FAILED`/`REJECTED` refund linked to a return —
-  manual admin follow-up only.
-- A `return_restock_sync` sweep closing the documented crash window
-  between the `APPROVED_FOR_REFUND` transition and the restock call
-  completing — the same category of gap `invoice_generation`/
-  `order_conversion` exist to close for their own two-step crash
-  windows, deliberately left out of this phase's scope.
+  manual admin follow-up only, unchanged posture reaffirmed by ADR-013.
+- **Closed this phase**: the crash window between the
+  `APPROVED_FOR_REFUND` transition and the restock call completing —
+  ADR-012's own documented limitation, closed by `ReturnSettlement` +
+  the recovery sweep + reconciliation (see "Phase 013" above).
+- **Phase 013's own new deferrals**: cross-return reconciliation of
+  aggregate financial totals against `Order`/`Invoice` grand totals (a
+  larger reporting feature, out of this phase's per-return scope); a
+  dedicated settlement dashboard/metrics export (structured logging is
+  the extent of this phase's observability work).
 
 ## Concurrency safety, proven
 
-Found via this module's own e2e concurrency suite
-(`test/return-repository.e2e-spec.ts`, hybrid pattern — full app booted
-for HTTP-driven setup, actual racy calls bypass HTTP and hit
-`PrismaReturnRepository`/`PrismaCreditNoteRepository`/
-`PrismaRefundRepository` directly), not assumed: the return-quantity
-invariant holds under 4 concurrent 3-unit requests against a 10-unit
-line (exactly 3 admitted); return-creation idempotency holds under 15
-concurrent identical-key `create()` calls (exactly one row); return
-approval holds under 20 concurrent `approve()` calls (exactly one
-transition); the restock gate holds under 20 concurrent approve-for-
-refund calls (exactly one transition); refund double-creation is
-prevented under 10 concurrent identical-key `Refund.create()` calls
-(exactly one row); credit-note issuance holds under 20 concurrent
-`DRAFT -> ISSUED` calls (exactly one transition). Ran twice
-consecutively: 8/8 both times.
+Found via this module's own e2e concurrency suites, not assumed:
+
+**Phase 012** (`test/return-repository.e2e-spec.ts`, hybrid pattern —
+full app booted for HTTP-driven setup, actual racy calls bypass HTTP
+and hit `PrismaReturnRepository`/`PrismaCreditNoteRepository`/
+`PrismaRefundRepository` directly): the return-quantity invariant holds
+under 4 concurrent 3-unit requests against a 10-unit line (exactly 3
+admitted); return-creation idempotency holds under 15 concurrent
+identical-key `create()` calls (exactly one row); return approval holds
+under 20 concurrent `approve()` calls (exactly one transition); the
+restock gate holds under 20 concurrent approve-for-refund calls
+(exactly one transition); refund double-creation is prevented under 10
+concurrent identical-key `Refund.create()` calls (exactly one row);
+credit-note issuance holds under 20 concurrent `DRAFT -> ISSUED` calls
+(exactly one transition). Ran twice consecutively: 8/8 both times.
+
+**Phase 013** (`test/return-settlement-repository.e2e-spec.ts`, 10
+named proofs, and `test/return-settlement-failure-injection.e2e-spec.ts`,
+the 5 named crash windows from ADR-013's own failure-scenario table):
+20 concurrent `beginRestock()`/`receiveReturnedStock()` calls restock
+exactly once; 20 concurrent `requestSettlement()` calls (both
+`REFUND`/`CREDIT_NOTE` resolutions) settle exactly once; a settlement
+left `PENDING_RESTOCK`/with a physical restock that already happened
+converges safely on the next call without duplicating anything;
+`reconcileAll()` run 20 times in a row creates zero duplicate side
+effects; an illegal transition throws a real `409`, never a recorded
+failure; a `FAILED_TERMINAL` settlement rejects every retry, forever; a
+settlement with prior recorded transient failures still converges to
+exactly one restock. Every crash window (after settlement commit/
+before the sweep notices, after enqueue/before the worker starts, after
+refund/restock/credit-note creation each before the settlement state
+update) converges to one correct final state with zero duplicate
+financial or inventory side effects. Both suites ran twice
+consecutively, stable both times; the pre-existing
+`return-repository.e2e-spec.ts`/`return.e2e-spec.ts`/`order-repository
+.e2e-spec.ts`/payment e2e suites (74 tests) pass unmodified.

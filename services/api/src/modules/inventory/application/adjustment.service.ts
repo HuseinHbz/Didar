@@ -125,6 +125,12 @@ export class AdjustmentService {
     actorUserId?: string | null;
   }): Promise<{ item: InventoryItem; ledgerEntry: InventoryLedgerEntry }> {
     const correlationId = randomUUID();
+    // ADR-013 decision 6 — one deterministic key per ReturnItem, so
+    // this call is safe under any concurrency/retry pattern (20
+    // concurrent approve-for-refund calls, a crashed-and-retried
+    // recovery sweep tick, a duplicate worker delivery): the first
+    // caller to actually reach Postgres wins the real mutation, every
+    // other caller re-reads the same result.
     const result = await this.items.receiveStock({
       productSkuId: input.productSkuId,
       warehouseId: input.warehouseId,
@@ -136,6 +142,7 @@ export class AdjustmentService {
       reason: `Return ${input.returnRequestId} item ${input.returnItemId} received back into stock`,
       actorUserId: input.actorUserId ?? null,
       correlationId,
+      idempotencyKey: `return-restock__${input.returnItemId}`,
     });
     await this.auditLog.record({
       actorId: input.actorUserId ?? null,

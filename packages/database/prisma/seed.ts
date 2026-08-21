@@ -381,6 +381,26 @@ async function main(): Promise<void> {
         'Manually issue a DRAFT credit note (a recovery path for the documented approve-refund/refund crash window, not the normal flow)',
     },
     { module: 'credit_note', action: 'void', description: 'Void a DRAFT or ISSUED credit note' },
+    // ADR-013 — minimum settlement/reconciliation surface: read, retry,
+    // reconcile. No `settlement.manual_review` permission — a
+    // MANUAL_REVIEW settlement is resumed by the same retry action (see
+    // ReturnSettlementService.retry()'s own doc comment).
+    {
+      module: 'return',
+      action: 'settlement.read',
+      description: 'Read a return settlement (worker/queue metadata included, admin-only)',
+    },
+    {
+      module: 'return',
+      action: 'settlement.retry',
+      description:
+        'Manually re-drive a stuck or MANUAL_REVIEW settlement through the same idempotent recovery methods the sweep uses',
+    },
+    {
+      module: 'return',
+      action: 'settlement.reconcile',
+      description: 'Manually trigger the reconciliation engine (reconcileAll())',
+    },
   ];
   const permissions = await Promise.all(
     permissionDefs.map((def) =>
@@ -615,6 +635,10 @@ async function main(): Promise<void> {
   // Phase 012 — same read-only financial-visibility role, naturally
   // extended (ADR-012 RBAC section).
   await grant(financeAuditorRole.id, 'credit_note.read');
+  // ADR-013 — settlement read visibility fits this role's existing
+  // "refund/reconciliation/credit-note visibility, no mutations" scope
+  // exactly; no `.retry`/`.reconcile` (those are mutations).
+  await grant(financeAuditorRole.id, 'return.settlement.read');
 
   // Two order roles (Phase 009 — docs/security/order-fulfillment-security.md
   // has the full matrix): `order_manager` gets every order.* permission (a
@@ -3300,6 +3324,58 @@ async function main(): Promise<void> {
         },
       },
     });
+  }
+
+  // ---------------------------------------------------------------------
+  // ADR-013 — a real ReturnSettlement row for each of the two return
+  // fixtures above, matching their already-COMPLETED lifecycle exactly
+  // (restockCompletedAt/refundRequestedAt/refundRecordedAt/settledAt/
+  // completedAt all real timestamps, not left null). Without this, a
+  // freshly-seeded database would need one reconciliation sweep tick
+  // (up to 10 minutes) before GET /admin/returns/:id/settlement had
+  // anything to show for either fixture — the exact "missing settlement"
+  // pattern reconciliation's own checkMissingSettlements() self-heals
+  // for genuinely pre-existing data (verified against the real dev
+  // database while authoring this migration), but there is no reason to
+  // make a fresh seed wait on that when the correct end state is known
+  // up front. `ReturnItem.restockedAt` is set for the same reason —
+  // mirrors exactly what the migration's own backfill UPDATE does for
+  // historical rows, applied here at seed time instead since these rows
+  // do not exist yet when that UPDATE runs.
+  //
+  // Deliberately not seeded here: PENDING_RESTOCK / REFUND_REQUESTED /
+  // MANUAL_REVIEW / FAILED_TERMINAL example rows — those are crash/stuck
+  // states with no natural, honest "how did we get here" story from a
+  // one-shot seed script, and are exercised directly by the e2e suite's
+  // own fixture setup instead (matching how other modules' crash-window
+  // fixtures are built), not fabricated here.
+  // ---------------------------------------------------------------------
+  const order4RefundReturnItem = order4RefundReturn.items[0];
+  const order4CreditNoteReturnItem = order4CreditNoteReturn.items[0];
+  if (!order4RefundReturnItem || !order4CreditNoteReturnItem) {
+    throw new Error('[seed] order4 return fixtures: expected return items missing');
+  }
+  await prisma.returnItem.updateMany({
+    where: { id: { in: [order4RefundReturnItem.id, order4CreditNoteReturnItem.id] } },
+    data: { restockedAt: returnTimestamps.approvedAt },
+  });
+  for (const returnRequest of [order4RefundReturn, order4CreditNoteReturn]) {
+    const existingSettlement = await prisma.returnSettlement.findUnique({
+      where: { returnRequestId: returnRequest.id },
+    });
+    if (!existingSettlement) {
+      await prisma.returnSettlement.create({
+        data: {
+          returnRequestId: returnRequest.id,
+          status: 'COMPLETED',
+          restockCompletedAt: returnTimestamps.approvedAt,
+          refundRequestedAt: returnTimestamps.refundedAt,
+          refundRecordedAt: returnTimestamps.refundedAt,
+          settledAt: returnTimestamps.refundedAt,
+          completedAt: returnTimestamps.completedAt,
+        },
+      });
+    }
   }
 
   // ---------------------------------------------------------------------

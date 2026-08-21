@@ -47,6 +47,13 @@ export interface InventoryItemRepositoryPort {
    * row-locks the target item, increments `onHandQuantity`/
    * `availableQuantity`, writes one `PURCHASE_RECEIPT`/`RETURN_RECEIPT`
    * ledger entry in the same transaction.
+   *
+   * `idempotencyKey`, when supplied (ADR-013 decision 6), is
+   * P2002-catch-and-reread safe — a retried "receive this stock" call
+   * reusing the same key resolves to the item's *current* state and the
+   * *original* ledger entry rather than mutating a second time. Every
+   * pre-Phase-013 call site omits it and keeps its prior at-most-once-
+   * per-call-site behavior unchanged.
    */
   receiveStock(props: {
     productSkuId: ProductSkuId;
@@ -59,5 +66,6 @@ export interface InventoryItemRepositoryPort {
     reason?: string | null;
     actorUserId?: string | null;
     correlationId: string;
+    idempotencyKey?: string | null;
   }): Promise<{ item: InventoryItem; ledgerEntry: InventoryLedgerEntry }>;
 }

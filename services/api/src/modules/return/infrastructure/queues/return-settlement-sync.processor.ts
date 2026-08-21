@@ -15,6 +15,10 @@ import {
   type CreditNoteRepositoryPort,
 } from '../../domain/ports/credit-note.repository.port';
 import {
+  RETURN_SETTLEMENT_REPOSITORY,
+  type ReturnSettlementRepositoryPort,
+} from '../../domain/ports/return-settlement.repository.port';
+import {
   RETURN_REPOSITORY,
   type ReturnRepositoryPort,
 } from '../../domain/ports/return.repository.port';
@@ -52,6 +56,16 @@ export class ReturnSettlementSyncQueueService implements OnModuleInit {
  * `ReturnRequest` at `REFUNDED` — no automatic retry-forever loop,
  * logged for admin follow-up, the same known-limitation shape ADR-012
  * decision 8 documents.
+ *
+ * ADR-013 — also completes the linked `ReturnSettlement` row
+ * (`SETTLED -> COMPLETED`) at the same moment: nothing else in this
+ * codebase ever does, since `ReturnSettlementService.requestSettlement()`
+ * only ever reaches `SETTLED`, by design (`SETTLED`/`COMPLETED` are
+ * deliberately distinct milestones). Attempted whenever `isSettled()`
+ * is true, not only when the `ReturnRequest` transition itself won this
+ * tick — self-healing if a previous tick completed one and crashed
+ * before the other, idempotent either way via
+ * `ReturnSettlementStateMachine.isNoOp()`.
  */
 @Processor(RETURN_SETTLEMENT_SYNC_QUEUE)
 export class ReturnSettlementSyncProcessor extends WorkerHost {
@@ -61,6 +75,8 @@ export class ReturnSettlementSyncProcessor extends WorkerHost {
     @Inject(RETURN_REPOSITORY) private readonly returns: ReturnRepositoryPort,
     @Inject(REFUND_REPOSITORY) private readonly refunds: RefundRepositoryPort,
     @Inject(CREDIT_NOTE_REPOSITORY) private readonly creditNotes: CreditNoteRepositoryPort,
+    @Inject(RETURN_SETTLEMENT_REPOSITORY)
+    private readonly settlements: ReturnSettlementRepositoryPort,
     @Inject(AUDIT_LOG_REPOSITORY) private readonly auditLog: AuditLogRepositoryPort,
   ) {
     super();
@@ -96,10 +112,34 @@ export class ReturnSettlementSyncProcessor extends WorkerHost {
         });
         syncedCount += 1;
       }
+
+      await this.completeSettlement(request.id);
     }
 
     this.logger.log(`return_settlement_sync_sweep syncedCount=${syncedCount}`);
     return { syncedCount };
+  }
+
+  private async completeSettlement(returnRequestId: string): Promise<void> {
+    const settlement = await this.settlements.findByReturnRequestId(returnRequestId);
+    if (settlement?.status !== 'SETTLED') return;
+    try {
+      const result = await this.settlements.updateStatus(settlement.id, 'COMPLETED', {
+        completedAt: new Date(),
+      });
+      if (result.transitioned) {
+        await this.auditLog.record({
+          actorId: null,
+          action: 'RETURN_SETTLEMENT_COMPLETED',
+          entityType: 'ReturnSettlement',
+          entityId: settlement.id,
+        });
+      }
+    } catch (error) {
+      this.logger.warn(
+        `return_settlement_sync_settlement_complete_failed returnRequestId=${returnRequestId} settlementId=${settlement.id} error=${String(error)}`,
+      );
+    }
   }
 
   private async isSettled(returnRequestId: string, resolution: string): Promise<boolean> {

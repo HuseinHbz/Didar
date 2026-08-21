@@ -229,3 +229,109 @@ not only sequential retries.
   call completing** is a documented, known limitation, not silently
   swallowed — see `docs/architecture/returns.md`'s "Known, deliberate
   gaps" section.
+
+## Phase 013 — settlement/reconciliation admin API security
+
+Full design rationale: [`docs/adr/ADR-013-return-settlement-reconciliation.md`](../adr/ADR-013-return-settlement-reconciliation.md).
+Full architecture: [`docs/architecture/returns.md`](../architecture/returns.md)'s
+own Phase 013 section.
+
+### Three new permissions, minimum surface — no `.manual_review` permission
+
+| Permission                    | Meaning                                                                                     |
+| ----------------------------- | ------------------------------------------------------------------------------------------- |
+| `return.settlement.read`      | Read a settlement or the settlements list — worker/queue metadata included, admin-only      |
+| `return.settlement.retry`     | Manually re-drive a stuck or `MANUAL_REVIEW` settlement through the same idempotent methods |
+| `return.settlement.reconcile` | Manually trigger the reconciliation engine                                                  |
+
+No `return.settlement.manual_review` permission was created — a
+`MANUAL_REVIEW` settlement is resumed by the same `retry` action (see
+`ReturnSettlementService.retry()`'s own doc comment); a genuinely
+separate "acknowledge, this needs a human" action was never needed once
+`FAILED_TERMINAL`'s own empty transition graph already makes a further
+retry impossible, real HTTP 409, by construction.
+
+`returns_manager` picks up all three automatically (its existing
+"every `return.*`/`credit_note.*` permission" grant loop). `returns_clerk`
+does not — unchanged, intake/inspection-only. `finance_auditor` gains
+only `.read`, matching its existing "refund/reconciliation/credit-note
+visibility, no mutations" scope exactly — it can see a settlement's
+state but can never retry or reconcile.
+
+### Customers can never reach the settlement surface, by construction
+
+The settlement admin API lives entirely under `admin/returns/*`
+(`ReturnSettlementAdminController`), gated by the same global
+`JwtAuthGuard`/`AuthorizationGuard` + `@RequirePermission` every other
+admin route in this service uses — there is no customer-facing route
+that returns settlement state, worker metadata, `attempts`/`lastError`,
+or another customer's financial data. Proven:
+`test/return.e2e-spec.ts` asserts a plain customer token gets `403` on
+`GET /admin/returns/settlements`, `GET .../:id/settlement`,
+`POST .../:id/settlement/retry`, and `POST .../:id/reconcile` — the
+same assertion made for `returns_clerk`, which holds none of the three
+new permissions either.
+
+### Real 404s, real 409s — never a leaked existence signal, never a silent failure
+
+- `GET /admin/returns/:id/settlement` 404s both for a return with no
+  settlement row yet and for a genuinely nonexistent return id — proven
+  by `test/return.e2e-spec.ts`.
+- `POST .../:id/settlement/retry`/`.../reconcile` 404 the same way,
+  before ever touching the reconciliation engine — a fabricated id
+  cannot be used to probe whether reconciliation "did something"
+  globally.
+- A premature `refund()` call before restock completes is a real `409`
+  (`InvalidReturnSettlementTransitionError`) — proven at the repository/
+  service layer by `return-settlement-repository.e2e-spec.ts` (asserts
+  `attempts`/`lastError` stay untouched, so a legitimate "not ready yet"
+  business state is never misclassified as a settlement failure) and
+  over real HTTP by `test/return.e2e-spec.ts` (a double-click on
+  `approve-refund` is a safe no-op, never a duplicate restock).
+- `POST .../settlement/retry` on a `FAILED_TERMINAL` settlement is a
+  real `409` — no legal transition exists from that state; proven by
+  `return-settlement-repository.e2e-spec.ts`'s "terminal failure never
+  retries forever" case, asserting the same call rejected identically
+  on a second attempt.
+
+### No "force complete" endpoint — absolute rule, structurally enforced
+
+There is no route, permission, or method anywhere in this module that
+writes a settlement's status directly. Every mutation the admin API
+exposes is either a real, row-locked, state-machine-validated
+transition, or a call into `beginRestock()`/`requestSettlement()` —
+the same idempotent methods the synchronous path and every sweep use.
+An operator with `return.settlement.retry` can re-attempt work; nothing
+lets them declare a settlement done.
+
+### Audit logging (Phase 013 additions)
+
+`RETURN_SETTLEMENT_RESTOCKED`, `RETURN_SETTLEMENT_SETTLED`,
+`RETURN_SETTLEMENT_COMPLETED`, `RETURN_SETTLEMENT_FAILED`,
+`RETURN_SETTLEMENT_MANUAL_REVIEW`, `RETURN_SETTLEMENT_MANUAL_REVIEW_RESUMED`,
+`RETURN_SETTLEMENT_RECONCILED` — every one fires only on a real
+transition (`transitioned: true`), same duplicate-avoidance discipline
+this module already established. `RETURN_SETTLEMENT_RECONCILED` fires
+once per non-empty `reconcileAll()` run, never once per finding — an
+operator reading the audit log sees "reconciliation found N things,"
+not N separate rows for one sweep tick. No secret or payment credential
+is ever logged in any of these entries — only IDs, statuses, and
+non-sensitive amounts already visible elsewhere in the admin API.
+
+### What's proven, not just declared (Phase 013)
+
+- **RBAC is a real fixture**, not a paper matrix — `returns_clerk` and a
+  plain customer both get `403` on every one of the four settlement
+  routes, `returns_manager` succeeds on all of them.
+- **No second refund/restock/credit-note pathway was introduced** —
+  every settlement operation still funnels through the exact same
+  `RefundService`/`AdjustmentService`/`CreditNoteService` calls Phase
+  012 already established; proven by the 10 named concurrency proofs
+  and 5 named crash-window tests in
+  `services/api/src/modules/return/README.md`.
+- **A genuine financial double-counting bug** (`Order.refundedTotal`)
+  and **a genuine refund-validation race**
+  (`RefundService.requestRefund()`) were found by this phase's own
+  reconnaissance and concurrency testing, not by a production incident
+  — both fixed and proven closed under real 20-way concurrency before
+  this phase's own validation gate passed.

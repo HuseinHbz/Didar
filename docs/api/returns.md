@@ -69,6 +69,22 @@ note is only ever created as a side effect of `POST
 /admin/returns/:id/approve-refund` when the return's `resolution` is
 `CREDIT_NOTE`.
 
+## Return settlements (admin, Phase 013)
+
+| Method | Path                                  | Permission                    | Notes                                                                                                                                                         |
+| ------ | ------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/admin/returns/settlements`          | `return.settlement.read`      | Every settlement not yet `COMPLETED`/`FAILED_TERMINAL`/`MANUAL_REVIEW` (the default "active" view); `?status=MANUAL_REVIEW` for the escalated-for-review view |
+| GET    | `/admin/returns/:id/settlement`       | `return.settlement.read`      | Read one return's settlement — worker/queue metadata (`attempts`, `lastError`) included, admin-only; 404 if no settlement row exists yet                      |
+| POST   | `/admin/returns/:id/settlement/retry` | `return.settlement.retry`     | Manually re-drive a stuck or `MANUAL_REVIEW` settlement through the same idempotent methods the sweep uses; real 409 if `FAILED_TERMINAL`                     |
+| POST   | `/admin/returns/:id/reconcile`        | `return.settlement.reconcile` | Runs the same global `reconcileAll()` engine every sweep tick runs, returns only this return's own findings                                                   |
+
+No "force complete" route exists, or ever will — every mutation above
+is a real, row-locked, state-machine-validated transition, or a call
+into the same idempotent methods `beginRestock()`/`requestSettlement()`
+the synchronous `approve-refund`/`refund` routes above already use.
+Full account: [`docs/security/returns-security.md`](../security/returns-security.md)'s
+own Phase 013 section.
+
 ## Return reasons, resolutions, and item conditions
 
 ```
@@ -87,35 +103,45 @@ sellable inventory.
 
 ## Idempotency
 
-| Operation                             | Mechanism                                                                                                                                                                                                           |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Return creation                       | Optional client-supplied `idempotencyKey`, `@unique` — same P2002-catch-and-reread pattern `Fulfillment.idempotencyKey` established in Phase 011                                                                    |
-| Return-quantity invariant             | `SELECT ... FOR UPDATE` row lock on the target `OrderItem` row(s) inside the same transaction as the new `ReturnItem` insert, re-summing every non-`REJECTED`/non-`CANCELLED` return                                |
-| Return/credit-note status transitions | `SELECT ... FOR UPDATE` row lock, re-checking the state machine against the locked row — a retried identical transition is a safe no-op, never a duplicate history row                                              |
-| Refund creation                       | `Refund.idempotencyKey = return-refund__${returnRequestId}`, `@unique` — a retried/racing `refund()` call never double-refunds                                                                                      |
-| Credit-note issuance                  | No separate key — the `DRAFT` row is only ever created once, structurally guarded by the same `APPROVED_FOR_REFUND` row lock; `CreditNoteStateMachine.isNoOp` makes any retried `DRAFT -> ISSUED` call a safe no-op |
-| Inventory restock                     | No separate key — unreachable a second time once the return is `APPROVED_FOR_REFUND` (see the transitioned-gate above)                                                                                              |
+| Operation                                 | Mechanism                                                                                                                                                                                                           |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Return creation                           | Optional client-supplied `idempotencyKey`, `@unique` — same P2002-catch-and-reread pattern `Fulfillment.idempotencyKey` established in Phase 011                                                                    |
+| Return-quantity invariant                 | `SELECT ... FOR UPDATE` row lock on the target `OrderItem` row(s) inside the same transaction as the new `ReturnItem` insert, re-summing every non-`REJECTED`/non-`CANCELLED` return                                |
+| Return/credit-note status transitions     | `SELECT ... FOR UPDATE` row lock, re-checking the state machine against the locked row — a retried identical transition is a safe no-op, never a duplicate history row                                              |
+| Refund creation                           | `Refund.idempotencyKey = return-refund__${returnRequestId}`, `@unique` — a retried/racing `refund()` call never double-refunds                                                                                      |
+| Credit-note issuance                      | No separate key — the `DRAFT` row is only ever created once, structurally guarded by the same `APPROVED_FOR_REFUND` row lock; `CreditNoteStateMachine.isNoOp` makes any retried `DRAFT -> ISSUED` call a safe no-op |
+| Inventory restock                         | No separate key — unreachable a second time once the return is `APPROVED_FOR_REFUND` (see the transitioned-gate above)                                                                                              |
+| Restock (Phase 013, per item)             | `InventoryLedger.idempotencyKey = return-restock__${returnItemId}`, `@unique` — `beginRestock()` re-driven any number of times (synchronous path, recovery sweep, reconciliation) restocks each item at most once   |
+| `Order.refundedTotal` update (Phase 013)  | `ReturnSettlement.refundRecordedAt`, claimed via a single atomic `UPDATE ... WHERE refund_recorded_at IS NULL RETURNING id` — at most one caller ever records a given return's refund against the order total       |
+| Settlement status transitions (Phase 013) | `SELECT ... FOR UPDATE` row lock, re-checking `ReturnSettlementStateMachine` against the locked row — same pattern as return/credit-note transitions above                                                          |
+| Reconciliation runs (Phase 013)           | No separate key — `reconcileAll()` only ever calls the same idempotent methods above; running it any number of times converges to the same end state, never duplicates a side effect                                |
 
 ## Errors
 
-Nine domain error types get a real HTTP mapping via
+Twelve domain error types get a real HTTP mapping via
 `ReturnDomainExceptionFilter` (`APP_FILTER`, scoped `@Catch()`):
 
-| Domain error                             | HTTP status |
-| ---------------------------------------- | ----------- |
-| `InvalidReturnTransitionError`           | 409         |
-| `OverReturnedError`                      | 409         |
-| `ReturnNotEligibleError`                 | 409         |
-| `InvalidCreditNoteTransitionError`       | 409         |
-| `NonPositiveReturnQuantityError`         | 400         |
-| `CreditNoteLineSumMismatchError`         | 500         |
-| `CreditNoteGrandTotalMismatchError`      | 500         |
-| `CreditNoteExceedsRefundableAmountError` | 500         |
-| `NonPositiveCreditNoteAmountError`       | 500         |
+| Domain error                                         | HTTP status |
+| ---------------------------------------------------- | ----------- |
+| `InvalidReturnTransitionError`                       | 409         |
+| `OverReturnedError`                                  | 409         |
+| `ReturnNotEligibleError`                             | 409         |
+| `InvalidCreditNoteTransitionError`                   | 409         |
+| `InvalidReturnSettlementTransitionError` (Phase 013) | 409         |
+| `NonPositiveReturnQuantityError`                     | 400         |
+| `CreditNoteLineSumMismatchError`                     | 500         |
+| `CreditNoteGrandTotalMismatchError`                  | 500         |
+| `CreditNoteExceedsRefundableAmountError`             | 500         |
+| `NonPositiveCreditNoteAmountError`                   | 500         |
+| `MissingImmutableSnapshotError` (Phase 013)          | 500         |
+| `NonPositiveRestockQuantityError` (Phase 013)        | 500         |
 
-The four `CreditNoteValidator` errors are 500 — they only ever fire
-against server-computed values, never client input, so if one ever
-throws it means a genuine internal-consistency bug, not a bad request.
+The six 500-mapped errors only ever fire against server-computed
+values, never client input, so if one ever throws it means a genuine
+internal-consistency bug, not a bad request. `InvalidReturnSettlementTransitionError`
+is 409 — a premature settlement action (e.g. requesting the refund
+before restock has completed), the same "real conflict, not a bad
+request" shape every other transition error here already gets.
 
 Ownership violations on `returns/*` (an actor reading/cancelling/shipping
 a return that isn't theirs) are a plain `403 Forbidden`, thrown directly

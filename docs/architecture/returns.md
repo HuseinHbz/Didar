@@ -265,3 +265,184 @@ request is rejected outright (non-concurrent control case). Ran twice
 consecutively against real PostgreSQL to rule out flakiness: 8/8 both
 times. The pre-existing `order-repository.e2e-spec.ts` suite (5 tests)
 still passes unmodified — no pollution.
+
+## Phase 013 — settlement recovery & reconciliation
+
+Full design rationale: [`docs/adr/ADR-013-return-settlement-reconciliation.md`](../adr/ADR-013-return-settlement-reconciliation.md).
+Closes the two crash windows Phase 012 honestly documented above (the
+restock crash window, and a `Refund`/`CreditNote` created but the
+`ReturnRequest` status never advancing) plus a genuine financial
+double-counting bug found by this phase's own reconnaissance, with a
+real, tested, durable mechanism rather than a promise deferred again.
+
+### Settlement state machine
+
+A new `commerce.return_settlements` table — one row per `ReturnRequest`,
+created the moment `approveForRefund()` first transitions
+`INSPECTING -> APPROVED_FOR_REFUND`. `ReturnSettlementStatus`:
+
+```
+PENDING_RESTOCK -> RESTOCKED -> REFUND_REQUESTED -> SETTLED -> COMPLETED
+        │              │               │
+        └──────────────┴───────────────┴──> FAILED_TERMINAL | MANUAL_REVIEW
+```
+
+`RESTOCKED`/`SETTLED` are real, separately-persisted milestones, not a
+single "done" flag — deliberately preserving Phase 012's own two-click
+admin UX (`approve-refund` restocks; a separate `refund` click settles
+the money) rather than collapsing both into one pipeline.
+`FAILED_TERMINAL`/`MANUAL_REVIEW` are reachable from any active state, a
+genuine invariant violation or an operator-escalated stuck settlement —
+never auto-retried. `MANUAL_REVIEW` resumes into whichever progressing
+state the settlement's own `restockCompletedAt` says it actually
+reached (read from the row, never guessed), or moves to
+`FAILED_TERMINAL` as an explicit acknowledgment nothing more is
+recoverable. `FAILED_RETRYABLE` exists in the schema enum but is
+deliberately unreachable — a transient failure stays in its current
+progressing status with `attempts`/`lastError`/`lastAttemptAt` updated
+in place, never round-tripping through a dedicated status for no
+behavioral benefit.
+
+### Recovery strategy — the existing sweep precedent, extended, not a new framework
+
+`ReturnSettlementService.beginRestock()`/`.requestSettlement()` are the
+one, single idempotent implementation of each phase — called
+identically from the synchronous admin HTTP path, a new
+`return_settlement_recovery` BullMQ sweep (2 minute cadence — tighter
+than Phase 012's own `return_settlement_sync`, since an un-restocked
+item is a sharper business cost), and `ReturnReconciliationService
+.reconcileAll()`. No per-event job with a deterministic job ID was
+built — a deliberate rejection, documented in ADR-013 decision 8, of
+that alternative in favor of the exact `RefundStatusSyncProcessor`/
+`ReturnSettlementSyncProcessor` "periodic sweep re-drives through the
+same idempotent method" shape this codebase already established twice.
+
+`return_settlement_sync` itself gained one fix this phase: it now also
+completes the linked `ReturnSettlement` row (`SETTLED -> COMPLETED`) at
+the same moment it completes the `ReturnRequest` — nothing else in the
+codebase ever did, since `requestSettlement()` only ever reaches
+`SETTLED` by design.
+
+### Idempotency — database-enforced, never Redis/memory/job-ID-based
+
+| Side effect                               | Key                                 | Enforced by                                                                                                                                                                           |
+| ----------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Restock (per item)                        | `return-restock__${returnItemId}`   | `InventoryLedger.idempotencyKey` unique index                                                                                                                                         |
+| Credit-note draft (per return)            | structural                          | `CreditNote.returnRequestId` real unique index (closes a gap Phase 012's own doc comment claimed but never backed with a constraint)                                                  |
+| Refund creation (per return)              | `return-refund__${returnRequestId}` | `Refund.idempotencyKey` unique index (unchanged since ADR-012)                                                                                                                        |
+| `Order.refundedTotal` update (per return) | —                                   | `ReturnSettlement.refundRecordedAt`, claimed via a single atomic `UPDATE ... WHERE refund_recorded_at IS NULL RETURNING id` — the primitive that closes the double-counting bug below |
+| Settlement status transitions             | —                                   | `SELECT ... FOR UPDATE` + state-machine re-check, same technique every other status-bearing aggregate in this codebase uses                                                           |
+
+A genuine, previously-undetected double-counting bug was found and
+fixed by this phase's own reconnaissance: `OrderService
+.recordReturnRefund()` read `Order.refundedTotal`, added
+unconditionally, and wrote it back — no lock, no idempotency key,
+called unconditionally by `ReturnService.refund()` every time it
+reached that line. Two concurrent `refund()` calls, or one retried
+after a partial crash, would double-add. Fixed by gating the call
+behind `claimRefundRecording()`, called _before_
+`OrderService.recordReturnRefund()` — at most one caller ever, ever
+again, regardless of retries or concurrency; proven under real 20-way
+concurrency (see below).
+
+A second real bug surfaced while proving this under concurrency:
+`RefundService.requestRefund()`'s pre-flight `RefundValidator
+.assertRefundable()` check and its idempotent `create()` were two
+separate reads — a caller whose early idempotency check missed, but
+whose validation read landed _after_ another caller with the same key
+had already committed, saw its own already-completed refund as
+_additional_ balance being consumed and was rejected. Fixed by
+checking `findByIdempotencyKey()` before validation, and again if
+validation still throws — closing the race regardless of exactly where
+in the sequence a concurrent winner commits.
+
+### Reconciliation — read-heavy, deterministic, never guesses at a repair
+
+`ReturnReconciliationService.reconcileAll()` (a new `return_reconciliation`
+sweep, 10 minute cadence, plus `POST /admin/returns/:id/reconcile` for
+an on-demand run) covers four ordered passes, each calling the _same_
+idempotent methods the synchronous path and the recovery sweep already
+use — never a distinct "repair" code path:
+
+1. **Missing-settlement backfill** — any `APPROVED_FOR_REFUND`/
+   `REFUNDED`/`COMPLETED` return with no settlement row gets one created
+   via `ensureSettlement()`. Structurally unreachable going forward
+   (`approveForRefund()` now creates the row in the same call as the
+   transition) — kept as a defense-in-depth backstop, and the exact
+   mechanism that made a freshly-migrated-onto-real-data database
+   self-healing (see the migration's own backfill note below).
+2. **Active-settlement re-drive** — every `PENDING_RESTOCK`/
+   `REFUND_REQUESTED` settlement re-driven through `beginRestock()`/
+   `requestSettlement()`.
+3. **Stuck-settlement escalation** — an active settlement with
+   `attempts >= 3` and stale (`updatedAt` older than 30 minutes) moves
+   to `MANUAL_REVIEW`.
+4. **Duplicate detection** — more than one non-terminal `Refund`/
+   non-`VOID` `CreditNote` against a return is flagged, never
+   auto-repaired; a real duplicate would mean a bug or a manual database
+   intervention, never something safe to silently collapse.
+
+One audit-log entry per non-empty `reconcileAll()` run, never one per
+finding. Proven idempotent by running it 20 times consecutively against
+real data with zero duplicate side effects (see "Concurrency" below).
+
+### Manual review — controlled actions only, never a raw status overwrite
+
+`ReturnSettlementService.retry()` is the one manual re-drive action
+(`return.settlement.retry`): re-drives `PENDING_RESTOCK`/
+`REFUND_REQUESTED` through the same idempotent methods; resumes
+`MANUAL_REVIEW` into whichever progressing state it actually reached;
+no-ops on `RESTOCKED`/`SETTLED`/`COMPLETED`; a real HTTP 409 on
+`FAILED_TERMINAL` — no legal transition exists from that state, so no
+silent retry-forever is even possible. **No "force complete" endpoint
+exists, or will ever exist** — every mutation here is a real,
+row-locked, audited state-machine transition or a call into an
+already-idempotent method, never a raw status write.
+
+### Admin API (`return.settlement.read`/`.retry`/`.reconcile` — three permissions, minimum surface)
+
+- `GET /admin/returns/settlements[?status=MANUAL_REVIEW]`
+- `GET /admin/returns/:id/settlement`
+- `POST /admin/returns/:id/settlement/retry`
+- `POST /admin/returns/:id/reconcile` — runs the same global engine
+  every sweep tick runs, returns only this return's own findings.
+
+See [`docs/security/returns-security.md`](../security/returns-security.md)
+for the full RBAC matrix and IDOR/403/404/409 proof.
+
+### Migration — additive, with a real historical-data backfill
+
+`packages/database/prisma/migrations/20260821000000_return_settlement_reconciliation`
+adds the `return_settlements` table, `return_items.restocked_at`,
+`inventory_ledger.idempotency_key`, and the real unique index on
+`credit_notes.return_request_id` — plus a backfill `UPDATE` setting
+`restocked_at` for every item a pre-Phase-013 return had _already_
+physically restocked via the old, synchronous, non-idempotent
+`approveForRefund()` path. Found empirically, not theoretically: an app
+boot against this repository's own real accumulated dev data, before
+the backfill existed, produced 18 duplicate `InventoryLedger` rows.
+Manually reversed, backfill added, re-verified (a second boot produces
+zero new ledger rows) — see the ADR's own §6 for the full account.
+
+### Concurrency and crash recovery, proven not assumed
+
+`services/api/test/return-settlement-repository.e2e-spec.ts` (10 named
+proofs) and `return-settlement-failure-injection.e2e-spec.ts` (the 5
+named crash windows — after settlement commit/before the sweep
+notices, after enqueue/before the worker starts, after refund/restock/
+credit-note creation each before the settlement state update) — every
+one run against real PostgreSQL, run twice consecutively, zero
+duplicate financial or inventory side effects in any of them. See
+`services/api/src/modules/return/README.md` for the full list.
+
+### Known, deliberate gaps (Phase 013)
+
+- **No cross-return reconciliation of aggregate financial totals**
+  against `Order`/`Invoice` grand totals — a real, useful, larger
+  reporting feature explicitly out of this phase's per-return scope.
+- **No dedicated settlement dashboard/metrics export** — structured
+  logging is the extent of this phase's observability work, same as
+  every prior phase's own posture.
+- **A refund rejected by the payment provider after a return already
+  approved it still requires manual follow-up** — unchanged posture
+  from ADR-012 decision 8, reaffirmed not revisited.
