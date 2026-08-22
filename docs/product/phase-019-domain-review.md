@@ -1,21 +1,25 @@
 # CP-019 Domain Review
 
-**This is a domain-decision gate, not a new canonical phase and not
+**This is a human decision gate, not a new canonical phase and not
 feature implementation.** No new CP, phase, roadmap, or rename. No
 Customer or Prescription domain code is authorized by this document.
 Source: `docs/roadmap/master-roadmap-v2.md`, `## Track: Customer domain`,
 `### P019 — Customer Domain & Prescription` — renumbered `CP-019` by
 `canonical-roadmap.md` (content unchanged, only the ID prefix changes).
 
-## Status: **NO IMPLEMENTATION AUTHORIZED**
+## 1. Status: **NO IMPLEMENTATION AUTHORIZED**
 
-CP-019 remains `BLOCKED`. This document records what a domain expert
-must decide — it does not decide it, and it does not mark CP-019
-`IMPLEMENTED` or `VALIDATED`. Nothing in `packages/database/prisma/schema.prisma`,
+**CP-019 = BLOCKED**, and remains `BLOCKED` until all five decisions in
+§4 are formally recorded with a dated, authoritative sign-off. This
+document records what a human must decide — it does not decide it, does
+not mark CP-019 `IMPLEMENTED` or `VALIDATED`, and does not create an
+implementation branch. Nothing in `packages/database/prisma/schema.prisma`,
 `services/api/src/modules/`, or `packages/validation/src/prescription.ts`
-is created or changed by this operation.
+is created or changed by this operation — the validator was read as
+evidence only; its numeric bounds are **not** interpreted here as
+medically correct, and it is **not** modified.
 
-## Canonical CP-019 mission
+## Mission
 
 Verbatim, `master-roadmap-v2.md` P019: "Build a real Customer domain
 beyond auth — profile, address management (extending the existing thin
@@ -32,7 +36,7 @@ Acceptance criteria (verbatim):
 a real, non-technical blocker — do not let engineering timeline pressure
 ship without it."
 
-## Current blocker
+## 2. Current blocker
 
 `packages/validation/src/prescription.ts:12-15` (unchanged by this
 operation, quoted verbatim):
@@ -42,241 +46,138 @@ reasonable industry defaults, not a clinically reviewed spec. Confirm
 before this ships in a real order flow — see docs/product/blueprint.md
 §21 and §121 (Optometry Domain Specialist role).`
 
-This is the single named, canonical blocker. It is a human decision, not
-a missing technical dependency (see "Repository evidence" below).
+This is the single named, canonical blocker — a human decision, not a
+missing technical dependency (§3).
 
-## Repository evidence
+## 3. Evidence
 
-**Git** (re-verified live this operation, not assumed from a prior
-report):
+**Git** (re-verified live this operation):
 
-| Check                                                                                                                     | Result                                     |
-| ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| Current branch                                                                                                            | `develop`                                  |
-| `develop` HEAD (local == origin, tree clean)                                                                              | `2d0309a906035e4ff24aa6c33eaa09f731ec3abf` |
-| `git merge-base --is-ancestor origin/16-feature-platform-reliability origin/develop`                                      | `true` — **CP-016 MERGED**                 |
-| `git merge-base --is-ancestor origin/18-feature-admin-panel-mvp origin/develop`                                           | `true` — **CP-018 MERGED**                 |
-| `git merge-base --is-ancestor origin/21-feature-procurement origin/develop`                                               | `true` — **CP-021 MERGED**                 |
-| `git merge-base --is-ancestor origin/17-feature-real-notification-delivery origin/develop`                                | `false` — **CP-017 NOT merged**            |
-| Any CP-019 branch, local or remote (`git branch -a` / `git ls-remote origin`, grepped for `19-feature`/`customer-domain`) | **none exists**                            |
+| Check                                                                                      | Result                                                                                                            |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| Current branch                                                                             | `develop`                                                                                                         |
+| `develop` HEAD (local == origin, tree clean)                                               | `cd710d8e3799a75b3d029a6a7420bbab306f8bd1`                                                                        |
+| `git merge-base --is-ancestor origin/15-feature-integration-reconciliation origin/develop` | `true` — **CP-015 MERGED**                                                                                        |
+| `git merge-base --is-ancestor origin/16-feature-platform-reliability origin/develop`       | `true` — **CP-016 MERGED**                                                                                        |
+| `git merge-base --is-ancestor origin/18-feature-admin-panel-mvp origin/develop`            | `true` — **CP-018 MERGED**                                                                                        |
+| `git merge-base --is-ancestor origin/21-feature-procurement origin/develop`                | `true` — **CP-021 MERGED**                                                                                        |
+| `git merge-base --is-ancestor origin/17-feature-real-notification-delivery origin/develop` | `false` — **CP-017 NOT merged** (remains `IMPLEMENTED / VALIDATION-BLOCKED`, see `phase-017-validation-audit.md`) |
+| Any CP-019 implementation branch, local or remote                                          | **none exists**                                                                                                   |
+| CP-020 dependency check (`roadmap.json`: `["CP-016","CP-018","CP-019"]`)                   | CP-016/CP-018 satisfied, CP-019 not — **CP-020 remains BLOCKED**                                                  |
+| CP-022 dependency check (`roadmap.json`: `["CP-018","CP-020"]`)                            | CP-018 satisfied, CP-020 not — **CP-022 remains transitively BLOCKED**                                            |
 
-CP-019's two canonical dependencies (`roadmap.json`: `["CP-015","CP-016"]`)
-are both `VALIDATED` and merged. **The blocker is exclusively the
-domain-expert-review gate — no unmet technical dependency exists.**
+CP-019's two canonical dependencies (CP-015, CP-016) are both
+`VALIDATED` and merged. **The blocker is exclusively the domain-expert-
+review gate — no unmet technical dependency exists.**
 
-**Documentation** (`roadmap.json`, `canonical-roadmap.md`,
+**Current implementation evidence** (verified through source, not
+inferred from a similarly-named table):
+
+| Item                                                       | Exists?                                 | Evidence                                                                                                                                                                                                                                                                                                 |
+| ---------------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Prescription` Prisma model                                | **No**                                  | `grep -n "^model Prescription" packages/database/prisma/schema.prisma` — zero matches                                                                                                                                                                                                                    |
+| Dedicated `customer` module in `services/api/src/modules/` | **No**                                  | `ls services/api/src/modules/` → `cart-checkout, catalog, health, identity, inventory, order, payment, promotion, return`                                                                                                                                                                                |
+| `Customer` / `CustomerAddress` schema                      | Yes, schema only, one read-only caller  | `schema.prisma:377`/`:399`; only caller: `cart-checkout`'s read-only `PrismaCustomerLookupRepository`                                                                                                                                                                                                    |
+| `FamilyMember` / `LoyaltyAccount` / `WalletAccount` schema | Yes, schema only, zero application code | `schema.prisma:424`/`:473`/`:504`; zero hits across `services/api/src`                                                                                                                                                                                                                                   |
+| Prescription value-bounds validator                        | Yes, explicitly unreviewed              | `packages/validation/src/prescription.ts` (§2, quoted verbatim, unchanged)                                                                                                                                                                                                                               |
+| Prescription _reference_ validator                         | Yes, explicitly incomplete by design    | `cart-checkout/domain/services/prescription-reference-validator.ts` — returns `'unverified'`, never a fabricated `'valid'`                                                                                                                                                                               |
+| Any ADR for CP-019, or any recorded domain-expert sign-off | **No**                                  | `ls docs/adr/` — no CP-019/customer/prescription entry. The only two existing ADR mentions of "prescription" (`ADR-007` decision 9, `ADR-009` decision 5) are both the same class of self-documented "not built yet, no fabricated value" disclosure already cited above — neither is a domain sign-off. |
+
+**Documentation** — `roadmap.json`, `canonical-roadmap.md`,
 `phase-dependency-graph.md`, `gap-priority-matrix.md`,
-`requirements-matrix.md`, `project-progress.md`, `PROJECT_STATUS.md`) —
-all agree CP-019 is `BLOCKED` pending domain-expert review, `0%`
-implemented, no branch. No document claims otherwise. (One stale,
-unrelated finding — `canonical-roadmap.md`'s summary table for CP-012/013/015/016/017
-— is carried in "Governance consistency" below; it does not touch
-CP-019's own row or status.)
+`requirements-matrix.md`, `project-progress.md`, `PROJECT_STATUS.md` all
+agree CP-019 is `BLOCKED`, `0%` implemented, no branch. No document
+claims otherwise.
 
-## Current implementation evidence
+## 4. Q1–Q5 Decision Table
 
-Verified through source, not inferred from a similarly-named table:
+The only five decisions this gate covers. None is answered by this
+operation; each records only what the repository already contains.
 
-| Item                                                           | Exists?                                                           | Evidence                                                                                                                                                                                                                                 |
-| -------------------------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Prescription` Prisma model                                    | **No**                                                            | `grep -n "^model Prescription" packages/database/prisma/schema.prisma` — zero matches                                                                                                                                                    |
-| Dedicated `customer` module in `services/api/src/modules/`     | **No**                                                            | `ls services/api/src/modules/` → `cart-checkout, catalog, health, identity, inventory, order, payment, promotion, return`                                                                                                                |
-| `Customer` / `CustomerAddress` schema                          | Yes, schema only, no application code beyond one read-only lookup | `schema.prisma:377`/`:399`; only caller is `cart-checkout`'s read-only `PrismaCustomerLookupRepository` (ownership checks, not a profile API)                                                                                            |
-| `FamilyMember` / `LoyaltyAccount` / `WalletAccount` schema     | Yes, schema only, zero application code                           | `schema.prisma:424`/`:473`/`:504`; zero hits for any of the three across `services/api/src`                                                                                                                                              |
-| Prescription value-bounds validator                            | Yes, explicitly unreviewed                                        | `packages/validation/src/prescription.ts` — see "Current blocker" above (quoted verbatim, unchanged)                                                                                                                                     |
-| Prescription _reference_ validator                             | Yes, explicitly incomplete by design                              | `services/api/src/modules/cart-checkout/domain/services/prescription-reference-validator.ts` — returns `'unverified'`, never a fabricated `'valid'`, by its own documented design (no `Prescription` entity exists to check against yet) |
-| Any ADR for CP-019                                             | **No**                                                            | `ls docs/adr/` — no CP-019/customer/prescription entry                                                                                                                                                                                   |
-| Any recorded domain-expert sign-off anywhere in the repository | **No**                                                            | Repo-wide grep for the TODO's own marker and "domain-expert"/"optometrist review" hits only the same unresolved TODO and documents quoting it                                                                                            |
+| #      | Question                                                                                                                                                                                                                                                                                         | Allowed outcomes                                                                           | Repository evidence                                                                                                                                                                                                                                                                                                                                                                                                | Decision found in repo? | **Recorded outcome**                                               |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------- | ------------------------------------------------------------------ |
+| **Q1** | Are the current prescription numeric bounds medically/domain-correct? Bounds (verbatim, `packages/validation/src/prescription.ts`, unchanged): SPH ±20.00D/0.25 steps; CYL ±10.00D/0.25 steps; AXIS 0–180° int; ADD 0.00–+4.00D/0.25 steps; PD 20–80mm (binocular 50–75/monocular 25–40 per eye) | A — APPROVED · B — REJECTED · C — NEEDS REVISION · D — HUMAN REVIEW REQUIRED               | Self-labeled `TODO(optometry-domain-expert)`; "reasonable industry defaults, not a clinically reviewed spec"                                                                                                                                                                                                                                                                                                       | No                      | **D — HUMAN REVIEW REQUIRED** (default; no signed decision exists) |
+| **Q2** | What is the intended CP-019 review scope?                                                                                                                                                                                                                                                        | A — Bounds validation only · B — Full Optometrist Review workflow/domain · C — Other       | P019's own deliverable text names only bounds review (A); `blueprint.md` §21 (lines 4396–4444) separately describes a per-prescription Approved/Rejected/Need-More-Info workflow (B). Neither document resolves which CP-019 must build.                                                                                                                                                                           | No                      | **HUMAN DECISION REQUIRED**                                        |
+| **Q3** | Which Prescription data model is approved?                                                                                                                                                                                                                                                       | A — Flat `Prescription` entity · B — Blueprint's versioned multi-table model · C — Other   | P019's deliverable text implies A ("Prescription domain entity + migration"); `blueprint.md` §20 (lines 4391–4400) lists a 5-table model (`prescriptions`/`prescription_versions`/`prescription_items`/`prescription_images`/`prescription_verifications`) implying B. Not chosen here on implementation convenience — no repository text picks one.                                                               | No                      | **HUMAN DECISION REQUIRED**                                        |
+| **Q4** | What is the approved security requirement for Prescription data at rest?                                                                                                                                                                                                                         | A — Mandatory encryption at rest · B — Evaluate/recommend only · C — Other                 | P019's own `security_requirements` text: "encryption-at-rest **evaluated explicitly**" — says "evaluated," not "required." Whether the evaluation's outcome must be "yes" is not stated. (Not part of the decision: `services/api`'s identity module already has a reusable `ENCRYPTION_KEY` utility, so if the outcome is "encrypt," the mechanism exists — a technical fact, not a substitute for the decision.) | No                      | **HUMAN DECISION REQUIRED**                                        |
+| **Q5** | Are there applicable Iran-specific legal/regulatory requirements that materially affect the Prescription/Customer domain?                                                                                                                                                                        | A — Yes (record exact requirement + source) · B — No · C — Unknown / legal review required | Repository states only the general principle (`blueprint.md:4435`, verbatim: "سیستم نباید تشخیص پزشکی اختراع کند" — "the system must not invent medical diagnosis"). **No specific regulation, medical-device classification, or licensing law is cited anywhere.** Not invented here.                                                                                                                             | No                      | **C — UNKNOWN / LEGAL REVIEW REQUIRED** (default)                  |
 
-## Five decision questions
+## 5. Decision status
 
-Per this operation's own instruction, none of these is answered here —
-each states only what the repository already contains, and asks the
-question the repository cannot answer on its own.
+All five: **not resolved**. No signed/authoritative human decision for
+any of Q1–Q5 was found anywhere in `docs/`, `docs/adr/`, or any decision/
+governance record (§3's ADR search). Nothing is fabricated in its place.
 
-### 1. Prescription numeric bounds
+## 6. Required reviewers
 
-Which numeric ranges/constraints require optometry-domain approval?
-**Current repository-defined bounds** (`packages/validation/src/prescription.ts`,
-quoted verbatim, **not changed by this operation**):
+Recorded exactly per this operation's own assignment — no named
+individuals are claimed to have approved anything; only roles are
+recorded, and only because the repository's own text supports each
+assignment (§3):
 
-- SPH (sphere): ±20.00 diopters, 0.25 steps
-- CYL (cylinder): ±10.00 diopters, 0.25 steps
-- AXIS: 0–180°, integer, required whenever CYL is provided
-- ADD (addition/bifocal): 0.00 to +4.00 diopters, 0.25 steps
-- PD (pupillary distance): 20–80mm (code comment: binocular 50–75mm,
-  monocular 25–40mm per eye)
+- **Q1:** Optometry Domain Specialist
+- **Q2:** Product Manager + Optometry Domain Specialist
+- **Q3:** Product Manager + Optometry Domain Specialist
+- **Q4:** Security Reviewer
+- **Q5:** Legal/Regulatory Reviewer if required (conditional on Q5's own
+  eventual answer — nothing in the repository currently establishes that
+  a specific regulation applies, so this reviewer is not asserted as
+  needed outright, only as the correct escalation path if outcome A or C
+  surfaces a real requirement)
 
-**HUMAN DECISION REQUIRED** — whether each bound above is clinically
-correct as-is, or needs adjustment, is not decidable from repository
-evidence. Not guessed here.
+## 7. Explicit implementation prohibition
 
-### 2. Review scope
+**No implementation branch may be created by this or any preceding
+operation.** No `Prescription` model, migration, controller, use case,
+or UI may be written until §8's criteria are met. `packages/validation/src/prescription.ts`
+is not modified by this document — it remains exactly as evidence, not
+as an approved spec.
 
-What must be decided between:
-
-- **A. Validation/bounds review only** — a one-time technical sign-off
-  confirming the five numeric bounds above are correct; no per-instance
-  workflow. This is the literal scope of P019's own deliverable #3
-  ("Real optometry-domain review of `packages/validation/src/prescription.ts`'s
-  numeric bounds").
-- **B. A full Optometrist Review workflow** — a per-prescription
-  approval state machine (`Prescription → Optometrist Review →
-Approved/Rejected/Need More Info`), as separately described in
-  `docs/product/blueprint.md` §21 (lines 4396–4444).
-- **C. Another explicitly documented scope** — none is currently
-  documented anywhere in the repository beyond A and B above.
-
-**HUMAN DECISION REQUIRED** — P019's own deliverable text names only A;
-blueprint §21 (a separate, earlier document P019 itself cites) describes
-B. The repository does not resolve which one CP-019 must build. Not
-guessed here.
-
-### 3. Prescription data model
-
-Compare only the models already present in repository evidence:
-
-- **A. Flat/simple `Prescription` entity** — one row per prescription,
-  matching P019's own deliverable text ("Prescription domain entity +
-  migration").
-- **B. Versioned/multi-table blueprint model** — `docs/product/blueprint.md`
-  §20 (lines 4391–4400) lists five tables: `prescriptions`,
-  `prescription_versions`, `prescription_items`, `prescription_images`,
-  `prescription_verifications`.
-
-No third architecture is proposed — none exists in repository evidence.
-
-**HUMAN DECISION REQUIRED** — P019's deliverable text implies A;
-blueprint §20 describes B. Not guessed here.
-
-### 4. Encryption at rest
-
-Does the repository's existing requirement text **explicitly require**
-encryption for Prescription data, or does it require only a security
-**evaluation**?
-
-Verbatim, P019's own `security_requirements` block: "Prescription data
-is the most sensitive personal data this platform will hold — ownership
-checks reviewed with the same rigor as financial data, **encryption-at-rest
-evaluated explicitly**."
-
-The text says "evaluated," not "required" or "mandatory." Whether that
-evaluation's outcome must be "yes, encrypt" or may legitimately be "no,
-defer" is not stated anywhere in the repository.
-
-**HUMAN DECISION REQUIRED** — not guessed here. (Note, not a decision:
-`services/api`'s identity module already has a reusable
-`ENCRYPTION_KEY`-based encryption utility, so if the outcome is
-"encrypt," the mechanism already exists — that is a technical fact, not
-part of the decision itself.)
-
-### 5. Iran-specific regulatory requirements
-
-What requires explicit confirmation from a qualified domain/legal
-reviewer?
-
-The repository states only the general principle, `docs/product/blueprint.md:4435`
-(verbatim): "سیستم نباید تشخیص پزشکی اختراع کند" ("the system must not
-invent medical diagnosis"). **No specific Iran-market regulation,
-medical-device classification, or optometry-licensing law is cited
-anywhere in the repository.**
-
-**HUMAN DECISION REQUIRED** — whether a specific regulatory or legal
-constraint applies to collecting/storing optical prescription data is
-not established by repository evidence and is not invented here.
-
-## Decisions required (summary)
-
-| #   | Decision                                        | Resolved by repository evidence? | Status                      |
-| --- | ----------------------------------------------- | -------------------------------- | --------------------------- |
-| 1   | Numeric bounds correctness                      | No                               | **HUMAN DECISION REQUIRED** |
-| 2   | Review scope (A/B/C)                            | No                               | **HUMAN DECISION REQUIRED** |
-| 3   | Data model shape (A/B)                          | No                               | **HUMAN DECISION REQUIRED** |
-| 4   | Encryption-at-rest: mandatory vs. evaluate-only | No                               | **HUMAN DECISION REQUIRED** |
-| 5   | Iran-specific regulatory constraint             | No                               | **HUMAN DECISION REQUIRED** |
-
-All five remain **awaiting human review**. None is resolved by this or
-any prior operation.
-
-## Required reviewers
-
-Determined from repository evidence only — no named individuals are
-fabricated, only roles the repository itself already identifies:
-
-| Decision(s) | Reviewer role                                                                                                                       | Basis                                                                                                                                                                                                                                                      |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1, 2, 5     | **Optometry Domain Specialist**                                                                                                     | `docs/product/blueprint.md` §122's own named role list, line 3238; the TODO's own marker (`optometry-domain-expert`)                                                                                                                                       |
-| 2, 3        | **Product Manager**                                                                                                                 | Both are scope-size decisions (workflow breadth, schema breadth), not purely clinical ones                                                                                                                                                                 |
-| 4           | **Security Reviewer**                                                                                                               | P019's own `security_requirements` block names encryption-at-rest evaluation explicitly                                                                                                                                                                    |
-| 5           | **Legal/Regulatory Reviewer** — _only if_ the Optometry Domain Specialist's answer to Q5 identifies an actual applicable regulation | Not asserted as needed outright — the repository contains no evidence a specific regulation applies; this role is conditional on Q5's own outcome, per this operation's own instruction not to fabricate a review requirement the evidence doesn't support |
-
-No named person is assigned to any role — none is identified anywhere in
-the repository.
-
-## Criteria required to unblock CP-019
+## 8. Unblock criteria
 
 CP-019 may move from `BLOCKED` to implementation-ready only when **all**
-of the following exist, per its own acceptance criteria and
-`phase-governance.md`'s Definition of Ready:
+of the following are true:
 
-1. All five decisions above are recorded with an actual answer (not a
-   default, not an engineering guess).
-2. A dated ADR for CP-019 exists, naming the domain expert's sign-off —
-   per P019's own acceptance criterion #2 ("this phase does not ship
-   without it").
-3. `packages/validation/src/prescription.ts`'s bounds are updated to
-   match the confirmed answer to Decision 1 (or explicitly confirmed
-   unchanged, if the expert agrees the current defaults are correct).
-4. A `19-feature-customer-domain-prescription` branch is cut per
-   `phase-governance.md`'s Definition of Ready item 5 — only after 1–3
-   above, not before.
+1. Q1 has an explicit human decision (not the D default).
+2. Q2 has an explicit scope decision (not left unresolved).
+3. Q3 has an explicit data-model decision (not left unresolved).
+4. Q4 has an explicit security decision (not left unresolved).
+5. Q5 has an explicit regulatory disposition (not left at the C default,
+   unless "C, no regulation applies after review" is itself the final,
+   dated answer).
+6. Decisions are recorded in an authoritative ADR/decision record.
+7. The decision record has a date.
+8. Required reviewers (§6) are identified by name/role in that record.
+9. No unresolved contradiction exists between the decision record and
+   the canonical roadmap.
 
-None of these four exist yet. This document is Decision-package
-delivery only — it does not satisfy any of them.
+Until then: **NO IMPLEMENTATION.**
 
-## Governance consistency
+## 9. Next permitted execution unit
 
-Re-verified this operation, live:
+Hand §4's five questions to a human Optometry Domain Specialist (joined
+by the Product Manager for Q2/Q3, the Security Reviewer for Q4, and
+conditionally a Legal/Regulatory Reviewer if Q5 surfaces a real
+requirement). No engineering action starts CP-019, CP-020, or CP-022
+until §8's nine criteria are met.
 
-- **CP-020** remains `NOT_STARTED`, blocked on CP-019 (`roadmap.json`
-  dependency: `["CP-016","CP-018","CP-019"]` — CP-016/CP-018 satisfied,
-  CP-019 not).
-- **CP-022** remains `NOT_STARTED`, blocked transitively via CP-020
-  (`roadmap.json` dependency: `["CP-018","CP-020"]`).
-- **CP-017** remains `IMPLEMENTED / VALIDATION-BLOCKED`, not merged —
-  see `docs/product/phase-017-validation-audit.md`; re-confirmed live
-  via `git merge-base --is-ancestor` above.
-- **CP-016, CP-018, CP-021** remain `VALIDATED` and merged — re-confirmed
-  live via `git merge-base --is-ancestor` above (not assumed from any
-  prior report).
-- No new CP or phase was introduced by this or any prior operation. No
-  second roadmap exists (`docs/product/roadmap.json` remains the one
-  machine-readable source; `grep -c '"id": "CP-019"' roadmap.json` → 1,
-  no duplicate).
+## 10. Governance consistency
 
-**Stale, unrelated finding — reported, not silently rewritten:**
-`docs/product/canonical-roadmap.md`'s summary table still shows CP-012
-"BLOCKED (not merged to develop)", CP-013 "BLOCKED (not merged to
-develop)", CP-015 "NOT_STARTED", CP-016 "NOT_STARTED", CP-017
-"NOT_STARTED" — all contradicted by `roadmap.json`/`PROJECT_STATUS.md`/
-git (CP-012/013/015/016 are `VALIDATED` and merged; CP-017 is
-`IMPLEMENTED / VALIDATION-BLOCKED`). Root cause: `git log -- docs/product/canonical-roadmap.md`
-shows only CP-018's and CP-021's own branches ever edited this file,
-each touching only its own row. **This does not touch CP-019's own row**
-("BLOCKED (needs domain-expert review)" — accurate), and this
-operation's own dependency verification used `roadmap.json` + live git,
-not this table. Per `phase-governance.md`'s own ownership rule
-("whichever phase most recently touched them" keeps these in sync),
-correcting five _unrelated_ phases' historical status here would be
-out-of-scope, unrelated-history rewriting — explicitly not this
-operation's job, left for whichever phase next legitimately touches
-that file.
+Re-verified live, this operation (§3): CP-020 remains `BLOCKED` on
+CP-019; CP-022 remains transitively `BLOCKED` via CP-020; CP-017 remains
+`IMPLEMENTED / VALIDATION-BLOCKED`, not merged; CP-016, CP-018, CP-021
+remain `VALIDATED` and merged. No new CP or phase was introduced. No
+second roadmap exists (`grep -c '"id": "CP-019"' roadmap.json` → 1, no
+duplicate).
 
-## Exact next action
-
-Hand the five questions above to a human Optometry Domain Specialist
-(joined by the Product Manager for Q2/Q3, the Security Reviewer for Q4,
-and conditionally a Legal/Regulatory Reviewer only if Q5's answer
-surfaces an actual applicable regulation). No engineering action starts
-CP-019, CP-020, or CP-022 until the four "Criteria required to unblock"
-above are met.
+**Not rewritten** (out of this gate's scope, unrelated to CP-019's own
+status): `docs/product/canonical-roadmap.md`'s summary table still shows
+stale pre-merge statuses for five unrelated phases (CP-012/013/015/016/017
+— contradicted by `roadmap.json`/`PROJECT_STATUS.md`/git). This was
+first reported in `docs/product/phase-017-validation-audit.md` and again
+in this file's prior revision; it does not touch CP-019's own row
+("BLOCKED (needs domain-expert review)" — accurate) and correcting five
+unrelated phases' historical status is not required for CP-019
+consistency, so it is left untouched here, consistent with this
+operation's own instruction not to "fix" unrelated stale documentation
+unless strictly required.
