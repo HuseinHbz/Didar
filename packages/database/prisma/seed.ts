@@ -232,6 +232,34 @@ async function main(): Promise<void> {
       description: 'Create/edit warehouses and locations',
     },
     { module: 'inventory', action: 'low_stock.read', description: 'Read the low-stock report' },
+    // Phase 021 — procurement (suppliers + purchase orders). Read routes
+    // reuse `inventory.ledger.read` (SupplierController is the one
+    // exception — master data, so it reuses `warehouse.manage`'s own
+    // single-permission-for-read-and-write shape via its own
+    // `supplier.manage` permission below). Approve/receive are split from
+    // create/cancel — the same "floor role can't approve its own
+    // sensitive action" boundary `transfer.approve`/`count.approve`
+    // already establish for this module.
+    {
+      module: 'inventory',
+      action: 'supplier.manage',
+      description: 'Create/edit vendor master data (suppliers)',
+    },
+    {
+      module: 'inventory',
+      action: 'purchase_order.create',
+      description: 'Create or cancel a purchase order',
+    },
+    {
+      module: 'inventory',
+      action: 'purchase_order.approve',
+      description: 'Approve a submitted purchase order',
+    },
+    {
+      module: 'inventory',
+      action: 'purchase_order.receive',
+      description: 'Record goods receipt against an approved purchase order',
+    },
     // payment (Phase 008) — matching what services/api's payment module
     // actually checks via @RequirePermission (see that module's README
     // and docs/adr/ADR-008-payment-orchestration.md). Intent
@@ -560,6 +588,10 @@ async function main(): Promise<void> {
     'transfer.receive',
     'count.create',
     'low_stock.read',
+    // Phase 021 — the same floor-level "receive the physical goods"
+    // action `transfer.receive` already grants this role, just for a
+    // purchase order's delivery instead of an inter-warehouse transfer.
+    'purchase_order.receive',
   ]) {
     await grant(warehouseOperatorRole.id, `inventory.${action}`);
   }
@@ -1382,9 +1414,11 @@ async function main(): Promise<void> {
       type: 'STORAGE',
     },
   });
-  // RECV exists to satisfy "at least three locations" and to give a
-  // receiving-dock example; nothing is stocked there in this fixture.
-  await prisma.warehouseLocation.upsert({
+  // RECV satisfies "at least three locations"; it stays unstocked by the
+  // Phase 006 fixtures above — the Phase 021 procurement fixture below is
+  // what first puts stock there (a receiving dock, naturally empty until
+  // a purchase order is received into it).
+  const locRecv = await prisma.warehouseLocation.upsert({
     where: { warehouseId_code: { warehouseId: warehouseCentral.id, code: 'RECV' } },
     update: {},
     create: {
@@ -1561,6 +1595,136 @@ async function main(): Promise<void> {
         transferId: seedTransfer.id,
         productSkuId: sku.id,
         requestedQuantity: 10,
+      },
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // procurement (Phase 021 — see docs/adr/ADR-021-procurement.md): one
+  // active supplier and two purchase orders exercising two different
+  // `PurchaseOrderStateMachine` states — SEED-PO-1 stays SUBMITTED (not
+  // yet approved), so admin/e2e fixtures have a live order to run
+  // approve/receive/cancel against; SEED-PO-2 is a historical, fully
+  // RECEIVED order with the matching InventoryLedger PURCHASE_RECEIPT
+  // entry — the same `referenceType: 'PURCHASE_ORDER'` a live
+  // `PurchaseOrderRepositoryPort.receive()` call writes (see that
+  // method's own doc comment) — received into RECV, the one location the
+  // Phase 006 fixtures above deliberately left unstocked.
+  // ---------------------------------------------------------------------
+  const seedSupplier = await prisma.supplier.upsert({
+    where: { code: 'SUP-TEHRAN-OPTICS-01' },
+    update: {},
+    create: {
+      id: randomUUID(),
+      code: 'SUP-TEHRAN-OPTICS-01',
+      name: 'Tehran Optics Distribution Co.',
+      contactName: 'Reza Ahmadi',
+      contactEmail: 'sales@tehranoptics.example',
+      contactPhone: '+98-21-5550-1234',
+      address: 'Tehran, Iran',
+      status: 'ACTIVE',
+    },
+  });
+
+  const seedPoSubmitted = await prisma.purchaseOrder.upsert({
+    where: { poNumber: 'SEED-PO-1' },
+    update: {},
+    create: {
+      id: randomUUID(),
+      poNumber: 'SEED-PO-1',
+      supplierId: seedSupplier.id,
+      warehouseId: warehouseCentral.id,
+      status: 'SUBMITTED',
+      createdBy: adminUser.id,
+      notes: 'Seed fixture — exercises approve/receive/cancel',
+    },
+  });
+  const existingPoSubmittedItem = await prisma.purchaseOrderItem.findFirst({
+    where: { purchaseOrderId: seedPoSubmitted.id, productSkuId: sku.id },
+  });
+  if (!existingPoSubmittedItem) {
+    await prisma.purchaseOrderItem.create({
+      data: {
+        id: randomUUID(),
+        purchaseOrderId: seedPoSubmitted.id,
+        productSkuId: sku.id,
+        orderedQuantity: 15,
+        unitCost: 5_000_000n,
+      },
+    });
+  }
+
+  const seedPoReceived = await prisma.purchaseOrder.upsert({
+    where: { poNumber: 'SEED-PO-2' },
+    update: {},
+    create: {
+      id: randomUUID(),
+      poNumber: 'SEED-PO-2',
+      supplierId: seedSupplier.id,
+      warehouseId: warehouseCentral.id,
+      status: 'RECEIVED',
+      createdBy: adminUser.id,
+      approvedBy: adminUser.id,
+      approvedAt: new Date('2026-01-10T09:00:00Z'),
+      receivedAt: new Date('2026-01-15T09:00:00Z'),
+      notes: 'Seed fixture — historical, fully received order',
+    },
+  });
+  let poReceivedItem = await prisma.purchaseOrderItem.findFirst({
+    where: { purchaseOrderId: seedPoReceived.id, productSkuId: sku.id },
+  });
+  poReceivedItem ??= await prisma.purchaseOrderItem.create({
+    data: {
+      id: randomUUID(),
+      purchaseOrderId: seedPoReceived.id,
+      productSkuId: sku.id,
+      orderedQuantity: 25,
+      receivedQuantity: 25,
+      unitCost: 4_800_000n,
+    },
+  });
+
+  const seedRecvItem = await prisma.inventoryItem.upsert({
+    where: {
+      productSkuId_warehouseId_locationId: {
+        productSkuId: sku.id,
+        warehouseId: warehouseCentral.id,
+        locationId: locRecv.id,
+      },
+    },
+    update: { onHandQuantity: 25, reservedQuantity: 0, availableQuantity: 25 },
+    create: {
+      id: randomUUID(),
+      productSkuId: sku.id,
+      warehouseId: warehouseCentral.id,
+      locationId: locRecv.id,
+      onHandQuantity: 25,
+      reservedQuantity: 0,
+      availableQuantity: 25,
+    },
+  });
+  const existingReceiptLedger = await prisma.inventoryLedger.findFirst({
+    where: { referenceType: 'PURCHASE_ORDER', referenceId: seedPoReceived.id },
+  });
+  if (!existingReceiptLedger) {
+    await prisma.inventoryLedger.create({
+      data: {
+        id: randomUUID(),
+        inventoryItemId: seedRecvItem.id,
+        productSkuId: sku.id,
+        warehouseId: warehouseCentral.id,
+        locationId: locRecv.id,
+        movementType: 'PURCHASE_RECEIPT',
+        quantity: poReceivedItem.receivedQuantity,
+        beforeOnHand: 0,
+        afterOnHand: poReceivedItem.receivedQuantity,
+        beforeReserved: 0,
+        afterReserved: 0,
+        referenceType: 'PURCHASE_ORDER',
+        referenceId: seedPoReceived.id,
+        reason: `Goods receipt for ${seedPoReceived.poNumber}`,
+        correlationId: randomUUID(),
+        idempotencyKey: `seed__${seedPoReceived.id}__${sku.id}`,
       },
     });
   }
