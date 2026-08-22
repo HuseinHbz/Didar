@@ -720,10 +720,10 @@
   ],
   "nextPhase": "CP-017 (or CP-018/CP-021 \u2014 see phase-dependency-graph.md)",
   "aggregate": {
-    "completedPhases": 17,
+    "completedPhases": 18,
     "partialPhases": 0,
     "inProgressPhases": 0,
-    "plannedPhases": 13,
+    "plannedPhases": 12,
     "totalPhases": 30
   }
 }

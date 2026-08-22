@@ -137,7 +137,7 @@ tests and concurrency e2e — no UI deliverable, matching the Phase
   from elsewhere): the original idempotent-retry design for `receive()`
   assumed a retried call would always collide on the ledger's
   `idempotency_key` unique constraint (P2002) — but a receipt that
-  *completes* an order moves it straight to the terminal `RECEIVED`
+  _completes_ an order moves it straight to the terminal `RECEIVED`
   status, so a legitimate retry of that exact call instead failed
   `assertCanReceive` (`InvalidPurchaseOrderTransitionError`, a 409)
   before it ever reached the ledger insert. Left unfixed, this would
@@ -185,23 +185,23 @@ tests and concurrency e2e — no UI deliverable, matching the Phase
 
 ## Validation results
 
-| Check | Result |
-| --- | --- |
-| `pnpm validate:structure` | ✓ pass |
-| `pnpm format:check` | ✓ pass on every file this phase touched (5 pre-existing, untouched files elsewhere in the repo still warn — see below) |
-| `pnpm lint` (all 15 workspaces) | ✓ pass |
-| `pnpm typecheck` (all 15 workspaces) | ✓ pass |
-| `pnpm build` (all 11 buildable workspaces) | ✓ pass |
-| `pnpm --filter @iecp/api test` | ✓ 349/349 |
-| `pnpm --filter @iecp/api test:e2e` | ✓ 211/213 (2 pre-existing, classified below) |
-| `pnpm audit --audit-level high` | ✓ pass (1 pre-existing low-severity finding, 0 high) |
-| `pnpm roadmap:audit` | ✓ pass, no structural problems |
-| `prisma migrate status` | ✓ up to date |
-| `prisma migrate diff` (UP→DOWN→UP) | ✓ clean round-trip, verified via `\dt` before/after |
-| Seed + seed idempotency (run twice) | ✓ identical row counts both runs |
-| Compiled app boot | ✓ `node dist/main.js`, all 10 procurement routes mapped |
-| Health check | ✓ `GET /api/v1/health` → `{"status":"ok",...}` |
-| Graceful shutdown | ✓ `SIGTERM` → process exits cleanly, no hang |
+| Check                                      | Result                                                                                                                 |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `pnpm validate:structure`                  | ✓ pass                                                                                                                 |
+| `pnpm format:check`                        | ✓ pass on every file this phase touched (5 pre-existing, untouched files elsewhere in the repo still warn — see below) |
+| `pnpm lint` (all 15 workspaces)            | ✓ pass                                                                                                                 |
+| `pnpm typecheck` (all 15 workspaces)       | ✓ pass                                                                                                                 |
+| `pnpm build` (all 11 buildable workspaces) | ✓ pass                                                                                                                 |
+| `pnpm --filter @iecp/api test`             | ✓ 349/349                                                                                                              |
+| `pnpm --filter @iecp/api test:e2e`         | ✓ 211/213 (2 pre-existing, classified below)                                                                           |
+| `pnpm audit --audit-level high`            | ✓ pass (1 pre-existing low-severity finding, 0 high)                                                                   |
+| `pnpm roadmap:audit`                       | ✓ pass, no structural problems                                                                                         |
+| `prisma migrate status`                    | ✓ up to date                                                                                                           |
+| `prisma migrate diff` (UP→DOWN→UP)         | ✓ clean round-trip, verified via `\dt` before/after                                                                    |
+| Seed + seed idempotency (run twice)        | ✓ identical row counts both runs                                                                                       |
+| Compiled app boot                          | ✓ `node dist/main.js`, all 10 procurement routes mapped                                                                |
+| Health check                               | ✓ `GET /api/v1/health` → `{"status":"ok",...}`                                                                         |
+| Graceful shutdown                          | ✓ `SIGTERM` → process exits cleanly, no hang                                                                           |
 
 ## Known risks
 

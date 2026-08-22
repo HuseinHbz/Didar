@@ -214,20 +214,20 @@ CP-016 and CP-021 are both merged and VALIDATED as of this integration
 `docs/product/integration-cp016-cp021.md`. Both are excluded from the
 "still not started" table below.
 
-| CP ID  | Name                            | Priority | Dependencies           | Status      | Next action                                                 |
-| ------ | -------------------------------- | -------- | ---------------------- | ----------- | ------------------------------------------------------------ |
+| CP ID  | Name                            | Priority | Dependencies           | Status                           | Next action                                                      |
+| ------ | ------------------------------- | -------- | ---------------------- | -------------------------------- | ---------------------------------------------------------------- |
 | CP-017 | Real Notification Delivery      | P1       | CP-016                 | IMPLEMENTED (80%, not VALIDATED) | Verify live SMS delivery against real network egress, then merge |
-| CP-018 | Admin Panel MVP                 | P1       | CP-015, CP-016         | VALIDATED (own branch, unmerged) | Merge decision — deferred, not part of this integration |
-| CP-019 | Customer Domain & Prescription  | P1       | CP-015, CP-016         | BLOCKED     | Needs optometry-domain-expert review before implementation |
-| CP-020 | Storefront MVP                  | P1       | CP-016, CP-018, CP-019 | NOT_STARTED | First real customer-facing surface                         |
-| CP-022 | Mobile real features            | P2       | CP-018, CP-020         | NOT_STARTED | Sequenced after web UX proven                               |
-| CP-023 | CMS                             | P2       | CP-018                 | NOT_STARTED | Needs admin UI to author content                            |
-| CP-024 | CRM beyond coupons              | P2       | CP-019, CP-020         | NOT_STARTED | Needs real customer data to segment                         |
-| CP-025 | Store/POS/omnichannel           | P2       | CP-018, CP-021         | NOT_STARTED | Separate operational model, deferred                        |
-| CP-026 | AI                              | P2       | CP-020                 | NOT_STARTED | Needs real usage data                                       |
-| CP-027 | Advanced Analytics              | P2       | CP-020                 | NOT_STARTED | Needs real volume                                           |
-| CP-028 | Security Hardening completion   | P1       | CP-016                 | NOT_STARTED | Before any phase is genuinely public                        |
-| CP-029 | Production Readiness completion | P1       | CP-016                 | NOT_STARTED | Before any "production-ready" claim                         |
+| CP-018 | Admin Panel MVP                 | P1       | CP-015, CP-016         | VALIDATED (own branch, unmerged) | Merge decision — deferred, not part of this integration          |
+| CP-019 | Customer Domain & Prescription  | P1       | CP-015, CP-016         | BLOCKED                          | Needs optometry-domain-expert review before implementation       |
+| CP-020 | Storefront MVP                  | P1       | CP-016, CP-018, CP-019 | NOT_STARTED                      | First real customer-facing surface                               |
+| CP-022 | Mobile real features            | P2       | CP-018, CP-020         | NOT_STARTED                      | Sequenced after web UX proven                                    |
+| CP-023 | CMS                             | P2       | CP-018                 | NOT_STARTED                      | Needs admin UI to author content                                 |
+| CP-024 | CRM beyond coupons              | P2       | CP-019, CP-020         | NOT_STARTED                      | Needs real customer data to segment                              |
+| CP-025 | Store/POS/omnichannel           | P2       | CP-018, CP-021         | NOT_STARTED                      | Separate operational model, deferred                             |
+| CP-026 | AI                              | P2       | CP-020                 | NOT_STARTED                      | Needs real usage data                                            |
+| CP-027 | Advanced Analytics              | P2       | CP-020                 | NOT_STARTED                      | Needs real volume                                                |
+| CP-028 | Security Hardening completion   | P1       | CP-016                 | NOT_STARTED                      | Before any phase is genuinely public                             |
+| CP-029 | Production Readiness completion | P1       | CP-016                 | NOT_STARTED                      | Before any "production-ready" claim                              |
 
 ## Aggregate
 
