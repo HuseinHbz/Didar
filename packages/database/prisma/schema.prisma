@@ -1119,13 +1119,14 @@ model Warehouse {
   updatedAt DateTime        @updatedAt @map("updated_at")
   deletedAt DateTime?       @map("deleted_at")
 
-  locations    WarehouseLocation[]
-  items        InventoryItem[]
-  thresholds   InventoryThreshold[]
-  transfersOut StockTransfer[]       @relation("TransferSource")
-  transfersIn  StockTransfer[]       @relation("TransferDestination")
-  adjustments  InventoryAdjustment[]
-  stockCounts  StockCount[]
+  locations      WarehouseLocation[]
+  items          InventoryItem[]
+  thresholds     InventoryThreshold[]
+  transfersOut   StockTransfer[]       @relation("TransferSource")
+  transfersIn    StockTransfer[]       @relation("TransferDestination")
+  adjustments    InventoryAdjustment[]
+  stockCounts    StockCount[]
+  purchaseOrders PurchaseOrder[]
 
   @@index([type])
   @@index([status])
@@ -1406,6 +1407,103 @@ model StockCountItem {
 
   @@unique([stockCountId, productSkuId])
   @@map("stock_count_items")
+  @@schema("inventory")
+}
+
+enum SupplierStatus {
+  ACTIVE
+  INACTIVE
+
+  @@schema("inventory")
+}
+
+/// A vendor a `PurchaseOrder` is placed against. Master data — no
+/// financial/contract fields (payment terms, currency, tax id) since
+/// P021's canonical scope doesn't call for them; `code` is the same
+/// human-readable-unique-identifier pattern `Warehouse.code` already
+/// established.
+model Supplier {
+  id           String         @id @default(uuid()) @db.Uuid
+  code         String         @unique
+  name         String
+  contactName  String?        @map("contact_name")
+  contactEmail String?        @map("contact_email")
+  contactPhone String?        @map("contact_phone")
+  address      String?
+  status       SupplierStatus @default(ACTIVE)
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+  deletedAt    DateTime?      @map("deleted_at")
+
+  purchaseOrders PurchaseOrder[]
+
+  @@index([status])
+  @@map("suppliers")
+  @@schema("inventory")
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+
+  @@schema("inventory")
+}
+
+/// A real 6-state machine (`PurchaseOrderStateMachine`, domain layer) —
+/// see that file's own doc comment for the exact transition table.
+/// `create()` writes the row directly in `SUBMITTED`, the same "no
+/// persisted DRAFT row" choice `StockTransfer.create()` already made.
+/// Receiving writes to the *existing* `InventoryLedger` via
+/// `InventoryItemRepositoryPort.receiveStock()` (ADR-006 decision 9's own
+/// "procurement/returns readiness seam") — this table holds no quantity-
+/// on-hand state of its own beyond `PurchaseOrderItem.receivedQuantity`,
+/// which is bookkeeping for "how much of this line has arrived so far",
+/// not a second source of truth for stock.
+model PurchaseOrder {
+  id          String              @id @default(uuid()) @db.Uuid
+  poNumber    String              @unique @map("po_number")
+  supplierId  String              @map("supplier_id") @db.Uuid
+  warehouseId String              @map("warehouse_id") @db.Uuid
+  status      PurchaseOrderStatus @default(SUBMITTED)
+  createdBy   String?             @map("created_by") @db.Uuid
+  approvedBy  String?             @map("approved_by") @db.Uuid
+  approvedAt  DateTime?           @map("approved_at")
+  cancelledAt DateTime?           @map("cancelled_at")
+  receivedAt  DateTime?           @map("received_at")
+  notes       String?
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  supplier  Supplier            @relation(fields: [supplierId], references: [id])
+  warehouse Warehouse           @relation(fields: [warehouseId], references: [id])
+  items     PurchaseOrderItem[]
+
+  @@index([status])
+  @@index([supplierId])
+  @@index([warehouseId])
+  @@map("purchase_orders")
+  @@schema("inventory")
+}
+
+model PurchaseOrderItem {
+  id               String   @id @default(uuid()) @db.Uuid
+  purchaseOrderId  String   @map("purchase_order_id") @db.Uuid
+  productSkuId     String   @map("product_sku_id") @db.Uuid
+  orderedQuantity  Int      @map("ordered_quantity")
+  receivedQuantity Int      @default(0) @map("received_quantity")
+  unitCost         BigInt   @map("unit_cost")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  @@unique([purchaseOrderId, productSkuId])
+  @@index([productSkuId])
+  @@map("purchase_order_items")
   @@schema("inventory")
 }
 

@@ -95,6 +95,27 @@ unhandled 500.
 | POST   | `/admin/inventory/counts/:id/approve` | `inventory.count.approve` | `COUNTED → APPROVED`; writes one `COUNT_ADJUSTMENT` ledger entry per nonzero-variance item |
 | POST   | `/admin/inventory/counts/:id/reject`  | `inventory.count.approve` | `COUNTED → REJECTED`; no ledger writes                                                     |
 
+## Admin — suppliers & purchase orders (Phase 021)
+
+| Method | Path                                           | Guard                              | Notes                                                                                                                                                                                                                 |
+| ------ | ---------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/admin/inventory/suppliers`                   | `inventory.supplier.manage`        | Filterable by status                                                                                                                                                                                                  |
+| GET    | `/admin/inventory/suppliers/:id`               | `inventory.supplier.manage`        |                                                                                                                                                                                                                       |
+| POST   | `/admin/inventory/suppliers`                   | `inventory.supplier.manage`        |                                                                                                                                                                                                                       |
+| PATCH  | `/admin/inventory/suppliers/:id`               | `inventory.supplier.manage`        |                                                                                                                                                                                                                       |
+| GET    | `/admin/inventory/purchase-orders`             | `inventory.ledger.read`            | Filterable by status/supplierId/warehouseId                                                                                                                                                                           |
+| GET    | `/admin/inventory/purchase-orders/:id`         | `inventory.ledger.read`            | Includes line items — the list endpoint does not                                                                                                                                                                      |
+| POST   | `/admin/inventory/purchase-orders`             | `inventory.purchase_order.create`  | `DRAFT/SUBMITTED`; `poNumber` auto-generated (`PO-...`); rejects duplicate SKU/non-positive quantity/negative cost                                                                                                    |
+| POST   | `/admin/inventory/purchase-orders/:id/approve` | `inventory.purchase_order.approve` | `SUBMITTED → APPROVED`                                                                                                                                                                                                |
+| POST   | `/admin/inventory/purchase-orders/:id/receive` | `inventory.purchase_order.receive` | `APPROVED/PARTIALLY_RECEIVED → {PARTIALLY_RECEIVED\|RECEIVED}`; writes one `PURCHASE_RECEIPT` ledger row per line; optional `idempotencyKey` — a retried call with the same key resolves to the already-applied state |
+| POST   | `/admin/inventory/purchase-orders/:id/cancel`  | `inventory.purchase_order.create`  | Only from `DRAFT`/`SUBMITTED`/`APPROVED` — rejected once any receiving has happened                                                                                                                                   |
+
+Every transition not on `PurchaseOrderStateMachine`'s graph, and every
+line-validation failure (duplicate SKU, non-positive quantity, negative
+cost, over-receipt), is mapped by `InventoryDomainExceptionFilter` —
+transitions to **409**, line validation to **400** — never a silent
+no-op and never an unhandled 500.
+
 ## Internal — reservations (the future cart/checkout/POS seam)
 
 | Method | Path                                           | Guard            | Notes                                                                                                                                              |

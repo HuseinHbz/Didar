@@ -83,10 +83,13 @@ for the underlying commands/greps/live reproductions.
 - **Completion:** 78%
 - **Database:** 100 · **Backend/API:** 100 (100-way concurrency proof, no oversell) · **Frontend/Admin:** N/A · **Mobile:** N/A · **Security:** 90 · **Testing:** 100 · **Integration:** 100 · **Documentation:** 100 · **CI/CD:** 50 (shared gap) · **Production Readiness:** 50
 - **Audit status:** VALIDATED
-- **Blocking issues:** **P1 — no Purchase Order/Supplier model** (owned by CP-021)
+- **Blocking issues:** none — the Purchase Order/Supplier gap this entry
+  used to name is resolved by CP-021 (VALIDATED), built directly on this
+  phase's own readiness seam (`PURCHASE_RECEIPT` movement type,
+  polymorphic ledger `referenceType`/`referenceId`, ADR-006 decision 9)
 - **Dependencies:** CP-003, CP-004, CP-005
 - **Git branch:** `06-feature-inventory-warehouse` · **Latest commit:** `db80dd7`
-- **Next action:** none this phase; procurement owned by CP-021
+- **Next action:** none
 
 ### CP-007 — Cart/checkout
 
@@ -183,39 +186,57 @@ for the underlying commands/greps/live reproductions.
 - **Git branch:** `16-feature-platform-reliability` · **Latest commit:** see this phase's completion report
 - **Next action:** CP-017 (or whichever phase picks up P1-1/P1-5's remainder — see `next-phase-decision.md`)
 
-## Planned phases (CP-017 – CP-029) — zero implementation, defined scope
+### CP-021 — Procurement
 
-All of the following score **0% on every dimension** — none has any code,
-test, or documentation of its own implementation yet (their _planning_
-documentation exists in `master-roadmap-v2.md`/`canonical-roadmap.md`,
-which is CP-014's output, not theirs). Full objective/deliverables/
-acceptance criteria for each: [`../roadmap/master-roadmap-v2.md`](../roadmap/master-roadmap-v2.md)
+- **Completion:** 95% (Supplier + PurchaseOrder lifecycle complete and evidenced end to end; explicitly out of scope: quotations, multi-level approval, attachments, multi-currency, three-way matching, reporting, admin UI — see `docs/product/procurement.md`)
+- **Database:** 100 (suppliers/purchase_orders/purchase_order_items, 3 CHECK constraints, UP/DOWN/UP verified) · **Backend/API:** 100 (10 routes, full lifecycle) · **Security:** 95 (RBAC proven via e2e permission-bypass tests; a real idempotency defect found and fixed this phase — see `phase-021-audit.md`) · **Testing:** 100 (17 domain unit + 18 e2e, incl. 20-way-concurrent idempotent-receive proof) · **Integration:** 100 (merged into `develop` in this integration commit) · **Documentation:** 100 (ADR-021 + procurement.md + API/security docs) · **Production Readiness:** 85
+- **Audit status:** VALIDATED — see [`phase-021-audit.md`](phase-021-audit.md)
+- **Blocking issues:** none
+- **Dependencies:** CP-015 only (verified empirically — branched directly off `develop`, independent of CP-016/017/018/020)
+- **Git branch:** `21-feature-procurement` · **Latest commit:** see this phase's completion report
+- **Next action:** none
+
+## Planned phases (CP-017 – CP-020, CP-022 – CP-029) — most not yet started; CP-017/018 implemented but unmerged
+
+CP-017 and CP-018 each have real implementation on their own branches
+(see the table below) but were deliberately **not** merged as part of
+this integration — only CP-016 and CP-021 were. Every other phase below
+scores **0% on every dimension** — no code, test, or documentation of
+its own implementation yet (their _planning_ documentation exists in
+`master-roadmap-v2.md`/`canonical-roadmap.md`, which is CP-014's output,
+not theirs). Full objective/deliverables/acceptance criteria for each:
+[`../roadmap/master-roadmap-v2.md`](../roadmap/master-roadmap-v2.md)
 (as `P016`–`P021`, renumbered `CP-` here) and
 [`canonical-roadmap.md`](canonical-roadmap.md) (`CP-022`–`CP-029`).
 
-| CP ID  | Name                            | Priority | Dependencies           | Status      | Next action                                                |
-| ------ | ------------------------------- | -------- | ---------------------- | ----------- | ---------------------------------------------------------- |
-| CP-017 | Real Notification Delivery      | P1       | CP-016                 | NOT_STARTED | Wire one real SMS provider                                 |
-| CP-018 | Admin Panel MVP                 | P1       | CP-015, CP-016         | NOT_STARTED | First real frontend features                               |
+CP-016 and CP-021 are both merged and VALIDATED as of this integration
+— see their own detail sections above/below and
+`docs/product/integration-cp016-cp021.md`. Both are excluded from the
+"still not started" table below.
+
+| CP ID  | Name                            | Priority | Dependencies           | Status      | Next action                                                 |
+| ------ | -------------------------------- | -------- | ---------------------- | ----------- | ------------------------------------------------------------ |
+| CP-017 | Real Notification Delivery      | P1       | CP-016                 | IMPLEMENTED (80%, not VALIDATED) | Verify live SMS delivery against real network egress, then merge |
+| CP-018 | Admin Panel MVP                 | P1       | CP-015, CP-016         | VALIDATED (own branch, unmerged) | Merge decision — deferred, not part of this integration |
 | CP-019 | Customer Domain & Prescription  | P1       | CP-015, CP-016         | BLOCKED     | Needs optometry-domain-expert review before implementation |
 | CP-020 | Storefront MVP                  | P1       | CP-016, CP-018, CP-019 | NOT_STARTED | First real customer-facing surface                         |
-| CP-021 | Procurement                     | P2       | CP-015                 | NOT_STARTED | Purchase Order/Supplier model                              |
-| CP-022 | Mobile real features            | P2       | CP-018, CP-020         | NOT_STARTED | Sequenced after web UX proven                              |
-| CP-023 | CMS                             | P2       | CP-018                 | NOT_STARTED | Needs admin UI to author content                           |
-| CP-024 | CRM beyond coupons              | P2       | CP-019, CP-020         | NOT_STARTED | Needs real customer data to segment                        |
-| CP-025 | Store/POS/omnichannel           | P2       | CP-018, CP-021         | NOT_STARTED | Separate operational model, deferred                       |
-| CP-026 | AI                              | P2       | CP-020                 | NOT_STARTED | Needs real usage data                                      |
-| CP-027 | Advanced Analytics              | P2       | CP-020                 | NOT_STARTED | Needs real volume                                          |
-| CP-028 | Security Hardening completion   | P1       | CP-016                 | NOT_STARTED | Before any phase is genuinely public                       |
-| CP-029 | Production Readiness completion | P1       | CP-016                 | NOT_STARTED | Before any "production-ready" claim                        |
+| CP-022 | Mobile real features            | P2       | CP-018, CP-020         | NOT_STARTED | Sequenced after web UX proven                               |
+| CP-023 | CMS                             | P2       | CP-018                 | NOT_STARTED | Needs admin UI to author content                            |
+| CP-024 | CRM beyond coupons              | P2       | CP-019, CP-020         | NOT_STARTED | Needs real customer data to segment                         |
+| CP-025 | Store/POS/omnichannel           | P2       | CP-018, CP-021         | NOT_STARTED | Separate operational model, deferred                        |
+| CP-026 | AI                              | P2       | CP-020                 | NOT_STARTED | Needs real usage data                                       |
+| CP-027 | Advanced Analytics              | P2       | CP-020                 | NOT_STARTED | Needs real volume                                           |
+| CP-028 | Security Hardening completion   | P1       | CP-016                 | NOT_STARTED | Before any phase is genuinely public                        |
+| CP-029 | Production Readiness completion | P1       | CP-016                 | NOT_STARTED | Before any "production-ready" claim                         |
 
 ## Aggregate
 
 - **Completed (Implementation+Test+Integration+Docs all met, or the
-  design-only equivalent for CP-000):** 17 (CP-000–CP-016)
+  design-only equivalent for CP-000):** 18 (CP-000–CP-016, plus CP-021 —
+  merged out of numeric order, its sole dependency being CP-015)
 - **Partial:** 0
 - **In progress:** 0
-- **Planned (zero implementation):** 13 (CP-017–CP-029)
+- **Planned (zero implementation, or implemented-but-unmerged — CP-017/018):** 12 (CP-017–CP-020, CP-022–CP-029)
 - **Total canonical phases tracked:** 30
 
 This count is the authoritative input to the "Number of completed/

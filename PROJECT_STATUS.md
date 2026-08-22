@@ -1,11 +1,19 @@
 # Project Status
 
-**Overall Progress:** 17 of 30 canonical phases Completed, 0 Partial,
-0 in progress, 13 Planned.
-**Current Phase:** CP-016 — Platform Reliability Foundation (complete).
-**Next Phase:** CP-017 — Real Notification Delivery (or CP-018/CP-021,
-which have no dependency on CP-017 — see `docs/product/phase-dependency-graph.md`).
-**Last Audit:** 2026-08-21 (`docs/product/phase-016-audit.md`).
+**Overall Progress:** 18 of 30 canonical phases Completed, 0 Partial,
+0 in progress, 12 Planned.
+**Current Phase:** CP-021 — Procurement (complete). CP-016 — Platform
+Reliability Foundation is also complete and merged (this integration
+commit carries both).
+**Next Phase:** CP-017 — Real Notification Delivery is the next
+gate-sequenced item (depends on CP-016, now merged), but is not yet
+VALIDATED on its own branch (IMPLEMENTED 80% — live SMS delivery never
+verified against real network egress) and has **not** been merged here.
+CP-018/CP-020/CP-022 remain unmerged/not started — see
+`docs/product/phase-dependency-graph.md`.
+**Last Audit:** 2026-08-22 (`docs/product/phase-016-audit.md`,
+`docs/product/phase-021-audit.md`; this integration itself is recorded
+in `docs/product/integration-cp016-cp021.md`).
 
 This file is a human-readable summary. The source of truth is
 [`docs/product/roadmap.json`](docs/product/roadmap.json), kept in sync by
@@ -33,6 +41,7 @@ Legend: `[x]` Completed · `[~]` In progress / Partial · `[ ]` Planned ·
 - [x] CP-011 — Order lifecycle hardening
 - [x] CP-012 — Returns/refunds/credit notes _(integrated by CP-015)_
 - [x] CP-013 — Return settlement recovery/reconciliation _(integrated by CP-015)_
+- [x] CP-021 — Procurement _(`21-feature-procurement`, branched directly off `develop` — its sole canonical dependency is CP-015, verified empirically; completed out of numeric order per that dependency, not by skipping the CP-016 gate)_
 
 ## Governance & integration
 
@@ -46,7 +55,6 @@ Legend: `[x]` Completed · `[~]` In progress / Partial · `[ ]` Planned ·
 - [ ] CP-018 — Admin Panel MVP
 - [!] CP-019 — Customer Domain & Prescription _(blocked on domain-expert review)_
 - [ ] CP-020 — Storefront MVP
-- [ ] CP-021 — Procurement
 
 ## Planned — deferred tracks
 

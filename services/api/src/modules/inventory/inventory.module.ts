@@ -9,9 +9,11 @@ import { AllocationService } from './application/allocation.service';
 import { LedgerService } from './application/ledger.service';
 import { LocationsService } from './application/locations.service';
 import { LowStockService } from './application/low-stock.service';
+import { PurchaseOrderService } from './application/purchase-order.service';
 import { ReservationService } from './application/reservation.service';
 import { StockCountService } from './application/stock-count.service';
 import { StockQueryService } from './application/stock-query.service';
+import { SupplierService } from './application/supplier.service';
 import { TransferService } from './application/transfer.service';
 import { WarehousesService } from './application/warehouses.service';
 import { ALLOCATION_RULES_REPOSITORY } from './domain/ports/allocation-rules.repository.port';
@@ -20,9 +22,11 @@ import { INVENTORY_ITEM_REPOSITORY } from './domain/ports/inventory-item.reposit
 import { INVENTORY_LEDGER_REPOSITORY } from './domain/ports/inventory-ledger.repository.port';
 import { INVENTORY_RESERVATION_REPOSITORY } from './domain/ports/inventory-reservation.repository.port';
 import { INVENTORY_THRESHOLD_REPOSITORY } from './domain/ports/inventory-threshold.repository.port';
+import { PURCHASE_ORDER_REPOSITORY } from './domain/ports/purchase-order.repository.port';
 import { SKU_LOOKUP_PORT } from './domain/ports/sku-lookup.port';
 import { STOCK_COUNT_REPOSITORY } from './domain/ports/stock-count.repository.port';
 import { STOCK_TRANSFER_REPOSITORY } from './domain/ports/stock-transfer.repository.port';
+import { SUPPLIER_REPOSITORY } from './domain/ports/supplier.repository.port';
 import { WAREHOUSE_LOCATION_REPOSITORY } from './domain/ports/warehouse-location.repository.port';
 import { WAREHOUSE_REPOSITORY } from './domain/ports/warehouse.repository.port';
 import { InventoryQueueModule } from './infrastructure/queues/inventory-queue.module';
@@ -32,18 +36,22 @@ import { PrismaInventoryItemRepository } from './infrastructure/repositories/pri
 import { PrismaInventoryLedgerRepository } from './infrastructure/repositories/prisma-inventory-ledger.repository';
 import { PrismaInventoryReservationRepository } from './infrastructure/repositories/prisma-inventory-reservation.repository';
 import { PrismaInventoryThresholdRepository } from './infrastructure/repositories/prisma-inventory-threshold.repository';
+import { PrismaPurchaseOrderRepository } from './infrastructure/repositories/prisma-purchase-order.repository';
 import { PrismaSkuLookupRepository } from './infrastructure/repositories/prisma-sku-lookup.repository';
 import { PrismaStockCountRepository } from './infrastructure/repositories/prisma-stock-count.repository';
 import { PrismaStockTransferRepository } from './infrastructure/repositories/prisma-stock-transfer.repository';
+import { PrismaSupplierRepository } from './infrastructure/repositories/prisma-supplier.repository';
 import { PrismaWarehouseLocationRepository } from './infrastructure/repositories/prisma-warehouse-location.repository';
 import { PrismaWarehouseRepository } from './infrastructure/repositories/prisma-warehouse.repository';
 import { AdjustmentController } from './presentation/controllers/adjustment.controller';
 import { AvailabilityController } from './presentation/controllers/availability.controller';
 import { CatalogAvailabilityPublicController } from './presentation/controllers/catalog-availability-public.controller';
 import { LedgerController } from './presentation/controllers/ledger.controller';
+import { PurchaseOrderController } from './presentation/controllers/purchase-order.controller';
 import { ReservationController } from './presentation/controllers/reservation.controller';
 import { StockCountController } from './presentation/controllers/stock-count.controller';
 import { StockController } from './presentation/controllers/stock.controller';
+import { SupplierController } from './presentation/controllers/supplier.controller';
 import { TransferController } from './presentation/controllers/transfer.controller';
 import { WarehouseController } from './presentation/controllers/warehouse.controller';
 import { InventoryDomainExceptionFilter } from './presentation/filters/inventory-domain-exception.filter';
@@ -81,6 +89,8 @@ import { InventoryDomainExceptionFilter } from './presentation/filters/inventory
     ReservationController,
     AvailabilityController,
     CatalogAvailabilityPublicController,
+    SupplierController,
+    PurchaseOrderController,
   ],
   providers: [
     WarehousesService,
@@ -93,6 +103,8 @@ import { InventoryDomainExceptionFilter } from './presentation/filters/inventory
     StockCountService,
     LowStockService,
     AllocationService,
+    SupplierService,
+    PurchaseOrderService,
     { provide: WAREHOUSE_REPOSITORY, useClass: PrismaWarehouseRepository },
     { provide: WAREHOUSE_LOCATION_REPOSITORY, useClass: PrismaWarehouseLocationRepository },
     { provide: INVENTORY_ITEM_REPOSITORY, useClass: PrismaInventoryItemRepository },
@@ -104,6 +116,8 @@ import { InventoryDomainExceptionFilter } from './presentation/filters/inventory
     { provide: STOCK_COUNT_REPOSITORY, useClass: PrismaStockCountRepository },
     { provide: SKU_LOOKUP_PORT, useClass: PrismaSkuLookupRepository },
     { provide: ALLOCATION_RULES_REPOSITORY, useClass: PrismaAllocationRulesRepository },
+    { provide: SUPPLIER_REPOSITORY, useClass: PrismaSupplierRepository },
+    { provide: PURCHASE_ORDER_REPOSITORY, useClass: PrismaPurchaseOrderRepository },
     { provide: AUDIT_LOG_REPOSITORY, useClass: PrismaAuditLogRepository },
     { provide: APP_FILTER, useClass: InventoryDomainExceptionFilter },
   ],

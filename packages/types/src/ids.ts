@@ -206,3 +206,12 @@ export const asCreditNoteLineId = brandedId<'CreditNoteLineId'>('CreditNoteLineI
 export type ReturnSettlementId = Brand<string, 'ReturnSettlementId'>;
 
 export const asReturnSettlementId = brandedId<'ReturnSettlementId'>('ReturnSettlementId').as;
+
+// Phase 021 — procurement (see docs/adr/ADR-021-procurement.md).
+export type SupplierId = Brand<string, 'SupplierId'>;
+export type PurchaseOrderId = Brand<string, 'PurchaseOrderId'>;
+export type PurchaseOrderItemId = Brand<string, 'PurchaseOrderItemId'>;
+
+export const asSupplierId = brandedId<'SupplierId'>('SupplierId').as;
+export const asPurchaseOrderId = brandedId<'PurchaseOrderId'>('PurchaseOrderId').as;
+export const asPurchaseOrderItemId = brandedId<'PurchaseOrderItemId'>('PurchaseOrderItemId').as;

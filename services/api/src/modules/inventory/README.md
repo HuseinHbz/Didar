@@ -162,15 +162,29 @@ new identity concept for a SKU, satisfying the brief's "integrate with Phase
 005's Product/SKU model without duplicating product identity" rule (ADR-006
 decision 10).
 
-## Procurement / returns — readiness, not a full workflow
+## Procurement (Phase 021) — real, built on the Phase 006 readiness seam
 
-The brief asks for readiness, not implementation. `InventoryLedger`'s
-`PURCHASE_RECEIPT`/`RETURN_RECEIPT`/`QUARANTINE`/`RELEASE_FROM_QUARANTINE`
-movement types and polymorphic `referenceType`/`referenceId` columns are
-real and usable today (the seed's own initial-stock fixture writes a real
-`PURCHASE_RECEIPT` row) — a future procurement/returns phase has a ledger
-vocabulary to write against without this module needing new tables (ADR-006
-decision 9).
+`InventoryLedger`'s `PURCHASE_RECEIPT`/`RETURN_RECEIPT`/`QUARANTINE`/
+`RELEASE_FROM_QUARANTINE` movement types and polymorphic
+`referenceType`/`referenceId` columns were prepared, unused, back in
+Phase 006 specifically for this (ADR-006 decision 9) — `RETURN_RECEIPT`
+was picked up first by returns (ADR-012), and `PURCHASE_RECEIPT` is now
+real too: `Supplier` (vendor master data) and `PurchaseOrder`/
+`PurchaseOrderItem` (a real 6-state lifecycle —
+`DRAFT → SUBMITTED → APPROVED → PARTIALLY_RECEIVED/RECEIVED`, or
+`CANCELLED` before receiving starts) live in this same module.
+`POST .../purchase-orders/:id/receive` writes `PURCHASE_RECEIPT` /
+`referenceType: 'PURCHASE_ORDER'` ledger rows through
+`mutateInventoryItem()` — the exact same shared, transaction-composable
+primitive every other quantity mutation in this module funnels through
+— inside one transaction with the order's own `receivedQuantity`
+update, and is idempotent under retry (see
+`docs/adr/ADR-021-procurement.md` for the full account, including a
+defect found and fixed during this phase's own concurrency testing).
+Full scope: `docs/product/procurement.md`. Deliberately not built this
+phase: quotations, multi-level approval, attachments, multi-currency,
+three-way matching, reporting, or any admin-frontend UI — see that
+document's own "What's explicitly not real yet" section.
 
 ## Allocation engine — configuration-driven, explainable
 
@@ -247,9 +261,11 @@ catalog).
   `@RequireModule('inventory')`) as every admin route; "internal" describes
   the URL prefix a future service-to-service caller would use, not a
   different auth model.
-- **No full procurement/returns workflow** — only the ledger vocabulary
-  (`PURCHASE_RECEIPT`/`RETURN_RECEIPT`/`QUARANTINE`/`RELEASE_FROM_QUARANTINE`)
-  a future phase builds on top of.
+- **No procurement quotations/multi-level approval/attachments/reporting**
+  — Phase 021 built the core Supplier + PurchaseOrder lifecycle; see
+  `docs/product/procurement.md`'s own "What's explicitly not real yet"
+  for the full deferred list. `QUARANTINE`/`RELEASE_FROM_QUARANTINE`
+  remain unused ledger vocabulary for a still-later phase.
 - **No notification fan-out** (SMS/email/push) off `inventory_low_stock` —
   the event is observable (a log line via the queue's own processor, a
   metric) but doesn't reach a human yet.
@@ -273,8 +289,9 @@ pnpm --filter @iecp/api test:e2e    # e2e — requires a migrated + seeded DATAB
 
 `domain/services/*.spec.ts` are the fast, DB-free proofs of the never-
 negative invariant, reservation state guards, the transfer state machine,
-adjustment validation, count variance calculation, low-stock evaluation, and
-allocation rule selection. `test/inventory.e2e-spec.ts` is the full-stack
+adjustment validation, count variance calculation, low-stock evaluation,
+allocation rule selection, and (Phase 021) the purchase order state
+machine + line validator. `test/inventory.e2e-spec.ts` is the full-stack
 proof against real Postgres + real Redis: unauthorized access, public
 storefront availability, warehouse-management RBAC, the reservation
 lifecycle (including idempotency and over-reservation rejection), adjustment
@@ -283,7 +300,12 @@ per-step RBAC, the stock count lifecycle, barcode/SKU lookup, and the
 mandatory 100-simultaneous-reservations-against-10-units concurrency proof —
 logging in as the seed's real `admin`/`inventory_manager`/
 `warehouse_operator`/`store_manager`/`inventory_auditor` fixture users via the
-real OTP flow, not fabricated tokens.
+real OTP flow, not fabricated tokens. `test/procurement.e2e-spec.ts`
+covers supplier/purchase-order RBAC, line validation, the full
+create→approve→receive lifecycle, partial receiving, cancellation,
+over-receive rejection, a sequential idempotent-retry proof, and a
+20-way-concurrent identical-request proof (exactly one receipt applied,
+not 20).
 
 ## Config
 
