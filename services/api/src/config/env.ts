@@ -6,7 +6,12 @@ const envSchema = z.object({
   PORT: envPrimitives.port.default(4000),
   DATABASE_URL: envPrimitives.nonEmptyString,
   JWT_SECRET: envPrimitives.nonEmptyString,
-  CORS_ORIGIN: envPrimitives.nonEmptyString.default('http://localhost:3000'),
+  // CP-018: comma-separated — the admin panel (apps/admin, :3001) is a
+  // second real browser origin alongside the storefront (apps/storefront,
+  // :3000), both legitimately calling this API cross-origin in local dev.
+  // main.ts splits this into the array Nest's `enableCors({ origin })`
+  // accepts.
+  CORS_ORIGIN: envPrimitives.nonEmptyString.default('http://localhost:3000,http://localhost:3001'),
 
   // identity module (Phase 004) — see services/api/src/modules/identity/README.md
   JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().positive().default(900), // 15 min

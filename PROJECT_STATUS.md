@@ -1,19 +1,24 @@
 # Project Status
 
-**Overall Progress:** 18 of 30 canonical phases Completed, 0 Partial,
-0 in progress, 12 Planned.
-**Current Phase:** CP-021 — Procurement (complete). CP-016 — Platform
-Reliability Foundation is also complete and merged (this integration
-commit carries both).
-**Next Phase:** CP-017 — Real Notification Delivery is the next
-gate-sequenced item (depends on CP-016, now merged), but is not yet
-VALIDATED on its own branch (IMPLEMENTED 80% — live SMS delivery never
-verified against real network egress) and has **not** been merged here.
-CP-018/CP-020/CP-022 remain unmerged/not started — see
+**Overall Progress:** 19 of 30 canonical phases Completed, 0 Partial,
+0 in progress, 11 Planned.
+**Current Phase:** CP-018 — Admin Panel MVP (VALIDATED, merged). CP-016
+— Platform Reliability Foundation and CP-021 — Procurement are also
+merged (all three landed in this and the prior integration operation).
+**Next Phase:** No canonical CP is both genuinely unblocked and not yet
+implemented right now. CP-017 — Real Notification Delivery depends on
+CP-016 (now merged) but is not yet VALIDATED on its own branch
+(IMPLEMENTED 80% — live SMS delivery never verified against real
+network egress) and has **not** been merged. CP-019 remains BLOCKED on
+domain-expert review. CP-020 depends on CP-016 (merged)/CP-018
+(merged)/CP-019 (still blocked) — not yet unblocked. CP-022 depends on
+CP-018 (merged)/CP-020 (not started) — not yet unblocked. See
 `docs/product/phase-dependency-graph.md`.
 **Last Audit:** 2026-08-22 (`docs/product/phase-016-audit.md`,
-`docs/product/phase-021-audit.md`; this integration itself is recorded
-in `docs/product/integration-cp016-cp021.md`).
+`docs/product/phase-018-audit.md`, `docs/product/phase-021-audit.md`;
+integration operations recorded in
+`docs/product/integration-cp016-cp021.md` and
+`docs/product/integration-cp018.md`).
 
 This file is a human-readable summary. The source of truth is
 [`docs/product/roadmap.json`](docs/product/roadmap.json), kept in sync by
@@ -47,14 +52,17 @@ Legend: `[x]` Completed · `[~]` In progress / Partial · `[ ]` Planned ·
 
 - [x] CP-014 — Roadmap Audit & Governance
 - [x] CP-015 — Integration Reconciliation _(merged CP-012/013/014, fresh-DB zero-drift proven, 195/195 e2e twice consecutively)_
-- [x] CP-016 — Platform Reliability Foundation _(this phase — real Redis CI service, bounded startup preflight in all 3 Redis-dependent services, `/health/ready` split, all live-proven twice against a real Redis; rate limiting (P1-1) and full observability (P1-5) explicitly deferred by this phase's own non-goals)_
+- [x] CP-016 — Platform Reliability Foundation _(real Redis CI service, bounded startup preflight in all 3 Redis-dependent services, `/health/ready` split, all live-proven twice against a real Redis; rate limiting (P1-1) and full observability (P1-5) explicitly deferred by this phase's own non-goals)_
+
+## Client applications
+
+- [x] CP-018 — Admin Panel MVP _(this phase — real operator UI over the pre-existing, RBAC-gated backend: auth, permission-aware nav, catalog/inventory/order/return operator views; zero new backend business logic beyond a CORS config widening; 12/12 e2e + 16/16 unit tests, run twice; see `docs/product/phase-018-audit.md`)_
 
 ## Planned — active tracks (the gate is closed)
 
-- [ ] CP-017 — Real Notification Delivery
-- [ ] CP-018 — Admin Panel MVP
+- [ ] CP-017 — Real Notification Delivery _(real implementation exists on sibling branch `17-feature-real-notification-delivery`, not yet merged — see `docs/product/phase-018-audit.md` §18)_
 - [!] CP-019 — Customer Domain & Prescription _(blocked on domain-expert review)_
-- [ ] CP-020 — Storefront MVP
+- [ ] CP-020 — Storefront MVP _(needs CP-019, still blocked)_
 
 ## Planned — deferred tracks
 

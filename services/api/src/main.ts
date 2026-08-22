@@ -29,7 +29,10 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
 
   app.use(helmet());
-  app.enableCors({ origin: env.CORS_ORIGIN, credentials: true });
+  app.enableCors({
+    origin: env.CORS_ORIGIN.split(',').map((origin) => origin.trim()),
+    credentials: true,
+  });
   app.setGlobalPrefix('api/v1');
   app.enableShutdownHooks();
 
