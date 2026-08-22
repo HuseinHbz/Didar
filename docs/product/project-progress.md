@@ -83,10 +83,13 @@ for the underlying commands/greps/live reproductions.
 - **Completion:** 78%
 - **Database:** 100 · **Backend/API:** 100 (100-way concurrency proof, no oversell) · **Frontend/Admin:** N/A · **Mobile:** N/A · **Security:** 90 · **Testing:** 100 · **Integration:** 100 · **Documentation:** 100 · **CI/CD:** 50 (shared gap) · **Production Readiness:** 50
 - **Audit status:** VALIDATED
-- **Blocking issues:** **P1 — no Purchase Order/Supplier model** (owned by CP-021)
+- **Blocking issues:** none — the Purchase Order/Supplier gap this entry
+  used to name is resolved by CP-021 (VALIDATED), built directly on this
+  phase's own readiness seam (`PURCHASE_RECEIPT` movement type,
+  polymorphic ledger `referenceType`/`referenceId`, ADR-006 decision 9)
 - **Dependencies:** CP-003, CP-004, CP-005
 - **Git branch:** `06-feature-inventory-warehouse` · **Latest commit:** `db80dd7`
-- **Next action:** none this phase; procurement owned by CP-021
+- **Next action:** none
 
 ### CP-007 — Cart/checkout
 
@@ -190,7 +193,7 @@ acceptance criteria for each: [`../roadmap/master-roadmap-v2.md`](../roadmap/mas
 | CP-018 | Admin Panel MVP                 | P1       | CP-015, CP-016         | NOT_STARTED | First real frontend features                                       |
 | CP-019 | Customer Domain & Prescription  | P1       | CP-015, CP-016         | BLOCKED     | Needs optometry-domain-expert review before implementation         |
 | CP-020 | Storefront MVP                  | P1       | CP-016, CP-018, CP-019 | NOT_STARTED | First real customer-facing surface                                 |
-| CP-021 | Procurement                     | P2       | CP-015                 | NOT_STARTED | Purchase Order/Supplier model                                      |
+| CP-021 | Procurement                     | P2       | CP-015                 | VALIDATED   | none — Supplier + PurchaseOrder lifecycle, real e2e evidence        |
 | CP-022 | Mobile real features            | P2       | CP-018, CP-020         | NOT_STARTED | Sequenced after web UX proven                                      |
 | CP-023 | CMS                             | P2       | CP-018                 | NOT_STARTED | Needs admin UI to author content                                   |
 | CP-024 | CRM beyond coupons              | P2       | CP-019, CP-020         | NOT_STARTED | Needs real customer data to segment                                |

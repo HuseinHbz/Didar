@@ -284,14 +284,14 @@
     {
       "id": "CP-021",
       "name": "Procurement",
-      "gitPhase": null,
+      "gitPhase": "21",
       "blueprintPhase": "PHASE 4 (remainder)",
-      "status": "NOT_STARTED",
-      "completionPercent": 0,
+      "status": "VALIDATED",
+      "completionPercent": 95,
       "dependencies": ["CP-015"],
-      "gitBranch": null,
+      "gitBranch": "21-feature-procurement",
       "latestCommit": null,
-      "blockingIssues": ["P2-1"],
+      "blockingIssues": [],
       "priority": "P2"
     },
     {
@@ -712,10 +712,10 @@
   ],
   "nextPhase": "CP-016",
   "aggregate": {
-    "completedPhases": 16,
+    "completedPhases": 17,
     "partialPhases": 0,
     "inProgressPhases": 0,
-    "plannedPhases": 14,
+    "plannedPhases": 13,
     "totalPhases": 30
   }
 }

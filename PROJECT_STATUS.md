@@ -1,10 +1,13 @@
 # Project Status
 
-**Overall Progress:** 16 of 30 canonical phases Completed, 0 Partial,
-0 in progress, 14 Planned.
-**Current Phase:** CP-015 — Integration Reconciliation (complete).
-**Next Phase:** CP-016 — Platform Reliability Foundation.
-**Last Audit:** 2026-08-21 (`docs/product/phase-015-audit.md`).
+**Overall Progress:** 17 of 30 canonical phases Completed, 0 Partial,
+0 in progress, 13 Planned.
+**Current Phase:** CP-021 — Procurement (complete).
+**Next Phase (gate-sequenced):** CP-016 — Platform Reliability Foundation
+— CP-021 was completed out of that linear sequence because its sole
+canonical dependency is CP-015, not CP-016; it does not close the CP-016
+gate or change what's still blocked behind it.
+**Last Audit:** 2026-08-22 (`docs/product/phase-021-audit.md`).
 
 This file is a human-readable summary. The source of truth is
 [`docs/product/roadmap.json`](docs/product/roadmap.json), kept in sync by
@@ -32,6 +35,7 @@ Legend: `[x]` Completed · `[~]` In progress / Partial · `[ ]` Planned ·
 - [x] CP-011 — Order lifecycle hardening
 - [x] CP-012 — Returns/refunds/credit notes _(integrated by CP-015)_
 - [x] CP-013 — Return settlement recovery/reconciliation _(integrated by CP-015)_
+- [x] CP-021 — Procurement _(`21-feature-procurement`, branched directly off `develop` — its sole canonical dependency is CP-015, verified empirically; completed out of numeric order per that dependency, not by skipping the CP-016 gate)_
 
 ## Governance & integration
 
@@ -48,7 +52,6 @@ Legend: `[x]` Completed · `[~]` In progress / Partial · `[ ]` Planned ·
 - [ ] CP-018 — Admin Panel MVP
 - [!] CP-019 — Customer Domain & Prescription _(blocked on domain-expert review)_
 - [ ] CP-020 — Storefront MVP
-- [ ] CP-021 — Procurement
 
 ## Planned — deferred tracks
 
