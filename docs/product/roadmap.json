@@ -290,7 +290,7 @@
       "completionPercent": 95,
       "dependencies": ["CP-015"],
       "gitBranch": "21-feature-procurement",
-      "latestCommit": null,
+      "latestCommit": "ec833f6",
       "blockingIssues": [],
       "priority": "P2"
     },
