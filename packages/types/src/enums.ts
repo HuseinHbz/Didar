@@ -545,3 +545,35 @@ export const RETURN_SETTLEMENT_STATUSES = [
   'MANUAL_REVIEW',
 ] as const;
 export type ReturnSettlementStatus = (typeof RETURN_SETTLEMENT_STATUSES)[number];
+
+/**
+ * Phase 021 — procurement (docs/adr/ADR-021-procurement.md). Deliberately
+ * small — a supplier is either usable or not; there is no draft/pending-
+ * review step the way `Product`'s publication lifecycle has one, since
+ * nothing customer-facing ever reads this row.
+ */
+export const SUPPLIER_STATUSES = ['ACTIVE', 'INACTIVE'] as const;
+export type SupplierStatus = (typeof SUPPLIER_STATUSES)[number];
+
+/**
+ * The Purchase Order lifecycle — mirrors `TransferStateMachine`'s own
+ * shape (`PurchaseOrderStateMachine`, domain layer): `create()` writes
+ * the row directly in `SUBMITTED`, the same "no persisted DRAFT row"
+ * choice `StockTransfer.create()` already made, so `DRAFT` here is the
+ * state machine's conceptual starting point only, never a value actually
+ * stored. `PARTIALLY_RECEIVED` and `RECEIVED` are both reachable from
+ * `APPROVED` (and `PARTIALLY_RECEIVED` is itself re-enterable) because
+ * receiving happens line-by-line and a real supplier shipment is rarely
+ * complete in one delivery — see `PurchaseOrderStateMachine`'s own doc
+ * comment for the exact rule that decides which of the two a given
+ * `receive()` call lands on.
+ */
+export const PURCHASE_ORDER_STATUSES = [
+  'DRAFT',
+  'SUBMITTED',
+  'APPROVED',
+  'PARTIALLY_RECEIVED',
+  'RECEIVED',
+  'CANCELLED',
+] as const;
+export type PurchaseOrderStatus = (typeof PURCHASE_ORDER_STATUSES)[number];
