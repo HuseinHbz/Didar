@@ -17,38 +17,51 @@ this file is scope-limited to what inventory checks and why.
 
 ## Permission registry
 
-All 13 registered in `packages/database/prisma/seed.ts`'s `permissionDefs`,
+All 17 registered in `packages/database/prisma/seed.ts`'s `permissionDefs`,
 each namespaced `inventory.<action>` and checked via `@RequirePermission` on
 exactly the controller method named. Read/list endpoints use the coarser
 `@RequireModule('inventory')` instead (any `inventory.*` permission is
 enough to read) — see [`docs/api/inventory.md`](../api/inventory.md) for the
 full endpoint-to-guard mapping.
 
-| Permission                    | Enforced on                                                                                          |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `inventory.read`              | Coarse read grant (role membership check, not a route guard by itself — routes use `@RequireModule`) |
-| `inventory.create`            | Coarse write grant held by `warehouse_operator`                                                      |
-| `inventory.update`            | `PUT /admin/inventory/low-stock/threshold`                                                           |
-| `inventory.adjust`            | `POST /admin/inventory/adjustments`                                                                  |
-| `inventory.transfer.create`   | `POST /admin/inventory/transfers`                                                                    |
-| `inventory.transfer.approve`  | `POST /admin/inventory/transfers/:id/approve`                                                        |
-| `inventory.transfer.dispatch` | `POST /admin/inventory/transfers/:id/dispatch`                                                       |
-| `inventory.transfer.receive`  | `POST /admin/inventory/transfers/:id/receive`                                                        |
-| `inventory.count.create`      | `POST /admin/inventory/counts`, `POST .../:id/submit`                                                |
-| `inventory.count.approve`     | `POST /admin/inventory/counts/:id/approve`, `POST .../:id/reject`                                    |
-| `inventory.ledger.read`       | `GET /admin/inventory/ledger`, adjustments/transfers/counts list+detail                              |
-| `inventory.warehouse.manage`  | `POST`/`PATCH /admin/inventory/warehouses`, `POST /admin/inventory/locations`                        |
-| `inventory.low_stock.read`    | `GET /admin/inventory/low-stock` — held by all four inventory roles                                  |
+| Permission                         | Enforced on                                                                                                                   |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `inventory.read`                   | Coarse read grant (role membership check, not a route guard by itself — routes use `@RequireModule`)                          |
+| `inventory.create`                 | Coarse write grant held by `warehouse_operator`                                                                               |
+| `inventory.update`                 | `PUT /admin/inventory/low-stock/threshold`                                                                                    |
+| `inventory.adjust`                 | `POST /admin/inventory/adjustments`                                                                                           |
+| `inventory.transfer.create`        | `POST /admin/inventory/transfers`                                                                                             |
+| `inventory.transfer.approve`       | `POST /admin/inventory/transfers/:id/approve`                                                                                 |
+| `inventory.transfer.dispatch`      | `POST /admin/inventory/transfers/:id/dispatch`                                                                                |
+| `inventory.transfer.receive`       | `POST /admin/inventory/transfers/:id/receive`                                                                                 |
+| `inventory.count.create`           | `POST /admin/inventory/counts`, `POST .../:id/submit`                                                                         |
+| `inventory.count.approve`          | `POST /admin/inventory/counts/:id/approve`, `POST .../:id/reject`                                                             |
+| `inventory.ledger.read`            | `GET /admin/inventory/ledger`, adjustments/transfers/counts/purchase-orders list+detail                                       |
+| `inventory.warehouse.manage`       | `POST`/`PATCH /admin/inventory/warehouses`, `POST /admin/inventory/locations`                                                 |
+| `inventory.low_stock.read`         | `GET /admin/inventory/low-stock` — held by all four inventory roles                                                           |
+| `inventory.supplier.manage`        | (Phase 021) `GET`/`POST`/`PATCH /admin/inventory/suppliers` — one permission for read+write, same shape as `warehouse.manage` |
+| `inventory.purchase_order.create`  | (Phase 021) `POST /admin/inventory/purchase-orders`, `POST .../:id/cancel`                                                    |
+| `inventory.purchase_order.approve` | (Phase 021) `POST /admin/inventory/purchase-orders/:id/approve`                                                               |
+| `inventory.purchase_order.receive` | (Phase 021) `POST /admin/inventory/purchase-orders/:id/receive`                                                               |
 
 ## Roles
 
-| Role                 | Grant                                                                                                                                                                                            | Seed user       |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------- |
-| `admin`              | Every `inventory.*` permission (looped grant over `permissionDefs`, `module === 'inventory'`) — same role Phase 004/005 gave every `identity.*`/`catalog.*` permission to                        | `+989120000001` |
-| `inventory_manager`  | Every `inventory.*` permission — a department-head role with full module access, distinct from `admin` (no `identity.*`/`catalog.*`)                                                             | `+989120000005` |
-| `warehouse_operator` | `read`, `create`, `transfer.dispatch`, `transfer.receive`, `count.create`, `low_stock.read` — day-to-day floor operations; **no** `adjust`, no `transfer.approve`, no `count.approve`            | `+989120000006` |
-| `store_manager`      | `read`, `adjust`, `transfer.receive`, `count.create`, `count.approve`, `low_stock.read` — store-level authority to adjust and reconcile counts; **no** `transfer.approve`, no `warehouse.manage` | `+989120000007` |
-| `inventory_auditor`  | `read`, `ledger.read`, `low_stock.read` — read-only, no mutation permission of any kind                                                                                                          | `+989120000008` |
+| Role                 | Grant                                                                                                                                                                                                                                                                        | Seed user       |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
+| `admin`              | Every `inventory.*` permission (looped grant over `permissionDefs`, `module === 'inventory'`) — same role Phase 004/005 gave every `identity.*`/`catalog.*` permission to                                                                                                    | `+989120000001` |
+| `inventory_manager`  | Every `inventory.*` permission — a department-head role with full module access, distinct from `admin` (no `identity.*`/`catalog.*`); this includes all 4 Phase 021 procurement permissions                                                                                  | `+989120000005` |
+| `warehouse_operator` | `read`, `create`, `transfer.dispatch`, `transfer.receive`, `count.create`, `low_stock.read`, `purchase_order.receive` — day-to-day floor operations; **no** `adjust`, no `transfer.approve`, no `count.approve`, no `purchase_order.create`/`.approve`, no `supplier.manage` | `+989120000006` |
+| `store_manager`      | `read`, `adjust`, `transfer.receive`, `count.create`, `count.approve`, `low_stock.read` — store-level authority to adjust and reconcile counts; **no** `transfer.approve`, no `warehouse.manage`, no procurement permission of any kind                                      | `+989120000007` |
+| `inventory_auditor`  | `read`, `ledger.read`, `low_stock.read` — read-only, no mutation permission of any kind (can list/read purchase orders via `ledger.read`, cannot create/approve/receive)                                                                                                     | `+989120000008` |
+
+`warehouse_operator`'s `purchase_order.receive` grant mirrors its existing
+`transfer.receive` grant exactly — the same floor-level "receive the
+physical goods" boundary, just for a purchase order's delivery instead of
+an inter-warehouse transfer. It never gets `purchase_order.create` or
+`.approve` — the same "floor role can't approve/originate its own
+sensitive action" rule this module enforces everywhere else (see the next
+section). `test/procurement.e2e-spec.ts`'s "Purchase order RBAC" and
+"Supplier RBAC" suites prove each denial as a real `403`.
 
 ## "Warehouse operators cannot approve their own sensitive adjustments"
 
@@ -99,13 +112,26 @@ Inventory is the **second** real writer of `system.AuditLog` in this repo
 (catalog was first, Phase 005). Every mutation that changes stock state or
 its authorization boundary writes one:
 
-| Action                            | Audit event                     |
-| --------------------------------- | ------------------------------- |
-| `POST .../adjustments`            | `INVENTORY_ADJUSTMENT_CREATED`  |
-| `POST .../transfers/:id/approve`  | `INVENTORY_TRANSFER_APPROVED`   |
-| `POST .../transfers/:id/dispatch` | `INVENTORY_TRANSFER_DISPATCHED` |
-| `POST .../transfers/:id/receive`  | `INVENTORY_TRANSFER_RECEIVED`   |
-| `POST .../counts/:id/approve`     | `INVENTORY_COUNT_APPROVED`      |
+| Action                                 | Audit event                     |
+| -------------------------------------- | ------------------------------- |
+| `POST .../adjustments`                 | `INVENTORY_ADJUSTMENT_CREATED`  |
+| `POST .../transfers/:id/approve`       | `INVENTORY_TRANSFER_APPROVED`   |
+| `POST .../transfers/:id/dispatch`      | `INVENTORY_TRANSFER_DISPATCHED` |
+| `POST .../transfers/:id/receive`       | `INVENTORY_TRANSFER_RECEIVED`   |
+| `POST .../counts/:id/approve`          | `INVENTORY_COUNT_APPROVED`      |
+| `POST .../suppliers`                   | `SUPPLIER_CREATED`              |
+| `PATCH .../suppliers/:id`              | `SUPPLIER_UPDATED`              |
+| `POST .../purchase-orders`             | `PURCHASE_ORDER_CREATED`        |
+| `POST .../purchase-orders/:id/approve` | `PURCHASE_ORDER_APPROVED`       |
+| `POST .../purchase-orders/:id/receive` | `PURCHASE_ORDER_RECEIVED`       |
+| `POST .../purchase-orders/:id/cancel`  | `PURCHASE_ORDER_CANCELLED`      |
+
+(Procurement's audit actions are entity-prefixed, not module-prefixed —
+`PURCHASE_ORDER_*`/`SUPPLIER_*`, not `INVENTORY_PURCHASE_ORDER_*` —
+matching the wider repo convention `ORDER_*`/`RETURN_*`/`CREDIT_NOTE_*`
+already use, since "purchase order" and "supplier" are unambiguous
+entity names on their own; `INVENTORY_` only prefixes the generic nouns
+`ADJUSTMENT`/`TRANSFER`/`COUNT` that would otherwise collide.)
 
 `InventoryLedger` itself is the parallel, append-only **stock-history**
 trail (what changed, before/after quantities, why, correlation id) — the two
