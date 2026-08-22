@@ -7,17 +7,19 @@
 merged (all three landed in this and the prior integration operation).
 **Next Phase:** No canonical CP is both genuinely unblocked and not yet
 implemented right now. CP-017 — Real Notification Delivery depends on
-CP-016 (now merged) but is not yet VALIDATED on its own branch
-(IMPLEMENTED 80% — live SMS delivery never verified against real
-network egress) and has **not** been merged. CP-019 remains BLOCKED on
-domain-expert review. CP-020 depends on CP-016 (merged)/CP-018
-(merged)/CP-019 (still blocked) — not yet unblocked. CP-022 depends on
-CP-018 (merged)/CP-020 (not started) — not yet unblocked. See
-`docs/product/phase-dependency-graph.md`.
+CP-016 (now merged) but remains **IMPLEMENTED / VALIDATION-BLOCKED**
+(80% — a dedicated validation gate re-confirmed live, this session, that
+this sandbox has neither network egress to any external host nor a real
+provisioned SMS credential; see
+`docs/product/phase-017-validation-audit.md`) and has, deliberately, **not**
+been merged. CP-019 remains BLOCKED on domain-expert review. CP-020
+depends on CP-016 (merged)/CP-018 (merged)/CP-019 (still blocked) — not
+yet unblocked. CP-022 depends on CP-018 (merged)/CP-020 (not started) —
+not yet unblocked. See `docs/product/phase-dependency-graph.md`.
 **Last Audit:** 2026-08-22 (`docs/product/phase-016-audit.md`,
-`docs/product/phase-018-audit.md`, `docs/product/phase-021-audit.md`;
-integration operations recorded in
-`docs/product/integration-cp016-cp021.md` and
+`docs/product/phase-018-audit.md`, `docs/product/phase-021-audit.md`,
+`docs/product/phase-017-validation-audit.md`; integration operations
+recorded in `docs/product/integration-cp016-cp021.md` and
 `docs/product/integration-cp018.md`).
 
 This file is a human-readable summary. The source of truth is
@@ -60,7 +62,7 @@ Legend: `[x]` Completed · `[~]` In progress / Partial · `[ ]` Planned ·
 
 ## Planned — active tracks (the gate is closed)
 
-- [ ] CP-017 — Real Notification Delivery _(real implementation exists on sibling branch `17-feature-real-notification-delivery`, not yet merged — see `docs/product/phase-018-audit.md` §18)_
+- [ ] CP-017 — Real Notification Delivery _(IMPLEMENTED / VALIDATION-BLOCKED on sibling branch `17-feature-real-notification-delivery`, not merged — see `docs/product/phase-017-validation-audit.md`)_
 - [!] CP-019 — Customer Domain & Prescription _(blocked on domain-expert review)_
 - [ ] CP-020 — Storefront MVP _(needs CP-019, still blocked)_
 
