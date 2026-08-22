@@ -69,6 +69,15 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
+    # CP-016: this job boots the real compiled app (the e2e step), and
+    # every services/api module has required a reachable Redis to boot
+    # since Phase 006 (BullMQ queue registration) — see
+    # docs/architecture/redis-reliability.md. Before CP-016, this job had
+    # no redis service at all; a service/api boot in this job would hang
+    # indefinitely on ECONNREFUSED with no timeout to catch it (empirically
+    # reproduced in the Phase 014 audit). `timeout-minutes` below is a
+    # backstop against any future dependency hang, not just this one.
+    timeout-minutes: 20
     services:
       # Bootstrapped as the superuser (`postgres`) so the "Bootstrap schemas
       # and least-privilege roles" step below can create iecp_migrator/
@@ -85,6 +94,20 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U postgres -d iecp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      # REDIS_URL defaults to redis://localhost:6379 in every service's own
+      # env schema (services/*/src/config/env.ts) — this service's mapped
+      # port matches that default, so no REDIS_URL override is needed here.
+      # Pinned to a specific minor (not `latest`) for the same reproducibility
+      # reason postgres above is pinned to `17-alpine`, not `latest`.
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -132,7 +155,18 @@ jobs:
         env:
           DATABASE_URL: ${{ env.MIGRATOR_DATABASE_URL }}
 
-      - name: Integration tests (services/api e2e, against real Postgres, iecp_app role)
+      # CP-016: proves the redis service above is actually reachable at the
+      # address every service's own REDIS_URL default points to, before the
+      # e2e step boots the real app against it — a real bounded-retry PING
+      # (scripts/verify-redis.mjs), not just trusting the service
+      # container's own --health-cmd. Belt and suspenders: GHA already
+      # waits for --health-cmd to pass before this step runs, but this
+      # step's failure message names the actual gap directly if something's
+      # wrong, rather than surfacing as an opaque e2e boot hang.
+      - name: Verify Redis connectivity
+        run: node scripts/verify-redis.mjs
+
+      - name: Integration tests (services/api e2e, against real Postgres+Redis, iecp_app role)
         run: pnpm --filter @iecp/api test:e2e
 
   security:

@@ -40,12 +40,12 @@ for the underlying commands/greps/live reproductions.
 
 - **Objective:** 4-job CI pipeline (lint/test/security/build) + quality gate + branch strategy.
 - **Completion:** 70%
-- **Backend/API:** N/A · **Frontend/Admin:** N/A · **Mobile:** N/A · **Security:** 75 (secret scan + dependency audit real) · **Testing:** 100 (the pipeline itself is the deliverable) · **Integration:** 100 · **Documentation:** 100 · **CI/CD:** 50 (**no Redis service in the `test` job — see CP-016**) · **Production Readiness:** 50
-- **Audit status:** IMPLEMENTED — real and well-structured, with one confirmed CRITICAL gap (P0, see [`gap-priority-matrix.md`](gap-priority-matrix.md))
-- **Blocking issues:** **P0 — CI has no Redis service; app has no fail-fast (empirically reproduced in the Phase 014 audit)**
+- **Backend/API:** N/A · **Frontend/Admin:** N/A · **Mobile:** N/A · **Security:** 75 (secret scan + dependency audit real) · **Testing:** 100 (the pipeline itself is the deliverable) · **Integration:** 100 · **Documentation:** 100 · **CI/CD:** 100 (**real `redis:7.4-alpine` service container added by CP-016**) · **Production Readiness:** 50
+- **Audit status:** IMPLEMENTED — real and well-structured; the one confirmed CRITICAL gap this entry originally flagged (P0-2, see [`gap-priority-matrix.md`](gap-priority-matrix.md)) is now **RESOLVED by CP-016**
+- **Blocking issues:** none (P0-2 resolved by CP-016)
 - **Dependencies:** none
 - **Git branch:** `02-feature-ci-pipeline` · **Latest commit:** `8bb4ea9`
-- **Next action:** owned by CP-016
+- **Next action:** none
 
 ### CP-003 — Database foundation
 
@@ -173,7 +173,17 @@ for the underlying commands/greps/live reproductions.
 - **Git branch:** `15-feature-integration-reconciliation` · **Latest commit:** see this phase's completion report
 - **Next action:** hand off to CP-016
 
-## Planned phases (CP-016 – CP-029) — zero implementation, defined scope
+### CP-016 — Platform Reliability Foundation
+
+- **Completion:** 90% (the P0 reliability fix is complete and evidenced end to end; rate limiting (P1-1) and full observability (P1-5) are explicitly out of this phase's own scope — see below)
+- **Database:** N/A (no schema change) · **Backend/API:** 100 (bounded startup preflight in all 3 Redis-dependent services + new `GET /health/ready`) · **Security:** 90 (credential-handling rule enforced and tested; no new attack surface — see `docs/security/redis-security.md`) · **Testing:** 100 (4 unit-test files + 7-case e2e spec, all passing; plus live BullMQ-under-real-stall proof, run twice) · **Integration:** 100 (fresh-database migration re-verified, full e2e suite run twice consecutively) · **Documentation:** 100 (4 companion docs + this audit) · **CI/CD:** 100 (real `redis:7.4-alpine` service container + connectivity check) · **Production Readiness:** 80 (the reliability gap is closed; rate limiting and full observability remain, by this phase's own explicit non-goals)
+- **Audit status:** VALIDATED — see [`phase-016-audit.md`](phase-016-audit.md)
+- **Blocking issues:** none for this phase's own scope. **P1-1** (rate limiting) and the **full** form of **P1-5** (production observability — `/metrics`, alerting) are explicitly deferred, per this phase's own non-goals — CP-016 delivered only P1-5's structured-logging "minimum" (no credential leakage in any Redis-related log line, live-verified)
+- **Dependencies:** CP-015
+- **Git branch:** `16-feature-platform-reliability` · **Latest commit:** see this phase's completion report
+- **Next action:** CP-017 (or whichever phase picks up P1-1/P1-5's remainder — see `next-phase-decision.md`)
+
+## Planned phases (CP-017 – CP-029) — zero implementation, defined scope
 
 All of the following score **0% on every dimension** — none has any code,
 test, or documentation of its own implementation yet (their _planning_
@@ -183,30 +193,29 @@ acceptance criteria for each: [`../roadmap/master-roadmap-v2.md`](../roadmap/mas
 (as `P016`–`P021`, renumbered `CP-` here) and
 [`canonical-roadmap.md`](canonical-roadmap.md) (`CP-022`–`CP-029`).
 
-| CP ID  | Name                            | Priority | Dependencies           | Status      | Next action                                                        |
-| ------ | ------------------------------- | -------- | ---------------------- | ----------- | ------------------------------------------------------------------ |
-| CP-016 | Platform Reliability Foundation | P0       | CP-015                 | NOT_STARTED | Redis CI service + fail-fast + rate limit + observability minimums |
-| CP-017 | Real Notification Delivery      | P1       | CP-016                 | NOT_STARTED | Wire one real SMS provider                                         |
-| CP-018 | Admin Panel MVP                 | P1       | CP-015, CP-016         | NOT_STARTED | First real frontend features                                       |
-| CP-019 | Customer Domain & Prescription  | P1       | CP-015, CP-016         | BLOCKED     | Needs optometry-domain-expert review before implementation         |
-| CP-020 | Storefront MVP                  | P1       | CP-016, CP-018, CP-019 | NOT_STARTED | First real customer-facing surface                                 |
-| CP-021 | Procurement                     | P2       | CP-015                 | NOT_STARTED | Purchase Order/Supplier model                                      |
-| CP-022 | Mobile real features            | P2       | CP-018, CP-020         | NOT_STARTED | Sequenced after web UX proven                                      |
-| CP-023 | CMS                             | P2       | CP-018                 | NOT_STARTED | Needs admin UI to author content                                   |
-| CP-024 | CRM beyond coupons              | P2       | CP-019, CP-020         | NOT_STARTED | Needs real customer data to segment                                |
-| CP-025 | Store/POS/omnichannel           | P2       | CP-018, CP-021         | NOT_STARTED | Separate operational model, deferred                               |
-| CP-026 | AI                              | P2       | CP-020                 | NOT_STARTED | Needs real usage data                                              |
-| CP-027 | Advanced Analytics              | P2       | CP-020                 | NOT_STARTED | Needs real volume                                                  |
-| CP-028 | Security Hardening completion   | P1       | CP-016                 | NOT_STARTED | Before any phase is genuinely public                               |
-| CP-029 | Production Readiness completion | P1       | CP-016                 | NOT_STARTED | Before any "production-ready" claim                                |
+| CP ID  | Name                            | Priority | Dependencies           | Status      | Next action                                                |
+| ------ | ------------------------------- | -------- | ---------------------- | ----------- | ---------------------------------------------------------- |
+| CP-017 | Real Notification Delivery      | P1       | CP-016                 | NOT_STARTED | Wire one real SMS provider                                 |
+| CP-018 | Admin Panel MVP                 | P1       | CP-015, CP-016         | NOT_STARTED | First real frontend features                               |
+| CP-019 | Customer Domain & Prescription  | P1       | CP-015, CP-016         | BLOCKED     | Needs optometry-domain-expert review before implementation |
+| CP-020 | Storefront MVP                  | P1       | CP-016, CP-018, CP-019 | NOT_STARTED | First real customer-facing surface                         |
+| CP-021 | Procurement                     | P2       | CP-015                 | NOT_STARTED | Purchase Order/Supplier model                              |
+| CP-022 | Mobile real features            | P2       | CP-018, CP-020         | NOT_STARTED | Sequenced after web UX proven                              |
+| CP-023 | CMS                             | P2       | CP-018                 | NOT_STARTED | Needs admin UI to author content                           |
+| CP-024 | CRM beyond coupons              | P2       | CP-019, CP-020         | NOT_STARTED | Needs real customer data to segment                        |
+| CP-025 | Store/POS/omnichannel           | P2       | CP-018, CP-021         | NOT_STARTED | Separate operational model, deferred                       |
+| CP-026 | AI                              | P2       | CP-020                 | NOT_STARTED | Needs real usage data                                      |
+| CP-027 | Advanced Analytics              | P2       | CP-020                 | NOT_STARTED | Needs real volume                                          |
+| CP-028 | Security Hardening completion   | P1       | CP-016                 | NOT_STARTED | Before any phase is genuinely public                       |
+| CP-029 | Production Readiness completion | P1       | CP-016                 | NOT_STARTED | Before any "production-ready" claim                        |
 
 ## Aggregate
 
 - **Completed (Implementation+Test+Integration+Docs all met, or the
-  design-only equivalent for CP-000):** 16 (CP-000–CP-015)
+  design-only equivalent for CP-000):** 17 (CP-000–CP-016)
 - **Partial:** 0
 - **In progress:** 0
-- **Planned (zero implementation):** 14 (CP-016–CP-029)
+- **Planned (zero implementation):** 13 (CP-017–CP-029)
 - **Total canonical phases tracked:** 30
 
 This count is the authoritative input to the "Number of completed/

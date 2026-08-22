@@ -6,11 +6,25 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 
 import { AppModule } from './app.module';
+import { waitForRedis } from './bootstrap/wait-for-redis';
 import { loadEnv } from './config/env';
 
 async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
   const env = loadEnv();
+
+  // CP-016: fail fast, deterministically, before NestFactory.create() ever
+  // runs — that call is what used to hang indefinitely when Redis was
+  // unreachable (every domain module's BullModule.forRootAsync resolves
+  // during it). See src/bootstrap/wait-for-redis.ts and
+  // docs/architecture/redis-reliability.md.
+  try {
+    await waitForRedis(env.REDIS_URL);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'unknown error';
+    logger.error(message);
+    process.exit(1);
+  }
 
   const app = await NestFactory.create(AppModule);
 
