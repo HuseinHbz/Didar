@@ -55,7 +55,7 @@ A human decision, not a missing technical dependency (§3).
 | Check                                                                                      | Result                                                                                                            |
 | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
 | Current branch                                                                             | `develop`                                                                                                         |
-| `develop` HEAD (local == origin, tree clean)                                               | `23872943e4660304e90f06754a322073b8ec2aa9`                                                                        |
+| `develop` HEAD (local == origin, tree clean)                                               | `d12b850c116c44e3326f70efdae996452a7eb0a6` (before this operation's own commit)                                   |
 | `git merge-base --is-ancestor origin/16-feature-platform-reliability origin/develop`       | `true` — **CP-016 MERGED**                                                                                        |
 | `git merge-base --is-ancestor origin/18-feature-admin-panel-mvp origin/develop`            | `true` — **CP-018 MERGED**                                                                                        |
 | `git merge-base --is-ancestor origin/21-feature-procurement origin/develop`                | `true` — **CP-021 MERGED**                                                                                        |
@@ -89,6 +89,25 @@ signed off\|dated.*review\|decision record"` across `docs/adr/` and
 revisions — **none for CP-019**. A mention is not an approval, a TODO is
 not an approval, and no prior assistant statement is treated as one — no
 authoritative decision record for any of Q1–Q5 exists.
+
+## Decision status summary
+
+**CP-019 = BLOCKED.**
+
+| Question                                   | Required Authority                                                  | Decision          | Status                      |
+| ------------------------------------------ | ------------------------------------------------------------------- | ----------------- | --------------------------- |
+| Q1 — Numeric bounds                        | Optometry Domain Specialist                                         | _(none recorded)_ | **HUMAN DECISION REQUIRED** |
+| Q2 — Domain review scope                   | Product Manager + Optometry Domain Specialist                       | _(none recorded)_ | **HUMAN DECISION REQUIRED** |
+| Q3 — Prescription data model               | Product Manager + Technical Architect + Optometry Domain Specialist | _(none recorded)_ | **HUMAN DECISION REQUIRED** |
+| Q4 — Encryption at rest                    | Security Reviewer + Product Manager                                 | _(none recorded)_ | **HUMAN DECISION REQUIRED** |
+| Q5 — Iran-specific regulatory requirements | Legal/Regulatory Reviewer, when required                            | _(none recorded)_ | **HUMAN DECISION REQUIRED** |
+
+Full per-question evidence, allowed-outcome codes, and the seven-field
+decision record (Decision / Evidence / Decision authority / Reviewer /
+Date / Source document / Approval status) for each are in §4 below. No
+field above is filled from inference, a TODO, a developer opinion, or
+any prior AI-generated statement — none of those constitutes an
+authoritative decision.
 
 ## 4. Decision Matrix
 
