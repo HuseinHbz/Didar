@@ -429,6 +429,21 @@ async function main(): Promise<void> {
       action: 'settlement.reconcile',
       description: 'Manually trigger the reconciliation engine (reconcileAll())',
     },
+    // CP-019 (docs/adr/ADR-019-customer-domain-prescription.md) — the
+    // one RBAC-gated action this module adds. Everything else under
+    // `me/profile`/`me/addresses`/`me/prescriptions` is self-service,
+    // ownership-checked by the application layer, and consumes no
+    // permission at all (same shape `me/sessions` already establishes).
+    // No `customer.prescription.review` grant to `admin` here — same
+    // "dedicated role, not folded into the admin blanket loop" choice
+    // `returns_manager`/`returns_clerk` already make for `return`/
+    // `credit_note`; see `prescriptionReviewerRole` below.
+    {
+      module: 'customer',
+      action: 'prescription.review',
+      description:
+        'Start review of, approve, or reject a submitted prescription (any customer\'s) — the Optometry Domain Specialist reviewer role (Q1/Q2, docs/product/phase-019-final-acceptance.md)',
+    },
   ];
   const permissions = await Promise.all(
     permissionDefs.map((def) =>
@@ -758,6 +773,23 @@ async function main(): Promise<void> {
     await grant(returnsClerkRole.id, `return.${action}`);
   }
 
+  // CP-019 — the Optometry Domain Specialist reviewer role (Q1/Q2
+  // decision-request table, docs/product/phase-019-final-acceptance.md).
+  // A single dedicated permission, same shape `returns_clerk` gets for
+  // its own narrow slice: this role can review/approve/reject any
+  // customer's prescription but has no other module access.
+  const prescriptionReviewerRole = await prisma.role.upsert({
+    where: { name: 'prescription_reviewer' },
+    update: {
+      description: 'Optometry Domain Specialist — reviews, approves, or rejects submitted prescriptions',
+    },
+    create: {
+      name: 'prescription_reviewer',
+      description: 'Optometry Domain Specialist — reviews, approves, or rejects submitted prescriptions',
+    },
+  });
+  await grant(prescriptionReviewerRole.id, 'customer.prescription.review');
+
   // Two promotion roles (Phase 010 — docs/security/promotion-security.md
   // has the full matrix): `promotion_manager` gets every promotion.*/
   // coupon.* permission including delete/analytics; `promotion_editor` is
@@ -1026,6 +1058,26 @@ async function main(): Promise<void> {
     where: { userId_roleId: { userId: returnAdminUser.id, roleId: adminRole.id } },
     update: {},
     create: { userId: returnAdminUser.id, roleId: adminRole.id },
+  });
+
+  // Seventeenth user: prescription_reviewer role only — real fixture for
+  // CP-019's own e2e suite (reviewer-access, approve, reject scenarios)
+  // and its permission-bypass case (a plain `customerUser` token calling
+  // POST .../admin/prescriptions/:id/approve must 403).
+  const prescriptionReviewerUser = await prisma.user.upsert({
+    where: { phone: '+989120000018' },
+    update: {},
+    create: {
+      phone: '+989120000018',
+      email: 'prescription-reviewer@iecp.dev',
+      isActive: true,
+      phoneVerifiedAt: new Date(),
+    },
+  });
+  await prisma.userRole.upsert({
+    where: { userId_roleId: { userId: prescriptionReviewerUser.id, roleId: prescriptionReviewerRole.id } },
+    update: {},
+    create: { userId: prescriptionReviewerUser.id, roleId: prescriptionReviewerRole.id },
   });
 
   // A trusted device + an active-looking session for the admin user (blueprint

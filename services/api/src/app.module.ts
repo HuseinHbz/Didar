@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { loadEnv } from './config/env';
 import { CartCheckoutModule } from './modules/cart-checkout/cart-checkout.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
+import { CustomerModule } from './modules/customer/customer.module';
 import { HealthModule } from './modules/health/health.module';
 import { IdentityModule } from './modules/identity/identity.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
@@ -38,7 +39,10 @@ import { ReturnModule } from './modules/return/return.module';
  * `return` (Phase 012) composes from `order`, `payment`, and `inventory`
  * at once (`docs/adr/ADR-012-returns-refunds-credit-notes.md` decision
  * 2/6) — never a second refund pathway, only the existing `RefundService`
- * extended additively.
+ * extended additively. `customer` (CP-019,
+ * `docs/adr/ADR-019-customer-domain-prescription.md`) is self-contained
+ * (no cross-module imports) — it only re-binds `AUDIT_LOG_REPOSITORY`
+ * locally, same as every other module here.
  */
 @Module({
   imports: [
@@ -51,6 +55,7 @@ import { ReturnModule } from './modules/return/return.module';
     PaymentModule,
     OrderModule,
     ReturnModule,
+    CustomerModule,
   ],
 })
 export class AppModule {}
