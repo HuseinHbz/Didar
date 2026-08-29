@@ -577,3 +577,28 @@ export const PURCHASE_ORDER_STATUSES = [
   'CANCELLED',
 ] as const;
 export type PurchaseOrderStatus = (typeof PURCHASE_ORDER_STATUSES)[number];
+
+/**
+ * Prescription lifecycle (Phase 019 — see
+ * docs/adr/ADR-019-customer-domain-prescription.md). Each row is one
+ * immutable *version* — `DRAFT -> SUBMITTED -> UNDER_REVIEW ->
+ * {APPROVED | REJECTED}`; an `APPROVED` version is never mutated in
+ * place — attaching corrected measurements creates a new `DRAFT` version
+ * in the same lineage, and only when *that* version reaches `APPROVED`
+ * does the previous one become `SUPERSEDED` (both writes happen in the
+ * same transaction — `PrismaPrescriptionRepository.approve()`). `REJECTED`
+ * and `SUPERSEDED` are both terminal for that specific version, but not
+ * for the lineage: a customer may submit a new version after either.
+ * `CLINICAL_APPROVAL_STATUS = PENDING` (packages/validation/src/
+ * prescription.ts) applies to the numeric bounds this state machine
+ * validates against, not to this lifecycle itself.
+ */
+export const PRESCRIPTION_STATUSES = [
+  'DRAFT',
+  'SUBMITTED',
+  'UNDER_REVIEW',
+  'APPROVED',
+  'REJECTED',
+  'SUPERSEDED',
+] as const;
+export type PrescriptionStatus = (typeof PRESCRIPTION_STATUSES)[number];
