@@ -260,13 +260,14 @@
       "name": "Customer Domain & Prescription",
       "gitPhase": null,
       "blueprintPhase": "PHASE 5 (remainder)",
-      "status": "BLOCKED",
-      "completionPercent": 0,
+      "status": "IMPLEMENTED",
+      "completionPercent": 100,
       "dependencies": ["CP-015", "CP-016"],
-      "gitBranch": null,
+      "gitBranch": "19-feature-customer-domain-prescription",
       "latestCommit": null,
       "blockingIssues": ["P1-4"],
-      "priority": "P1"
+      "priority": "P1",
+      "note": "Technical/domain implementation complete on the branch above (services/api/src/modules/customer, docs/adr/ADR-019-customer-domain-prescription.md) — validation gate passed (typecheck/lint/build/unit+e2e tests/no migration drift/boot+health/graceful shutdown). NOT marked VALIDATED: Q1-Q5 human clinical/product/architecture/security/legal acceptance remain PENDING (docs/product/phase-019-final-acceptance.md). CP-020 stays gated on this dependency's own policy, not unblocked by this note."
     },
     {
       "id": "CP-020",
@@ -622,7 +623,7 @@
     {
       "id": "P1-4",
       "priority": "P1",
-      "description": "No Prescription domain model",
+      "description": "Prescription domain model implemented (CP-019, branch 19-feature-customer-domain-prescription) on an explicit technical baseline — human clinical/product/architecture/security/legal acceptance (Q1–Q5) remains PENDING, see docs/product/phase-019-final-acceptance.md",
       "ownerPhase": "CP-019"
     },
     {
@@ -718,7 +719,7 @@
       "ownerPhase": "CP-027"
     }
   ],
-  "nextPhase": "CP-018 is now VALIDATED. CP-020 needs both CP-018 and CP-019, and CP-019 remains BLOCKED (domain-expert review gate) \u2014 not yet available. CP-021 depends only on CP-015 and is genuinely unblocked now; recommended next unless CP-019's gate clears first. CP-017's own status is unchanged by this file \u2014 its real implementation lives on the sibling branch 17-feature-real-notification-delivery, not yet reflected here (see phase-018-audit.md \u00a721/\u00a718). See phase-dependency-graph.md for the full graph.",
+  "nextPhase": "CP-018 is now VALIDATED. CP-019's technical/domain implementation is now IMPLEMENTED (branch 19-feature-customer-domain-prescription, docs/adr/ADR-019-customer-domain-prescription.md) \u2014 not VALIDATED: Q1\u2013Q5 human clinical/product/architecture/security/legal acceptance remain PENDING (docs/product/phase-019-final-acceptance.md). CP-020 needs both CP-018 and CP-019; whether CP-019 being IMPLEMENTED-but-not-VALIDATED satisfies CP-020's own dependency policy is a decision this file does not make on its own. CP-021 depends only on CP-015 and was already unblocked. CP-017's own status is unchanged by this file \u2014 its real implementation lives on the sibling branch 17-feature-real-notification-delivery, not yet reflected here (see phase-018-audit.md \u00a721/\u00a718). See phase-dependency-graph.md for the full graph.",
   "aggregate": {
     "completedPhases": 19,
     "partialPhases": 0,

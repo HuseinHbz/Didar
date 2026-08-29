@@ -228,8 +228,8 @@ above/below, `docs/product/integration-cp016-cp021.md`, and
 | CP ID  | Name                            | Priority | Dependencies           | Status                            | Next action                                                      |
 | ------ | ------------------------------- | -------- | ---------------------- | --------------------------------- | ---------------------------------------------------------------- |
 | CP-017 | Real Notification Delivery      | P1       | CP-016                 | IMPLEMENTED (80%, not VALIDATED)  | Verify live SMS delivery against real network egress, then merge |
-| CP-019 | Customer Domain & Prescription  | P1       | CP-015, CP-016         | BLOCKED                           | Needs optometry-domain-expert review before implementation       |
-| CP-020 | Storefront MVP                  | P1       | CP-016, CP-018, CP-019 | NOT_STARTED — CP-019 still blocks | First real customer-facing surface                               |
+| CP-019 | Customer Domain & Prescription  | P1       | CP-015, CP-016         | IMPLEMENTED (not VALIDATED)       | Human clinical/product/architecture/security/legal acceptance (Q1–Q5, `phase-019-final-acceptance.md`) |
+| CP-020 | Storefront MVP                  | P1       | CP-016, CP-018, CP-019 | NOT_STARTED                       | First real customer-facing surface                               |
 | CP-022 | Mobile real features            | P2       | CP-018, CP-020         | NOT_STARTED — CP-020 still blocks | Sequenced after web UX proven                                    |
 | CP-023 | CMS                             | P2       | CP-018                 | NOT_STARTED                       | Needs admin UI to author content                                 |
 | CP-024 | CRM beyond coupons              | P2       | CP-019, CP-020         | NOT_STARTED                       | Needs real customer data to segment                              |
@@ -247,7 +247,7 @@ above/below, `docs/product/integration-cp016-cp021.md`, and
   dependencies: CP-018 needed CP-015+CP-016, CP-021 needed only CP-015)
 - **Partial:** 0
 - **In progress:** 0
-- **Planned (zero implementation, or implemented-but-unmerged — CP-017):** 11 (CP-017, CP-019–CP-020, CP-022–CP-029)
+- **Planned (zero implementation, or implemented-but-unmerged — CP-017, CP-019):** 11 (CP-017, CP-019–CP-020, CP-022–CP-029)
 - **Total canonical phases tracked:** 30
 
 This count is the authoritative input to the "Number of completed/

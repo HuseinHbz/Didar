@@ -12,10 +12,15 @@ CP-016 (now merged) but remains **IMPLEMENTED / VALIDATION-BLOCKED**
 this sandbox has neither network egress to any external host nor a real
 provisioned SMS credential; see
 `docs/product/phase-017-validation-audit.md`) and has, deliberately, **not**
-been merged. CP-019 remains BLOCKED on domain-expert review. CP-020
-depends on CP-016 (merged)/CP-018 (merged)/CP-019 (still blocked) — not
-yet unblocked. CP-022 depends on CP-018 (merged)/CP-020 (not started) —
-not yet unblocked. See `docs/product/phase-dependency-graph.md`.
+been merged. CP-019's technical/domain implementation is now
+**IMPLEMENTED** on `19-feature-customer-domain-prescription`, not
+merged — human clinical/product/architecture/security/legal acceptance
+(Q1–Q5) remains **PENDING**, see
+`docs/product/phase-019-final-acceptance.md`. CP-020
+depends on CP-016 (merged)/CP-018 (merged)/CP-019 (implemented,
+unmerged, human acceptance pending) — not yet unblocked. CP-022 depends
+on CP-018 (merged)/CP-020 (not started) — not yet unblocked. See
+`docs/product/phase-dependency-graph.md`.
 **Last Audit:** 2026-08-22 (`docs/product/phase-016-audit.md`,
 `docs/product/phase-018-audit.md`, `docs/product/phase-021-audit.md`,
 `docs/product/phase-017-validation-audit.md`; integration operations
@@ -63,8 +68,8 @@ Legend: `[x]` Completed · `[~]` In progress / Partial · `[ ]` Planned ·
 ## Planned — active tracks (the gate is closed)
 
 - [ ] CP-017 — Real Notification Delivery _(IMPLEMENTED / VALIDATION-BLOCKED on sibling branch `17-feature-real-notification-delivery`, not merged — see `docs/product/phase-017-validation-audit.md`)_
-- [!] CP-019 — Customer Domain & Prescription _(blocked on domain-expert review)_
-- [ ] CP-020 — Storefront MVP _(needs CP-019, still blocked)_
+- [!] CP-019 — Customer Domain & Prescription _(IMPLEMENTED on sibling branch `19-feature-customer-domain-prescription`, not merged — human clinical/product/architecture/security/legal acceptance PENDING, see `docs/product/phase-019-final-acceptance.md`)_
+- [ ] CP-020 — Storefront MVP _(needs CP-019, still unmerged/unaccepted)_
 
 ## Planned — deferred tracks
 
