@@ -389,6 +389,7 @@ model Customer {
   addresses      CustomerAddress[]
   familyMembers  FamilyMember[]
   segments       CustomerSegmentMember[]
+  prescriptions  Prescription[]
   loyaltyAccount LoyaltyAccount?
   walletAccount  WalletAccount?
 
@@ -465,6 +466,100 @@ model CustomerSegmentMember {
 
   @@id([customerId, segmentId])
   @@map("customer_segment_members")
+  @@schema("customer")
+}
+
+/// Phase 019 — prescription lifecycle (see
+/// docs/adr/ADR-019-customer-domain-prescription.md and
+/// packages/types/src/enums.ts's PRESCRIPTION_STATUSES for the full
+/// transition rule). Enforced only through PrescriptionStateMachine
+/// (domain layer) — never a bare `status = X` write.
+enum PrescriptionStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  SUPERSEDED
+
+  @@schema("customer")
+}
+
+/// Each row is one immutable *version* of a prescription — `rootId`
+/// groups a lineage (the first version's `rootId` equals its own `id`;
+/// `previousVersionId` chains to the exact predecessor it supersedes).
+/// A partial unique index (migration, not expressible in Prisma's schema
+/// language) guarantees at most one `APPROVED` row per `rootId` at a
+/// time — approving a new version and marking the old one `SUPERSEDED`
+/// happens in the same transaction (`PrismaPrescriptionRepository
+/// .approve()`), so the constraint never has two APPROVED rows to
+/// contend with, live or transient.
+///
+/// Eye measurements are stored as integers — hundredths of a diopter
+/// (SPH/CYL/ADD) and hundredths of a millimeter (PD), the same single
+/// `diopterToCenti()`/`centiToDiopter()` pair (`packages/validation`)
+/// converts every field with — never floats, same
+/// "no float for exact business-critical values" convention every other
+/// module in this schema already follows for money. The numeric bounds
+/// these columns are validated against before insert are centralized in
+/// `packages/validation/src/prescription.ts`, whose own header still
+/// carries `CLINICAL_APPROVAL_STATUS = 'PENDING'` — a technical
+/// baseline, not a clinically reviewed spec (see
+/// docs/product/phase-019-final-acceptance.md).
+model Prescription {
+  id         String @id @default(uuid()) @db.Uuid
+  rootId     String @map("root_id") @db.Uuid
+  version    Int
+  customerId String @map("customer_id") @db.Uuid
+
+  previousVersionId String? @map("previous_version_id") @db.Uuid
+
+  status PrescriptionStatus @default(DRAFT)
+
+  /// Right eye — SPH in centi-diopters (e.g. -725 = -7.25D).
+  rightSph Int @map("right_sph")
+  /// Right eye — CYL in centi-diopters. Null when the eye has no
+  /// astigmatism correction — matches `packages/validation`'s own
+  /// `cylSchema.optional()`.
+  rightCyl Int? @map("right_cyl")
+  /// Right eye — AXIS in whole degrees (0-180). Required whenever
+  /// `rightCyl` is set — enforced in the domain layer, not by the
+  /// database (the same rule `eyeMeasurementSchema`'s own `.refine()`
+  /// already validates at the DTO layer).
+  rightAxis Int? @map("right_axis")
+  /// Right eye — ADD (bifocal/progressive) in centi-diopters.
+  rightAdd Int? @map("right_add")
+  /// Right eye — pupillary distance in hundredths of a millimeter.
+  rightPd Int? @map("right_pd")
+
+  leftSph  Int  @map("left_sph")
+  leftCyl  Int? @map("left_cyl")
+  leftAxis Int? @map("left_axis")
+  leftAdd  Int? @map("left_add")
+  leftPd   Int? @map("left_pd")
+
+  notes String?
+
+  issuedAt  DateTime? @map("issued_at")
+  expiresAt DateTime? @map("expires_at")
+
+  submittedAt      DateTime? @map("submitted_at")
+  reviewStartedAt  DateTime? @map("review_started_at")
+  reviewedByUserId String?   @map("reviewed_by_user_id") @db.Uuid
+  reviewedAt       DateTime? @map("reviewed_at")
+  rejectionReason  String?   @map("rejection_reason")
+  supersededAt     DateTime? @map("superseded_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  customer        Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  previousVersion Prescription?  @relation("PrescriptionVersionChain", fields: [previousVersionId], references: [id])
+  nextVersions    Prescription[] @relation("PrescriptionVersionChain")
+
+  @@index([customerId])
+  @@index([rootId])
+  @@map("prescriptions")
   @@schema("customer")
 }
 

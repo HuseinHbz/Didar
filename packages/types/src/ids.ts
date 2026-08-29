@@ -215,3 +215,10 @@ export type PurchaseOrderItemId = Brand<string, 'PurchaseOrderItemId'>;
 export const asSupplierId = brandedId<'SupplierId'>('SupplierId').as;
 export const asPurchaseOrderId = brandedId<'PurchaseOrderId'>('PurchaseOrderId').as;
 export const asPurchaseOrderItemId = brandedId<'PurchaseOrderItemId'>('PurchaseOrderItemId').as;
+
+// Phase 019 — customer domain & prescription (see
+// docs/adr/ADR-019-customer-domain-prescription.md). `PrescriptionId` was
+// already reserved above (line 49) before this phase — unused until now.
+export type CustomerAddressId = Brand<string, 'CustomerAddressId'>;
+
+export const asCustomerAddressId = brandedId<'CustomerAddressId'>('CustomerAddressId').as;
