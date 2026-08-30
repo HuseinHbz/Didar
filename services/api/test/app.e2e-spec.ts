@@ -34,4 +34,16 @@ describe('AppModule (e2e)', () => {
     expect([200, 503]).toContain(response.status);
     expect(response.body).toHaveProperty('status');
   });
+
+  // CP-029 (P1-5) — real HTTP proof, no auth header, that /metrics is
+  // reachable and returns real Prometheus exposition text, not a route
+  // that only "looks wired" from source reading alone.
+  it('/metrics (GET) is reachable with no authentication and returns Prometheus exposition text', async () => {
+    const response = await request(app.getHttpServer() as Server).get('/metrics');
+
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toContain('text/plain');
+    expect(response.text).toContain('# HELP process_cpu_user_seconds_total');
+    expect(response.text).toContain('# TYPE iecp_queue_jobs gauge');
+  });
 });
