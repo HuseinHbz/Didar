@@ -13,6 +13,19 @@ import type {
 
 const REQUEST_TIMEOUT_MS = 15_000;
 
+/** Extracts a human-readable message from a caught value without assuming
+ * it's an `instanceof Error` in *this* module's realm — see this file's own
+ * catch-block comment for why that assumption is unsafe here. Falls back to
+ * `'unknown error'` only when nothing message-shaped is available at all. */
+function messageOf(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    const { message } = error;
+    if (typeof message === 'string') return message;
+  }
+  return 'unknown error';
+}
+
 /** Kavenegar's own response envelope, both endpoints this adapter calls
  * share the same shape (https://kavenegar.com/rest.html). `return.status`
  * 200 is success; anything else carries `return.message` as the reason
@@ -101,8 +114,20 @@ export class SmsAdapter implements NotificationChannelPort {
       // (it can't — `post()` below only throws with Kavenegar's own
       // message field, never the request we sent) — see this class's own
       // security note in docs/security/notification-security.md.
-      const reason = error instanceof Error ? error.message : 'unknown error';
-      this.logger.warn(`SMS -> ${message.to} failed: ${reason}`);
+      //
+      // CP-017 audit finding: a bare `error instanceof Error` check silently
+      // degrades to "unknown error" for a real `Error` whose constructor
+      // isn't the same `Error` reference this module closes over — exactly
+      // what happens when Node's own `fetch`/`response.json()` throw across
+      // a VM-realm boundary (reproduced by this file's own test suite,
+      // running under Jest's per-file sandboxed context — the same failure
+      // shape a `vm`-isolated plugin host or a future Node runtime change
+      // could reproduce in production). `messageOf()` recovers the real,
+      // still-non-sensitive message (this class's own contract above: the
+      // request body/key never end up in a message) whenever the thrown
+      // value merely looks like an Error, without ever trusting a raw
+      // `String(error)` that could stringify to `[object Object]` or worse.
+      this.logger.warn(`SMS -> ${message.to} failed: ${messageOf(error)}`);
       const id = randomUUID();
       this.statuses.set(id, 'failed');
       return { id, status: 'failed' };
