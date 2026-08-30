@@ -50,7 +50,11 @@ import { TWO_FACTOR_REPOSITORY } from './domain/ports/two-factor.repository.port
 import { USER_REPOSITORY } from './domain/ports/user.repository.port';
 import { IDENTITY_CONFIG, type IdentityConfig } from './identity.config';
 import { ApiKeyGeneratorService } from './infrastructure/crypto/api-key-generator.service';
-import { ENCRYPTION_KEY, EncryptionService } from './infrastructure/crypto/encryption.service';
+import {
+  ENCRYPTION_KEYRING,
+  EncryptionService,
+  type EncryptionKeyring,
+} from './infrastructure/crypto/encryption.service';
 import { JwtTokenService } from './infrastructure/crypto/jwt-token.service';
 import { OtpCodeService } from './infrastructure/crypto/otp-code.service';
 import { PasswordHasherService } from './infrastructure/crypto/password-hasher.service';
@@ -142,11 +146,26 @@ import { FieldPermissionInterceptor } from './presentation/interceptors/field-pe
       }),
     },
     {
-      provide: ENCRYPTION_KEY,
+      // CP-028 (P2-7) — builds the full key ring (v0 = ENCRYPTION_KEY,
+      // always present; v1-v3 = optional rotation slots) and the
+      // currently-active version — see EncryptionService's own doc
+      // comment for the rotation story this enables.
+      provide: ENCRYPTION_KEYRING,
       inject: [ConfigService],
-      useFactory: (config: ConfigService<Env, true>): Buffer => {
-        const encodedKey: string = config.get('ENCRYPTION_KEY', { infer: true });
-        return Buffer.from(encodedKey, 'base64');
+      useFactory: (config: ConfigService<Env, true>): EncryptionKeyring => {
+        const keys = new Map<number, Buffer>();
+        const v0 = config.get('ENCRYPTION_KEY', { infer: true });
+        keys.set(0, Buffer.from(v0, 'base64'));
+        const v1 = config.get('ENCRYPTION_KEY_V1', { infer: true });
+        if (v1 !== undefined) keys.set(1, Buffer.from(v1, 'base64'));
+        const v2 = config.get('ENCRYPTION_KEY_V2', { infer: true });
+        if (v2 !== undefined) keys.set(2, Buffer.from(v2, 'base64'));
+        const v3 = config.get('ENCRYPTION_KEY_V3', { infer: true });
+        if (v3 !== undefined) keys.set(3, Buffer.from(v3, 'base64'));
+        return {
+          currentVersion: config.get('ENCRYPTION_KEY_CURRENT_VERSION', { infer: true }),
+          keys,
+        };
       },
     },
 

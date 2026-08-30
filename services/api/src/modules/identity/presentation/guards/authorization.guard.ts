@@ -18,6 +18,17 @@ import type { AuthenticatedRequest } from '../request-context';
  * Recomputes effective permissions on every request rather than trusting
  * anything cached in the JWT — see GetEffectivePermissionsUseCase's doc for
  * why that trade-off was made deliberately.
+ *
+ * CP-028 (P2-6) — when `request.user.apiKeyScopes` is set (this request
+ * authenticated via an API key, not a Bearer token — see
+ * `JwtAuthGuard`'s own doc comment), a gated route also requires the
+ * permission/module to be present in the key's own `scopes`, on top of
+ * the owner's real RBAC check below — a leaked key narrower than its
+ * owner's real permissions can never do more than the key itself was
+ * scoped for, even though it authenticates as that owner. A route with
+ * neither decorator (the `!requiredPermission && !requiredModule` early
+ * return above) is unaffected — "authenticated only" already means "any
+ * key the owner could authenticate with," scoped or not.
  */
 @Injectable()
 export class AuthorizationGuard implements CanActivate {
@@ -56,6 +67,17 @@ export class AuthorizationGuard implements CanActivate {
     }
     if (requiredModule && !PermissionResolver.hasModuleAccess(effective, requiredModule)) {
       throw new ForbiddenException(`No access to module: ${requiredModule}`);
+    }
+
+    const apiKeyScopes = request.user.apiKeyScopes;
+    if (apiKeyScopes) {
+      const scopeSet = new Set(apiKeyScopes);
+      if (requiredPermission && !PermissionResolver.has(scopeSet, requiredPermission)) {
+        throw new ForbiddenException(`API key scope does not include: ${requiredPermission}`);
+      }
+      if (requiredModule && !PermissionResolver.hasModuleAccess(scopeSet, requiredModule)) {
+        throw new ForbiddenException(`API key scope does not include module: ${requiredModule}`);
+      }
     }
 
     return true;

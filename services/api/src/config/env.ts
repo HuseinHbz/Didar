@@ -1,6 +1,22 @@
 import { envPrimitives, parseEnv } from '@iecp/validation';
 import { z } from 'zod';
 
+/** Shared validator for every AES-256-GCM key slot (`ENCRYPTION_KEY` and
+ * its `_V1`.."_V3"` rotation siblings — see the rotation comment on
+ * `ENCRYPTION_KEY` below) — base64, must decode to exactly 32 bytes. */
+function base64EncryptionKey(varName: string) {
+  return envPrimitives.nonEmptyString.refine(
+    (value) => {
+      try {
+        return Buffer.from(value, 'base64').length === 32;
+      } catch {
+        return false;
+      }
+    },
+    { message: `${varName} must be base64 and decode to exactly 32 bytes` },
+  );
+}
+
 const envSchema = z.object({
   NODE_ENV: envPrimitives.nodeEnv.default('development'),
   PORT: envPrimitives.port.default(4000),
@@ -20,16 +36,23 @@ const envSchema = z.object({
   // AES-256-GCM key for TwoFactorCredential.secretEncrypted — base64, must
   // decode to exactly 32 bytes. No default: a real environment must set its
   // own; see identity/README.md for what "real" needs beyond this env var.
-  ENCRYPTION_KEY: envPrimitives.nonEmptyString.refine(
-    (value) => {
-      try {
-        return Buffer.from(value, 'base64').length === 32;
-      } catch {
-        return false;
-      }
-    },
-    { message: 'ENCRYPTION_KEY must be base64 and decode to exactly 32 bytes' },
-  ),
+  // This is key version 0 — always present, always the fallback decrypt
+  // target for every ciphertext written before rotation was ever
+  // configured (see EncryptionService's own doc comment).
+  ENCRYPTION_KEY: base64EncryptionKey('ENCRYPTION_KEY'),
+  // CP-028 (P2-7) — key-rotation slots. Optional: unset means "no rotation
+  // configured," the exact pre-CP-028 behavior (encrypt/decrypt both use
+  // ENCRYPTION_KEY alone, ciphertext format unchanged). To rotate: set the
+  // next unused ENCRYPTION_KEY_V{n} to a fresh key, then bump
+  // ENCRYPTION_KEY_CURRENT_VERSION to {n} — every already-encrypted value
+  // (any version, including the original unversioned/v0 ones) keeps
+  // decrypting exactly as before; only *new* encryptions switch to the new
+  // key. This is the rotation mechanism itself, not a KMS integration —
+  // see EncryptionService's own doc comment for what's still deferred.
+  ENCRYPTION_KEY_V1: base64EncryptionKey('ENCRYPTION_KEY_V1').optional(),
+  ENCRYPTION_KEY_V2: base64EncryptionKey('ENCRYPTION_KEY_V2').optional(),
+  ENCRYPTION_KEY_V3: base64EncryptionKey('ENCRYPTION_KEY_V3').optional(),
+  ENCRYPTION_KEY_CURRENT_VERSION: z.coerce.number().int().min(0).max(3).default(0),
 
   // inventory module (Phase 006) — BullMQ connection for the
   // reservation_expiration/low_stock_notification/inventory_event_processing
