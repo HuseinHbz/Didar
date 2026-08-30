@@ -238,7 +238,7 @@
       "completionPercent": 80,
       "dependencies": ["CP-016"],
       "gitBranch": "17-feature-real-notification-delivery",
-      "latestCommit": "aa5e22a",
+      "latestCommit": "b8e581d",
       "blockingIssues": ["P1-8"],
       "priority": "P1"
     },

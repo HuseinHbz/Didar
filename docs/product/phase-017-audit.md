@@ -275,3 +275,88 @@ hash.
 
 All rows are real, final results from this phase's own validation gate
 run (2026-08-21), not placeholders.
+
+## Follow-up hardening pass (2026-08-30)
+
+A later operation re-audited CP-017 directly against its own source
+(never relying only on this document or `phase-017-validation-audit`'s
+prior conclusions), per that operation's own instruction to inspect the
+actual implementation before trusting any prior write-up. Findings:
+
+- **Real, previously-untested gaps closed** in
+  `sms.adapter.spec.ts` (3 new cases, real infrastructure, no mocks —
+  same convention this file's existing tests already use): a malformed
+  (non-JSON) provider response, a real request timeout against a
+  hanging local server (bounded by the adapter's own 15s
+  `AbortSignal.timeout`), and credential redaction specifically on the
+  network-failure path (not just the success path the original tests
+  covered).
+- **One real bug found and fixed** while writing the timeout/malformed
+  tests: `SmsAdapter`'s catch block used a bare `error instanceof Error`
+  check to extract a log message, which silently degraded to the
+  uninformative literal `'unknown error'` for a genuine `Error` whose
+  constructor crosses a realm boundary from this module's own — observed
+  reproducibly for both the malformed-response `SyntaxError` and the
+  timeout `TypeError` under this repo's own Jest sandboxing, the same
+  class of gap a `vm`-isolated host or a future runtime change could hit
+  in production. Fixed with a defensive `messageOf()` helper (duck-types
+  a `.message` string when `instanceof` fails, still falls back to
+  `'unknown error'` only when nothing message-shaped exists) — never a
+  security regression either way, since the fallback is strictly less
+  informative, never more; confirmed no leak in both directions with a
+  live re-run (see below). Full before/after log evidence: the same two
+  test cases logged `"unknown error"` before the fix and
+  `"Unexpected token '<'..."` / `"The operation was aborted due to
+timeout"` after it.
+- **New automated coverage** for two things this phase's original
+  audit only verified once, by hand: `notification.processor.spec.ts`
+  (pass-through/failure-propagation unit coverage for the one seam
+  BullMQ itself reads — a resolved value completes a job, a rejection
+  fails it) and `notification-worker.e2e.spec.ts` (real Redis, real
+  `AppModule`, real BullMQ `Worker` — job completion, a malformed job's
+  failure not wedging the worker for the next job, bounded failed-job
+  retention actually pruning old entries past its configured count, and
+  a bounded, non-hanging `enableShutdownHooks()` shutdown). This is the
+  automated version of the one-time manual "drained a 521-job real
+  backlog, clean shutdown" proof this phase's own audit already
+  performed by hand once.
+- **Live re-confirmation, this operation's own run**: `SMS_API_KEY` set
+  to a non-real sandbox value, `services/api` and
+  `services/notification-worker` both booted from a real build, a real
+  `POST /auth/otp/request` issued end-to-end. The worker took the real
+  Kavenegar `/verify/lookup.json` path, the sandbox's outbound proxy
+  denied it exactly as previously documented (HTML "Host not i[n
+  allowlist]" body, not JSON), the sandbox test value never appeared in
+  any log line, and OTP issuance still succeeded regardless (fire-and-
+  forget dispatch, unchanged). Same conclusion as this phase's original
+  audit and `phase-017-validation-audit`'s later re-confirmation — a
+  third independent live reproduction, not a re-statement.
+- **Full validation gate re-run, this branch**: `validate:structure` ✓ ·
+  `format:check` — 2 files fixed (the new/edited spec files), 5
+  unrelated pre-existing warnings untouched (`next-env.d.ts` × 3,
+  `docs/api/payment.md`, `docs/security/payment-security.md`) · `lint`
+  15/15 workspaces clean · `typecheck` 15/15 clean (one stale `.next`
+  build-cache artifact from a prior, unrelated branch checkout in this
+  same sandbox caused a transient `apps/admin` failure, resolved by
+  clearing `.next/` — environment, not code) · `build` 11/11 · `pnpm
+test` (api) 353/353, (notification-worker) 19/19 (was 9 before this
+  pass) · `pnpm audit --audit-level high` exit 0, 1 pre-existing low
+  advisory · `pnpm roadmap:audit` clean, no structural problems ·
+  migration status `UP_TO_DATE` against this branch's 11 migrations ·
+  e2e suite (`--runInBand`, ×2 consecutive) 205/206 both runs, identical
+  single pre-existing failure (`reconcileAll() 20x` timeout in
+  `return-settlement-repository.e2e-spec.ts` — same finding this
+  document's own table already carries) · `services/api` and
+  `services/notification-worker` both booted from a real build, real
+  `/health`/`/health/ready` returned `"status":"ok"`, both shut down
+  gracefully on `SIGTERM` (~2.1s and ~1.3s respectively, no force-kill).
+
+**Conclusion — no status change.** CP-017 remains `IMPLEMENTED`, 80%,
+blocked only by **P1-8** (live Kavenegar network path unverified) —
+Testing was already scored 100/100 in `project-progress.md` before this
+pass (deeper coverage doesn't raise a dimension already at its ceiling),
+and Security's existing 90/100 already accounted for credential handling
+being live-verified. This pass closes real test-coverage and
+observability gaps without changing the phase's completion percentage,
+status, or blocking-issue list — and does not touch CP-018/019/020/021's
+own status, and does not move CP-019's Q1–Q5 off `PENDING`.
