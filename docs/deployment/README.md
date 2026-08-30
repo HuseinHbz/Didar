@@ -37,8 +37,26 @@ No direct `local → production` DB connection, ever (blueprint §108). Only
 - CD (auto-deploy on merge, staging promotion, production approval gate).
 - Database backup/PITR/offsite (blueprint §101).
 - Rollback tooling beyond "redeploy the previous image" (blueprint §116-§117).
-- Load testing (blueprint §104) — nothing has been load tested because nothing is
-  deployed.
+
+## What CP-029 added
+
+- **Load testing** (blueprint §104) — `scripts/load-test.mjs`
+  (`pnpm load-test`) is real and has been run against a real
+  `services/api` instance; see
+  [`../operations/load-testing.md`](../operations/load-testing.md) for
+  results and honest caveats about what a sandbox run can and cannot say
+  about production capacity.
+- **Disaster recovery / restore drill** —
+  [`../operations/disaster-recovery.md`](../operations/disaster-recovery.md),
+  including a real, timed, data-integrity-verified restore drill against
+  this sandbox's own PostgreSQL.
+- **Production observability** (`/metrics`, alerting rules, runbook,
+  incident response) —
+  [`../../infrastructure/monitoring/README.md`](../../infrastructure/monitoring/README.md),
+  [`../operations/runbook.md`](../operations/runbook.md),
+  [`../operations/incident-response.md`](../operations/incident-response.md).
+- **Environment-configuration management** —
+  [`environments.md`](environments.md).
 
 ## Versioning
 

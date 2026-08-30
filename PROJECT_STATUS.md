@@ -1,7 +1,7 @@
 # Project Status
 
-**Overall Progress:** 19 of 30 canonical phases Completed, 0 Partial,
-0 in progress, 11 Planned.
+**Overall Progress:** 19 of 30 canonical phases Completed, 1 Partial,
+0 in progress, 10 Planned.
 **Current Phase:** CP-018 — Admin Panel MVP (VALIDATED, merged). CP-016
 — Platform Reliability Foundation and CP-021 — Procurement are also
 merged (all three landed in this and the prior integration operation).
@@ -12,15 +12,22 @@ CP-016 (now merged) but remains **IMPLEMENTED / VALIDATION-BLOCKED**
 this sandbox has neither network egress to any external host nor a real
 provisioned SMS credential; see
 `docs/product/phase-017-validation-audit.md`) and has, deliberately, **not**
-been merged. CP-019 remains BLOCKED on domain-expert review. CP-020
-depends on CP-016 (merged)/CP-018 (merged)/CP-019 (still blocked) — not
-yet unblocked. CP-022 depends on CP-018 (merged)/CP-020 (not started) —
-not yet unblocked. See `docs/product/phase-dependency-graph.md`.
+been merged. CP-029 — Production Readiness completion is likewise
+**IMPLEMENTED, 90%** on its own branch
+(`29-feature-production-readiness-completion`) but not merged — the
+remaining gap is a live Prometheus/`promtool`-verified deployment of the
+alerting rules this phase wrote, same sandbox-network/no-docker-daemon
+limitation class; see `docs/product/phase-029-audit.md`. CP-019 remains
+BLOCKED on domain-expert review. CP-020 depends on CP-016 (merged)/
+CP-018 (merged)/CP-019 (still blocked) — not yet unblocked. CP-022
+depends on CP-018 (merged)/CP-020 (not started) — not yet unblocked.
+See `docs/product/phase-dependency-graph.md`.
 **Last Audit:** 2026-08-22 (`docs/product/phase-016-audit.md`,
 `docs/product/phase-018-audit.md`, `docs/product/phase-021-audit.md`,
-`docs/product/phase-017-validation-audit.md`; integration operations
+`docs/product/phase-017-validation-audit.md`); CP-029's own audit
+(2026-08-30): `docs/product/phase-029-audit.md`. Integration operations
 recorded in `docs/product/integration-cp016-cp021.md` and
-`docs/product/integration-cp018.md`).
+`docs/product/integration-cp018.md`.
 
 This file is a human-readable summary. The source of truth is
 [`docs/product/roadmap.json`](docs/product/roadmap.json), kept in sync by
@@ -63,6 +70,7 @@ Legend: `[x]` Completed · `[~]` In progress / Partial · `[ ]` Planned ·
 ## Planned — active tracks (the gate is closed)
 
 - [ ] CP-017 — Real Notification Delivery _(IMPLEMENTED / VALIDATION-BLOCKED on sibling branch `17-feature-real-notification-delivery`, not merged — see `docs/product/phase-017-validation-audit.md`)_
+- [~] CP-029 — Production Readiness completion _(IMPLEMENTED, 90%, on branch `29-feature-production-readiness-completion`, not merged — real `/metrics` on all three processes, 5 alerting rules, runbook + incident response docs, real load test, real timed restore drill; live Prometheus/`promtool` verification remains undone — see `docs/product/phase-029-audit.md`, `ADR-029`)_
 - [!] CP-019 — Customer Domain & Prescription _(blocked on domain-expert review)_
 - [ ] CP-020 — Storefront MVP _(needs CP-019, still blocked)_
 
@@ -75,7 +83,6 @@ Legend: `[x]` Completed · `[~]` In progress / Partial · `[ ]` Planned ·
 - [ ] CP-026 — AI
 - [ ] CP-027 — Advanced Analytics
 - [ ] CP-028 — Security Hardening completion
-- [ ] CP-029 — Production Readiness completion
 
 ## P0 blockers open right now
 

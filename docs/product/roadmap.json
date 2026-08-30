@@ -388,14 +388,14 @@
     {
       "id": "CP-029",
       "name": "Production Readiness completion",
-      "gitPhase": null,
+      "gitPhase": "29",
       "blueprintPhase": "PHASE 14 (remainder)",
-      "status": "NOT_STARTED",
-      "completionPercent": 0,
+      "status": "IMPLEMENTED",
+      "completionPercent": 90,
       "dependencies": ["CP-016"],
-      "gitBranch": null,
+      "gitBranch": "29-feature-production-readiness-completion",
       "latestCommit": null,
-      "blockingIssues": ["P1-5"],
+      "blockingIssues": [],
       "priority": "P1"
     }
   ],
@@ -629,7 +629,9 @@
       "id": "P1-5",
       "priority": "P1",
       "description": "No production observability",
-      "ownerPhase": "CP-016,CP-029"
+      "ownerPhase": "CP-016,CP-029",
+      "status": "RESOLVED",
+      "resolvedBy": "CP-029 — real /metrics on all three processes, 5 alerting rules, runbook + incident response docs, real load test, real timed data-integrity-verified restore drill — see docs/product/phase-029-audit.md"
     },
     {
       "id": "P1-6",
@@ -718,12 +720,12 @@
       "ownerPhase": "CP-027"
     }
   ],
-  "nextPhase": "CP-018 is now VALIDATED. CP-020 needs both CP-018 and CP-019, and CP-019 remains BLOCKED (domain-expert review gate) \u2014 not yet available. CP-021 depends only on CP-015 and is genuinely unblocked now; recommended next unless CP-019's gate clears first. CP-017's own status is unchanged by this file \u2014 its real implementation lives on the sibling branch 17-feature-real-notification-delivery, not yet reflected here (see phase-018-audit.md \u00a721/\u00a718). See phase-dependency-graph.md for the full graph.",
+  "nextPhase": "CP-018 is now VALIDATED. CP-020 needs both CP-018 and CP-019, and CP-019 remains BLOCKED (domain-expert review gate) \u2014 not yet available. CP-029 is now IMPLEMENTED (90%) on its own branch, 29-feature-production-readiness-completion, not merged \u2014 see phase-029-audit.md. CP-021 depends only on CP-015 and is genuinely unblocked now; recommended next unless CP-019's gate clears first. CP-017's own status is unchanged by this file \u2014 its real implementation lives on the sibling branch 17-feature-real-notification-delivery, not yet reflected here (see phase-018-audit.md \u00a721/\u00a718). See phase-dependency-graph.md for the full graph.",
   "aggregate": {
     "completedPhases": 19,
-    "partialPhases": 0,
+    "partialPhases": 1,
     "inProgressPhases": 0,
-    "plannedPhases": 11,
+    "plannedPhases": 10,
     "totalPhases": 30
   }
 }

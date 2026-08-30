@@ -1,12 +1,25 @@
-# Scrape config stub (blueprint §102: Prometheus + Grafana + Loki +
-# OpenTelemetry + Sentry). No service exposes a /metrics endpoint yet — none of
-# the targets below will resolve to anything real until one does. This file
-# exists so the shape of the observability stack is decided (what gets scraped,
-# how often) before the first metric is wired.
+# CP-029 (P1-5, gap-priority-matrix.md) — no longer a pure stub. All three
+# scrape targets below now expose a real, live-verified `/metrics` endpoint
+# (see docs/product/phase-029-audit.md §3/§11):
+#   - iecp-api:   services/api/src/modules/observability (its main HTTP
+#     server, /metrics excluded from the api/v1 prefix in main.ts)
+#   - iecp-worker / iecp-notification-worker: services/worker and
+#     services/notification-worker each start a minimal standalone
+#     `node:http` listener (observability/metrics.server.ts) on the port
+#     below — these processes have no other HTTP surface.
+# What remains a stub: no Prometheus server is actually deployed anywhere
+# in this repository's docker-compose or CI (blueprint §102's Prometheus +
+# Grafana + Loki + OpenTelemetry + Sentry stack) — this file is the scrape
+# config a real deployment would mount, not proof one is running. Alerting
+# rules: infrastructure/monitoring/alerts.yml (loaded via rule_files
+# below).
 
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
+
+rule_files:
+  - alerts.yml
 
 scrape_configs:
   - job_name: 'iecp-api'
