@@ -1,8 +1,9 @@
 import type { NotificationChannel } from '@iecp/types';
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';
 
+import { recordJobOutcome } from '../../observability/job-metrics';
 import type { NotificationMessage, NotificationSendResult } from '../notification-channel.port';
 import { NotificationDispatcherService } from '../notification-dispatcher.service';
 
@@ -27,5 +28,17 @@ export class NotificationProcessor extends WorkerHost {
   async process(job: Job<NotificationJobData>): Promise<NotificationSendResult> {
     this.logger.log(`dispatching job ${job.id} on channel ${job.data.channel}`);
     return this.dispatcher.dispatch(job.data.channel, job.data.message);
+  }
+
+  // CP-029 (P1-5) — job-outcome metrics for the one real production queue
+  // this worker runs.
+  @OnWorkerEvent('completed')
+  onCompleted(job: Job<NotificationJobData>): void {
+    recordJobOutcome('notifications', 'completed', job);
+  }
+
+  @OnWorkerEvent('failed')
+  onFailed(job: Job<NotificationJobData> | undefined): void {
+    if (job) recordJobOutcome('notifications', 'failed', job);
   }
 }

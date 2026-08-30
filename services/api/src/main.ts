@@ -33,7 +33,11 @@ async function bootstrap(): Promise<void> {
     origin: env.CORS_ORIGIN.split(',').map((origin) => origin.trim()),
     credentials: true,
   });
-  app.setGlobalPrefix('api/v1');
+  // CP-029 (P1-5): `/metrics` stays unprefixed — Prometheus scrape targets
+  // (infrastructure/monitoring/prometheus.yml) expect the standard
+  // unversioned path regardless of API versioning, and this repo has no
+  // other consumer of an unprefixed route to conflict with.
+  app.setGlobalPrefix('api/v1', { exclude: ['metrics'] });
   app.enableShutdownHooks();
 
   // Reject unknown/extra fields and coerce DTOs to their class types at the

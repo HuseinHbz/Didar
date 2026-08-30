@@ -7,6 +7,7 @@ import { CatalogModule } from './modules/catalog/catalog.module';
 import { HealthModule } from './modules/health/health.module';
 import { IdentityModule } from './modules/identity/identity.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
+import { ObservabilityModule } from './modules/observability/observability.module';
 import { OrderModule } from './modules/order/order.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { ReturnModule } from './modules/return/return.module';
@@ -51,6 +52,7 @@ import { ReturnModule } from './modules/return/return.module';
     PaymentModule,
     OrderModule,
     ReturnModule,
+    ObservabilityModule,
   ],
 })
 export class AppModule {}

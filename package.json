@@ -21,9 +21,11 @@
     "validate:structure": "node scripts/validate-structure.mjs",
     "validate": "pnpm validate:structure && pnpm typecheck && pnpm lint",
     "roadmap:audit": "node scripts/roadmap-audit.mjs",
+    "load-test": "node scripts/load-test.mjs",
     "prepare": "husky"
   },
   "devDependencies": {
+    "autocannon": "8.0.0",
     "husky": "9.1.7",
     "prettier": "3.9.6",
     "prettier-plugin-tailwindcss": "0.6.14",

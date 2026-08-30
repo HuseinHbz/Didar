@@ -1,6 +1,8 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';
+
+import { recordJobOutcome } from '../../observability/job-metrics';
 
 export interface ExampleJobData {
   message: string;
@@ -23,5 +25,18 @@ export class ExampleProcessor extends WorkerHost {
   process(job: Job<ExampleJobData>): Promise<{ processedAt: string }> {
     this.logger.log(`processing job ${job.id}: ${job.data.message}`);
     return Promise.resolve({ processedAt: new Date().toISOString() });
+  }
+
+  // CP-029 (P1-5) — job-outcome metrics wired the same way for every real
+  // processor going forward, proven here on the template so the first real
+  // processor built from this one inherits observability, not just wiring.
+  @OnWorkerEvent('completed')
+  onCompleted(job: Job<ExampleJobData>): void {
+    recordJobOutcome('example', 'completed', job);
+  }
+
+  @OnWorkerEvent('failed')
+  onFailed(job: Job<ExampleJobData> | undefined): void {
+    if (job) recordJobOutcome('example', 'failed', job);
   }
 }
