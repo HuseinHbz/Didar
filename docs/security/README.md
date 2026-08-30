@@ -32,19 +32,20 @@ below marked "not yet" is covered just because the blueprint calls for it.
 | Order/invoice/fulfillment: dual auth model (reused `ActorResolverGuard` for customer/guest order routes, RBAC for admin routes), 15 `order.*` permissions across `order_manager`/`fulfillment_clerk` (Phase 011: `order.shipment.deliver` split out as its own permission, `fulfillment_clerk` deliberately excluded), an Order can only ever be created from a verified payment (never a client-supplied body), over-fulfillment and status-transition races closed with row locks on all three of `Order`/`Fulfillment`/`Shipment` (Phase 011 closed the latter two), order completion is a server-derived fact requiring real delivery, not a trusted cache column — proven, not assumed, multiple real races caught and fixed by this module's own e2e suites | `services/api/src/modules/order` — see [`docs/security/order-security.md`](order-security.md) for the full model and what's proven end-to-end in `test/order.e2e-spec.ts`/`test/order-repository.e2e-spec.ts`                                                                                                                                                       |
 | Promotion/coupon engine: dual auth model (reused `ActorResolverGuard` for `/cart/coupon`, RBAC for `/admin/promotions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | coupons`routes), 13`promotion._`/`coupon._`permissions across`promotion_manager`/`promotion_editor`, no coupon-enumeration leakage, negative-discount/client-total-manipulation/replay/IDOR all explicitly proven closed, usage-limit races closed with a row lock plus a real Postgres `CHECK` constraint backstop — proven at both the HTTP and repository layers | `services/api/src/modules/promotion` — see [`docs/security/promotion-security.md`](promotion-security.md) for the full model and what's proven end-to-end in `test/promotion.e2e-spec.ts`/`test/promotion-repository.e2e-spec.ts` |
 | Returns/refunds/credit notes: dual auth model (reused `ActorResolverGuard` for customer `returns/*`, RBAC for `admin/returns/*`/`admin/credit-notes/*`), 9 `return.*`/`credit_note.*` permissions across `returns_manager`/`returns_clerk`, eligibility/refund amounts always server-derived from real fulfillment/order-item snapshot data, restock fires exactly once and never on a merely-requested or rejected return, exactly one refund pathway extended (never duplicated) — proven, not assumed, six required concurrency races closed with row locks and verified under real duplicate submissions                                                                                                                                                      | `services/api/src/modules/return` — see [`docs/security/returns-security.md`](returns-security.md) for the full model and what's proven end-to-end in `test/return.e2e-spec.ts`/`test/return-repository.e2e-spec.ts`                                                                                                                                                |
+| API-key authentication (CP-028/P2-6): `X-API-Key` verified by the same global `JwtAuthGuard`, resolves to the key's owner, `AuthorizationGuard` additionally requires a gated route's permission/module to appear in the key's own `scopes` — a leaked, narrowly-scoped key can never do more than its owner explicitly scoped it for, even though the owner's real RBAC would allow more                                                                                                                                                                                                                                                                                                                                                                         | `services/api/src/modules/identity/presentation/guards/jwt-auth.guard.ts` — see [`docs/product/phase-028-audit.md`](../product/phase-028-audit.md) and `ADR-028` for the full model and adversarial proof in `test/api-key-auth.e2e-spec.ts`                                                                                                                        |
+| Encryption-key rotation mechanism (CP-028/P2-7): versioned keyring (`ENCRYPTION_KEY` = v0, `ENCRYPTION_KEY_V1..V3` = rotation slots), ciphertext tagged with its key version, every version ever issued stays decryptable — legacy 3-part ciphertext format unchanged byte-for-byte when no rotation is configured                                                                                                                                                                                                                                                                                                                                                                                                                                                | `services/api/src/modules/identity/infrastructure/crypto/encryption.service.ts` — see `ADR-028` §5 and `encryption.service.spec.ts`                                                                                                                                                                                                                                 |
+| OWASP API Security Top 10 pass (CP-028/P1-7): structured, evidence-based walk against the real running application (real Postgres, real adversarial HTTP requests — wrong-scope keys, revoked keys, malformed tokens)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | [`docs/product/phase-028-audit.md`](../product/phase-028-audit.md) §3                                                                                                                                                                                                                                                                                               |
 
 ## Not yet — explicitly open
 
 - **Rate limiting** — `infrastructure/nginx/nginx.conf` has one blanket
   `limit_req_zone`; nothing per-route, nothing at the application layer.
   `identity.OtpRequest.MAX_ATTEMPTS` (5) is the one exception — a local guard
-  on OTP verification, not a general mechanism.
+  on OTP verification, not a general mechanism. (`P1-1`, owned by `CP-017`
+  or later — explicitly not `CP-028`'s to fix, see `ADR-028` §2.)
 - **OAuth/social login** (blueprint §56) — not built; see
   `modules/identity/README.md`'s "Deliberately out of scope" for why and what
   adding it later would take.
-- **Using an API key to authenticate a request** — issuance/management is
-  real (`services/api/src/modules/identity`); nothing verifies an API key on
-  an inbound request yet, since nothing needs service-to-service auth today.
 - **Security Center dashboards / IP rules / suspicious-activity detection**
   (blueprint §55) — `SecurityEvent` rows are the _data_ those would read;
   the dashboards, anomaly detection, and IP allow/deny rules themselves don't
@@ -55,25 +56,26 @@ below marked "not yet" is covered just because the blueprint calls for it.
   independent approver — see `docs/security/catalog-security.md`. Inventory's
   transfer/count approvals (Phase 006) are the same single-approver shape —
   see `docs/security/inventory-security.md`.
-- **Service-to-service auth** — inventory's `/internal/inventory/*` routes
-  (a POS/home-try-on/future-service reservation seam) sit behind the same
-  `JwtAuthGuard`/`AuthorizationGuard` as every admin route; there's still no
-  distinct machine-to-machine credential, same gap the "API key
-  authentication" row above already documents. Cart/checkout (Phase 007)
-  did **not** end up calling this HTTP seam — it imports `InventoryModule`
-  and injects `ReservationService` directly (in-process NestJS DI, not a
-  network hop), so this gap remains open for whatever caller eventually
-  does need it over the network (a genuinely separate POS service, say).
+- **A distinct, owner-less machine-to-machine credential** — CP-028 made API
+  keys usable to authenticate (see the table above), but every key today
+  authenticates _as an owning user_; inventory's `/internal/inventory/*`
+  seam still sits behind the same `JwtAuthGuard`/`AuthorizationGuard` as
+  every admin route, with no independent, ownerless service credential.
+  Cart/checkout (Phase 007) did **not** end up calling this HTTP seam — it
+  imports `InventoryModule` and injects `ReservationService` directly
+  (in-process NestJS DI, not a network hop) — so this narrower gap remains
+  open for whatever caller eventually does need it over the network (a
+  genuinely separate POS service, say).
 - **Container scanning** — dependency + secret scanning are now real CI checks
   (see the table above), but nothing scans the `infrastructure/docker/`
   Dockerfiles/images yet (Trivy or similar — blueprint §112-§113). Those images
   aren't build-tested at all yet either, see `infrastructure/docker/README.md`.
-- **2FA secret key rotation/KMS** — `ENCRYPTION_KEY` is a single static env
-  var today; a real environment needs a managed key + rotation story before
-  handling real user 2FA secrets, see `modules/identity/README.md`'s Config
-  section.
-- **OWASP ASVS / Top 10 review** — not performed. Do this before any endpoint
-  handles real customer data or payment.
+- **Real KMS-backed key rotation** — CP-028 built the rotation _mechanism_
+  (versioned keyring, see the table above); what's still missing is an
+  actual provider (AWS KMS/GCP KMS/Vault) making a real network call
+  instead of reading a raw env var — this sandbox has no outbound network
+  path to verify one live, same class of gap as ZarinPal/Kavenegar
+  (`ADR-028` §5).
 
 ## Rule for every future PR touching `services/api`
 

@@ -375,14 +375,14 @@
     {
       "id": "CP-028",
       "name": "Security Hardening completion",
-      "gitPhase": null,
+      "gitPhase": "28",
       "blueprintPhase": "PHASE 13 (remainder)",
-      "status": "NOT_STARTED",
-      "completionPercent": 0,
+      "status": "IMPLEMENTED",
+      "completionPercent": 85,
       "dependencies": ["CP-016"],
-      "gitBranch": null,
+      "gitBranch": "28-feature-security-hardening-completion",
       "latestCommit": null,
-      "blockingIssues": ["P1-7", "P2-6", "P2-7"],
+      "blockingIssues": [],
       "priority": "P1"
     },
     {
@@ -641,7 +641,9 @@
       "id": "P1-7",
       "priority": "P1",
       "description": "No penetration test / threat model / OWASP pass",
-      "ownerPhase": "CP-028"
+      "ownerPhase": "CP-028",
+      "status": "RESOLVED",
+      "resolvedBy": "CP-028 OWASP API Security Top 10 walk against the real running app, real adversarial HTTP requests — see docs/product/phase-028-audit.md §3"
     },
     {
       "id": "P2-1",
@@ -679,13 +681,17 @@
       "id": "P2-6",
       "priority": "P2",
       "description": "API keys issuable but not usable to authenticate a request",
-      "ownerPhase": "CP-028"
+      "ownerPhase": "CP-028",
+      "status": "RESOLVED",
+      "resolvedBy": "CP-028 — X-API-Key accepted by JwtAuthGuard, scope-narrowed by AuthorizationGuard — see ADR-028 §4"
     },
     {
       "id": "P2-7",
       "priority": "P2",
       "description": "No KMS-backed key rotation",
-      "ownerPhase": "CP-028"
+      "ownerPhase": "CP-028",
+      "status": "PARTIAL",
+      "resolvedBy": "CP-028 delivered the rotation mechanism (versioned EncryptionKeyring) — a real KMS provider network integration remains undone, same class of gap as ZarinPal/Kavenegar — see ADR-028 §5"
     },
     {
       "id": "P2-8",
@@ -721,9 +727,9 @@
   "nextPhase": "CP-018 is now VALIDATED. CP-020 needs both CP-018 and CP-019, and CP-019 remains BLOCKED (domain-expert review gate) \u2014 not yet available. CP-021 depends only on CP-015 and is genuinely unblocked now; recommended next unless CP-019's gate clears first. CP-017's own status is unchanged by this file \u2014 its real implementation lives on the sibling branch 17-feature-real-notification-delivery, not yet reflected here (see phase-018-audit.md \u00a721/\u00a718). See phase-dependency-graph.md for the full graph.",
   "aggregate": {
     "completedPhases": 19,
-    "partialPhases": 0,
+    "partialPhases": 1,
     "inProgressPhases": 0,
-    "plannedPhases": 11,
+    "plannedPhases": 10,
     "totalPhases": 30
   }
 }

@@ -206,7 +206,7 @@ for the underlying commands/greps/live reproductions.
 - **Git branch:** `21-feature-procurement` · **Latest commit:** see this phase's completion report
 - **Next action:** none
 
-## Planned phases (CP-017 – CP-020, CP-022 – CP-029) — most not yet started; CP-017/018 implemented but unmerged
+## Planned phases (CP-017 – CP-020, CP-022 – CP-029) — most not yet started; CP-017/018/028 implemented but unmerged
 
 CP-017 and CP-018 each have real implementation on their own branches
 (see the table below) but were deliberately **not** merged as part of
@@ -225,19 +225,19 @@ above/below, `docs/product/integration-cp016-cp021.md`, and
 `docs/product/integration-cp018.md`. All three are excluded from the
 "still not started" table below.
 
-| CP ID  | Name                            | Priority | Dependencies           | Status                            | Next action                                                      |
-| ------ | ------------------------------- | -------- | ---------------------- | --------------------------------- | ---------------------------------------------------------------- |
-| CP-017 | Real Notification Delivery      | P1       | CP-016                 | IMPLEMENTED (80%, not VALIDATED)  | Verify live SMS delivery against real network egress, then merge |
-| CP-019 | Customer Domain & Prescription  | P1       | CP-015, CP-016         | BLOCKED                           | Needs optometry-domain-expert review before implementation       |
-| CP-020 | Storefront MVP                  | P1       | CP-016, CP-018, CP-019 | NOT_STARTED — CP-019 still blocks | First real customer-facing surface                               |
-| CP-022 | Mobile real features            | P2       | CP-018, CP-020         | NOT_STARTED — CP-020 still blocks | Sequenced after web UX proven                                    |
-| CP-023 | CMS                             | P2       | CP-018                 | NOT_STARTED                       | Needs admin UI to author content                                 |
-| CP-024 | CRM beyond coupons              | P2       | CP-019, CP-020         | NOT_STARTED                       | Needs real customer data to segment                              |
-| CP-025 | Store/POS/omnichannel           | P2       | CP-018, CP-021         | NOT_STARTED                       | Separate operational model, deferred                             |
-| CP-026 | AI                              | P2       | CP-020                 | NOT_STARTED                       | Needs real usage data                                            |
-| CP-027 | Advanced Analytics              | P2       | CP-020                 | NOT_STARTED                       | Needs real volume                                                |
-| CP-028 | Security Hardening completion   | P1       | CP-016                 | NOT_STARTED                       | Before any phase is genuinely public                             |
-| CP-029 | Production Readiness completion | P1       | CP-016                 | NOT_STARTED                       | Before any "production-ready" claim                              |
+| CP ID  | Name                            | Priority | Dependencies           | Status                            | Next action                                                                             |
+| ------ | ------------------------------- | -------- | ---------------------- | --------------------------------- | --------------------------------------------------------------------------------------- |
+| CP-017 | Real Notification Delivery      | P1       | CP-016                 | IMPLEMENTED (80%, not VALIDATED)  | Verify live SMS delivery against real network egress, then merge                        |
+| CP-028 | Security Hardening completion   | P1       | CP-016                 | IMPLEMENTED (85%, not VALIDATED)  | Real KMS provider network integration, then merge — see `ADR-028`, `phase-028-audit.md` |
+| CP-019 | Customer Domain & Prescription  | P1       | CP-015, CP-016         | BLOCKED                           | Needs optometry-domain-expert review before implementation                              |
+| CP-020 | Storefront MVP                  | P1       | CP-016, CP-018, CP-019 | NOT_STARTED — CP-019 still blocks | First real customer-facing surface                                                      |
+| CP-022 | Mobile real features            | P2       | CP-018, CP-020         | NOT_STARTED — CP-020 still blocks | Sequenced after web UX proven                                                           |
+| CP-023 | CMS                             | P2       | CP-018                 | NOT_STARTED                       | Needs admin UI to author content                                                        |
+| CP-024 | CRM beyond coupons              | P2       | CP-019, CP-020         | NOT_STARTED                       | Needs real customer data to segment                                                     |
+| CP-025 | Store/POS/omnichannel           | P2       | CP-018, CP-021         | NOT_STARTED                       | Separate operational model, deferred                                                    |
+| CP-026 | AI                              | P2       | CP-020                 | NOT_STARTED                       | Needs real usage data                                                                   |
+| CP-027 | Advanced Analytics              | P2       | CP-020                 | NOT_STARTED                       | Needs real volume                                                                       |
+| CP-029 | Production Readiness completion | P1       | CP-016                 | NOT_STARTED                       | Before any "production-ready" claim                                                     |
 
 ## Aggregate
 
@@ -247,7 +247,7 @@ above/below, `docs/product/integration-cp016-cp021.md`, and
   dependencies: CP-018 needed CP-015+CP-016, CP-021 needed only CP-015)
 - **Partial:** 0
 - **In progress:** 0
-- **Planned (zero implementation, or implemented-but-unmerged — CP-017):** 11 (CP-017, CP-019–CP-020, CP-022–CP-029)
+- **Planned (zero implementation, or implemented-but-unmerged — CP-017, CP-028):** 11 (CP-017, CP-019–CP-020, CP-022–CP-029)
 - **Total canonical phases tracked:** 30
 
 This count is the authoritative input to the "Number of completed/
