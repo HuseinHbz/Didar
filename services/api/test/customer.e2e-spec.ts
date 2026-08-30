@@ -82,11 +82,23 @@ describe('Customer domain & prescription (e2e)', () => {
       update: {},
       create: { phone, isActive: true, phoneVerifiedAt: new Date() },
     });
-    await prisma.customer.upsert({
+    // `update` resets to the same canonical values `create` uses — a
+    // prior run's PATCH /me/profile test otherwise leaves this customer
+    // permanently mutated, so a later run's own "starts as 'E2E'"
+    // assertion would only ever pass on a database's first-ever run.
+    const customer = await prisma.customer.upsert({
       where: { userId: user.id },
-      update: {},
+      update: { firstName: 'E2E', lastName: 'Prescription Customer' },
       create: { userId: user.id, firstName: 'E2E', lastName: 'Prescription Customer' },
     });
+    // `upsert` reuses the same customer across repeated runs of this
+    // suite against a database that isn't reset between runs (unlike a
+    // real CI run, which always starts from a fresh one) — clear any
+    // addresses/prescriptions a prior run left behind so this really is
+    // the "fresh customer per test" the comment above promises, not just
+    // on a database's first-ever run.
+    await prisma.customerAddress.deleteMany({ where: { customerId: customer.id } });
+    await prisma.prescription.deleteMany({ where: { customerId: customer.id } });
     return loginByPhone(phone);
   };
 
