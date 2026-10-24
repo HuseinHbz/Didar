@@ -15,6 +15,21 @@ export class InvalidReservationOperationError extends Error {
   }
 }
 
+/** Thrown when release/convert targets a reservation that is no longer
+ * ACTIVE (already released, converted or expired). That is a conflict with
+ * the reservation's *current state* — not a malformed request — so the
+ * inventory exception filter answers 409, and it is what the loser of a
+ * concurrent release/convert race receives (CP-031, gap P0-5). */
+export class ReservationNotActiveError extends Error {
+  constructor(
+    public readonly reservationId: string,
+    public readonly status: string,
+  ) {
+    super(`Reservation ${reservationId} is not ACTIVE (status: ${status})`);
+    this.name = 'ReservationNotActiveError';
+  }
+}
+
 /**
  * Pure business rules for reserve/release/convert — no I/O, no Prisma.
  * The infrastructure layer calls these from inside a row-locked
