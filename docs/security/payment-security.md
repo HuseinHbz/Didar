@@ -29,13 +29,13 @@ distinct access-control models on two disjoint route groups — see
 
 Five new `payment.*` permissions:
 
-| Permission                     | Meaning                                                     |
-| ------------------------------- | ------------------------------------------------------------- |
-| `payment.refund.read`           | Read a refund and its status                                |
-| `payment.refund.create`         | Request a refund against a `VERIFIED` payment transaction    |
-| `payment.refund.process`        | Submit a `PENDING` refund to the real provider adapter        |
-| `payment.reconciliation.read`   | Read reconciliation findings and manually trigger a run       |
-| `payment.reconciliation.resolve`| Record a resolution note on a reconciliation finding          |
+| Permission                       | Meaning                                                   |
+| -------------------------------- | --------------------------------------------------------- |
+| `payment.refund.read`            | Read a refund and its status                              |
+| `payment.refund.create`          | Request a refund against a `VERIFIED` payment transaction |
+| `payment.refund.process`         | Submit a `PENDING` refund to the real provider adapter    |
+| `payment.reconciliation.read`    | Read reconciliation findings and manually trigger a run   |
+| `payment.reconciliation.resolve` | Record a resolution note on a reconciliation finding      |
 
 Two new roles, real least-privilege boundaries, not labels:
 
@@ -131,7 +131,7 @@ secret out of a database row.
 `ZarinpalAdapter` selects its API/redirect base URL from two hardcoded
 constants (`API_BASE.sandbox`/`.production`, `START_PAY_BASE.sandbox`/
 `.production`) keyed only by `PaymentProvider.isSandbox` — a boolean, not
-a string. `PaymentProvider.config` (which an admin *can* eventually edit)
+a string. `PaymentProvider.config` (which an admin _can_ eventually edit)
 is never read for a URL. This closes the concrete SSRF vector "an admin
 sets `config.baseUrl` to an internal address and the adapter dutifully
 calls it" before it could exist, not as an afterthought.
