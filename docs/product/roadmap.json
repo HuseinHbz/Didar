@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0.0",
-  "generatedBy": "CP-015 (Integration Reconciliation), on top of CP-014 (Roadmap Audit & Governance)",
-  "generatedAt": "2026-08-21T00:00:00Z",
+  "generatedBy": "CP-030 (Remediation Roadmap), on top of CP-015 (Integration Reconciliation) and CP-014 (Roadmap Audit & Governance)",
+  "generatedAt": "2026-10-24T00:00:00Z",
   "sourceOfTruthNote": "This file is the one machine-readable source of truth for phase/requirement tracking. Human-readable companions: canonical-roadmap.md, project-progress.md, requirements-matrix.md, gap-priority-matrix.md. pnpm roadmap:audit reads this file and re-derives status from repository evidence \u2014 it does not trust the values below without checking them.",
   "statusEnum": [
     "NOT_STARTED",
@@ -240,7 +240,10 @@
       "gitBranch": null,
       "latestCommit": null,
       "blockingIssues": ["P1-2"],
-      "priority": "P1"
+      "priority": "P1",
+      "unmergedBranch": "17-feature-real-notification-delivery",
+      "unmergedLatestCommit": "834bcd7",
+      "unmergedNote": "Implemented and audited on this branch (real Kavenegar SMS adapter, BullMQ producer wiring, OTP throttle, tests); 10 commits ahead / 25 behind develop (diverged); VALIDATION-BLOCKED on live SMS egress and credential per docs/product/phase-017-validation-audit.md. Branch state verified 2026-10-24."
     },
     {
       "id": "CP-018",
@@ -266,7 +269,10 @@
       "gitBranch": null,
       "latestCommit": null,
       "blockingIssues": ["P1-4"],
-      "priority": "P1"
+      "priority": "P1",
+      "unmergedBranch": "19-feature-customer-domain-prescription",
+      "unmergedLatestCommit": "f5fb54a",
+      "unmergedNote": "Implemented on this branch (customer + address domain, prescription domain and lifecycle, RBAC wiring, tests, decision packet); 8 commits ahead / 0 behind develop; held behind the five owner decisions Q1-Q5 per docs/product/phase-019-domain-review.md. Not re-executed in CP-030. Branch state verified 2026-10-24."
     },
     {
       "id": "CP-020",
@@ -383,7 +389,10 @@
       "gitBranch": null,
       "latestCommit": null,
       "blockingIssues": ["P1-7", "P2-6", "P2-7"],
-      "priority": "P1"
+      "priority": "P1",
+      "unmergedBranch": "28-feature-security-hardening-completion",
+      "unmergedLatestCommit": "fb1c80f",
+      "unmergedNote": "Implemented on this branch (API-key request authentication, encryption-key rotation, guard and adversarial e2e tests, ADR-028, phase-028-audit.md); 3 commits ahead / 0 behind develop; not integrated. Tests not re-executed in CP-030. Branch state verified 2026-10-24."
     },
     {
       "id": "CP-029",
@@ -396,6 +405,139 @@
       "gitBranch": null,
       "latestCommit": null,
       "blockingIssues": ["P1-5"],
+      "priority": "P1",
+      "unmergedBranch": "29-feature-production-readiness-completion",
+      "unmergedLatestCommit": "faab0fd",
+      "unmergedNote": "Implemented on this branch (real /metrics on api/worker/notification-worker, alert rules, runbook, load-test script, ADR-029, phase-029-audit.md); 3 commits ahead / 0 behind develop; not integrated. Tests not re-executed in CP-030. Branch state verified 2026-10-24."
+    },
+    {
+      "id": "CP-030",
+      "name": "Remediation Roadmap & Review Correction",
+      "gitPhase": "30",
+      "blueprintPhase": null,
+      "status": "IMPLEMENTED",
+      "completionPercent": 70,
+      "dependencies": ["CP-014", "CP-015"],
+      "gitBranch": "30-feature-remediation-roadmap",
+      "latestCommit": "186dee3",
+      "blockingIssues": [],
+      "priority": "P0"
+    },
+    {
+      "id": "CP-031",
+      "name": "Payment/Order/Inventory Consistency",
+      "gitPhase": null,
+      "blueprintPhase": null,
+      "status": "NOT_STARTED",
+      "completionPercent": 0,
+      "dependencies": ["CP-030", "CP-007", "CP-008", "CP-009"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P0-3", "P0-4", "P0-5", "P0-6"],
+      "priority": "P0"
+    },
+    {
+      "id": "CP-032",
+      "name": "Pricing & Tax Integrity",
+      "gitPhase": null,
+      "blueprintPhase": null,
+      "status": "NOT_STARTED",
+      "completionPercent": 0,
+      "dependencies": ["CP-030", "CP-005", "CP-007"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P0-7", "P0-8", "P1-10"],
+      "priority": "P0"
+    },
+    {
+      "id": "CP-033",
+      "name": "Optical Catalog & Lens Pricing",
+      "gitPhase": null,
+      "blueprintPhase": null,
+      "status": "BLOCKED",
+      "completionPercent": 0,
+      "dependencies": ["CP-032", "CP-005"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P1-11"],
+      "priority": "P1"
+    },
+    {
+      "id": "CP-034",
+      "name": "Prescription at Purchase",
+      "gitPhase": null,
+      "blueprintPhase": null,
+      "status": "NOT_STARTED",
+      "completionPercent": 0,
+      "dependencies": ["CP-019", "CP-033"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P1-12"],
+      "priority": "P1"
+    },
+    {
+      "id": "CP-035",
+      "name": "Lab Operations & Warranty",
+      "gitPhase": null,
+      "blueprintPhase": null,
+      "status": "BLOCKED",
+      "completionPercent": 0,
+      "dependencies": ["CP-034", "CP-009"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P1-13"],
+      "priority": "P1"
+    },
+    {
+      "id": "CP-036",
+      "name": "Tax Invoice & Currency Presentation",
+      "gitPhase": null,
+      "blueprintPhase": null,
+      "status": "BLOCKED",
+      "completionPercent": 0,
+      "dependencies": ["CP-032", "CP-009"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P1-14"],
+      "priority": "P1"
+    },
+    {
+      "id": "CP-037",
+      "name": "Persian-aware Search",
+      "gitPhase": null,
+      "blueprintPhase": null,
+      "status": "NOT_STARTED",
+      "completionPercent": 0,
+      "dependencies": ["CP-030", "CP-005"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P2-13"],
+      "priority": "P2"
+    },
+    {
+      "id": "CP-038",
+      "name": "Virtual Try-On",
+      "gitPhase": null,
+      "blueprintPhase": null,
+      "status": "BLOCKED",
+      "completionPercent": 0,
+      "dependencies": ["CP-020", "CP-033"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P2-14"],
+      "priority": "P2"
+    },
+    {
+      "id": "CP-039",
+      "name": "Integration of Finished Phases & Release Sync",
+      "gitPhase": null,
+      "blueprintPhase": null,
+      "status": "BLOCKED",
+      "completionPercent": 0,
+      "dependencies": [],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P1-15"],
       "priority": "P1"
     }
   ],
@@ -581,6 +723,97 @@
       "domain": "frontend",
       "userType": "customer",
       "status": "PLANNED"
+    },
+    {
+      "id": "REQ-FIN-01",
+      "phase": "CP-031",
+      "domain": "payment-order",
+      "userType": "customer",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-FIN-02",
+      "phase": "CP-031",
+      "domain": "inventory",
+      "userType": "system",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-FIN-03",
+      "phase": "CP-031",
+      "domain": "payment",
+      "userType": "system",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-PRICE-01",
+      "phase": "CP-032",
+      "domain": "cart-checkout",
+      "userType": "customer",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-PRICE-02",
+      "phase": "CP-032",
+      "domain": "catalog",
+      "userType": "admin",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-TAX-01",
+      "phase": "CP-032",
+      "domain": "cart-checkout",
+      "userType": "system",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-OPT-01",
+      "phase": "CP-033",
+      "domain": "catalog",
+      "userType": "customer",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-RX-01",
+      "phase": "CP-034",
+      "domain": "prescription",
+      "userType": "customer",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-LAB-01",
+      "phase": "CP-035",
+      "domain": "fulfillment",
+      "userType": "admin",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-EINV-01",
+      "phase": "CP-036",
+      "domain": "finance",
+      "userType": "admin",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-SRCH-01",
+      "phase": "CP-037",
+      "domain": "catalog",
+      "userType": "customer",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-VTO-01",
+      "phase": "CP-038",
+      "domain": "frontend",
+      "userType": "customer",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-REL-01",
+      "phase": "CP-039",
+      "domain": "platform",
+      "userType": "system",
+      "status": "PLANNED"
     }
   ],
   "gaps": [
@@ -611,7 +844,8 @@
       "id": "P1-2",
       "priority": "P1",
       "description": "Every notification-channel adapter is a stub",
-      "ownerPhase": "CP-017"
+      "ownerPhase": "CP-017",
+      "implementedOnBranchNote": "Real Kavenegar SMS adapter exists on branch 17-feature-real-notification-delivery (unmerged, validation-blocked); integration tracked by CP-039"
     },
     {
       "id": "P1-3",
@@ -623,13 +857,15 @@
       "id": "P1-4",
       "priority": "P1",
       "description": "No Prescription domain model",
-      "ownerPhase": "CP-019"
+      "ownerPhase": "CP-019",
+      "implementedOnBranchNote": "Prescription domain is implemented on branch 19-feature-customer-domain-prescription (unmerged, held behind owner decisions Q1-Q5); absent on develop"
     },
     {
       "id": "P1-5",
       "priority": "P1",
       "description": "No production observability",
-      "ownerPhase": "CP-016,CP-029"
+      "ownerPhase": "CP-016,CP-029",
+      "implementedOnBranchNote": "Real /metrics, alert rules, runbook and load-test script exist on branch 29-feature-production-readiness-completion (unmerged); integration tracked by CP-039"
     },
     {
       "id": "P1-6",
@@ -679,13 +915,15 @@
       "id": "P2-6",
       "priority": "P2",
       "description": "API keys issuable but not usable to authenticate a request",
-      "ownerPhase": "CP-028"
+      "ownerPhase": "CP-028",
+      "implementedOnBranchNote": "API-key request authentication exists on branch 28-feature-security-hardening-completion (unmerged); integration tracked by CP-039"
     },
     {
       "id": "P2-7",
       "priority": "P2",
       "description": "No KMS-backed key rotation",
-      "ownerPhase": "CP-028"
+      "ownerPhase": "CP-028",
+      "implementedOnBranchNote": "Encryption-key rotation exists on branch 28-feature-security-hardening-completion (unmerged); integration tracked by CP-039"
     },
     {
       "id": "P2-8",
@@ -716,14 +954,112 @@
       "priority": "P2",
       "description": "No Advanced Analytics beyond one event-sink table",
       "ownerPhase": "CP-027"
+    },
+    {
+      "id": "P0-3",
+      "priority": "P0",
+      "description": "Checkout stock hold (20 min) is shorter than the payment window (30 min) and the expiry sweep ignores live payment intents",
+      "ownerPhase": "CP-031"
+    },
+    {
+      "id": "P0-4",
+      "priority": "P0",
+      "description": "A payment verified after its checkout stopped being eligible for CONVERTED produces no order unless the customer returns (order_conversion sweep cannot see it)",
+      "ownerPhase": "CP-031"
+    },
+    {
+      "id": "P0-5",
+      "priority": "P0",
+      "description": "An order can become PAID with no stock allocated; reservation-convert failures are swallowed and non-ACTIVE reservations are skipped silently",
+      "ownerPhase": "CP-031"
+    },
+    {
+      "id": "P0-6",
+      "priority": "P0",
+      "description": "Partial refunds are sent to the ZarinPal reverse API without an amount; local ledger and gateway can diverge",
+      "ownerPhase": "CP-031"
+    },
+    {
+      "id": "P0-7",
+      "priority": "P0",
+      "description": "Tax fails open: a missing default-tax setting means 0 percent and the value is not validated; the seeded rate is a demonstration value",
+      "ownerPhase": "CP-032"
+    },
+    {
+      "id": "P0-8",
+      "priority": "P0",
+      "description": "Cart lines are priced from the add-to-cart snapshot for up to 30 days; PRICE_CHANGED is never emitted and ProductPrice validFrom/validTo are never enforced on read",
+      "ownerPhase": "CP-032"
+    },
+    {
+      "id": "P1-10",
+      "priority": "P1",
+      "description": "Price changes have no guardrails (no below-cost check, no change threshold, no second approver)",
+      "ownerPhase": "CP-032"
+    },
+    {
+      "id": "P1-11",
+      "priority": "P1",
+      "description": "Lens types and coatings are name-only; lens/option prices are never computed; cart line configuration is unvalidated free-form JSON",
+      "ownerPhase": "CP-033"
+    },
+    {
+      "id": "P1-12",
+      "priority": "P1",
+      "description": "Prescription reference is only shape-checked at checkout; not resolved, not required for lens lines, no compatibility check, no optometrist release step",
+      "ownerPhase": "CP-034"
+    },
+    {
+      "id": "P1-13",
+      "priority": "P1",
+      "description": "No lab/fitting/QC/remake workflow and no warranty model; returns have no made-to-order policy",
+      "ownerPhase": "CP-035"
+    },
+    {
+      "id": "P1-14",
+      "priority": "P1",
+      "description": "Invoices carry no legal tax identity fields and no e-invoice integration seam; no Rial/Toman presentation convention",
+      "ownerPhase": "CP-036"
+    },
+    {
+      "id": "P1-15",
+      "priority": "P1",
+      "description": "Finished phases CP-017/019/028/029 are not integrated into develop, roadmap.json understates them, and main is 134 commits behind develop",
+      "ownerPhase": "CP-039"
+    },
+    {
+      "id": "P2-13",
+      "priority": "P2",
+      "description": "Product search is substring-only and not Persian-aware (no letter/digit/ZWNJ normalization, no full-text index, no ranking)",
+      "ownerPhase": "CP-037"
+    },
+    {
+      "id": "P2-14",
+      "priority": "P2",
+      "description": "No virtual try-on and the requested VR 5D is undefined in the blueprint",
+      "ownerPhase": "CP-038"
+    },
+    {
+      "id": "P2-15",
+      "priority": "P2",
+      "description": "Governance drift: canonical-roadmap.md status column and roadmap.json nextPhase are stale",
+      "ownerPhase": "CP-030",
+      "status": "RESOLVED",
+      "resolvedBy": "CP-030 - canonical-roadmap.md rows and roadmap.json nextPhase/aggregate corrected; CP-017/019/028/029 recorded additively via unmergedBranch"
+    },
+    {
+      "id": "P2-16",
+      "priority": "P2",
+      "description": "inventory e2e test assumes one availability row per warehouse but availability is returned per (warehouse, location) from an unordered query",
+      "ownerPhase": "CP-031"
     }
   ],
-  "nextPhase": "CP-018 is now VALIDATED. CP-020 needs both CP-018 and CP-019, and CP-019 remains BLOCKED (domain-expert review gate) \u2014 not yet available. CP-021 depends only on CP-015 and is genuinely unblocked now; recommended next unless CP-019's gate clears first. CP-017's own status is unchanged by this file \u2014 its real implementation lives on the sibling branch 17-feature-real-notification-delivery, not yet reflected here (see phase-018-audit.md \u00a721/\u00a718). See phase-dependency-graph.md for the full graph.",
+  "nextPhase": "CP-031 (Payment/Order/Inventory Consistency) is the recommended next execution phase: it owns four P0 gaps (P0-3..P0-6), all of its dependencies are met, and it needs no external decision. CP-032 (Pricing & Tax Integrity, P0-7/P0-8/P1-10) follows; merge CP-031 first because both edit checkout.service.ts. CP-037 (Persian-aware Search) is also ready and independent. CP-033, CP-035, CP-036, CP-038 and CP-039 are BLOCKED on owner or domain decisions (docs/product/remediation-roadmap.md section 7). CP-034 waits on CP-019 and CP-033. The earlier guidance that CP-021 is the next phase is obsolete: CP-021 is VALIDATED. CP-017/019/028/029 are complete on unmerged branches (see their unmergedBranch fields); integrating them is CP-039. See phase-dependency-graph.md for the full graph.",
   "aggregate": {
     "completedPhases": 19,
     "partialPhases": 0,
-    "inProgressPhases": 0,
-    "plannedPhases": 11,
-    "totalPhases": 30
+    "inProgressPhases": 1,
+    "plannedPhases": 20,
+    "totalPhases": 40
   }
 }

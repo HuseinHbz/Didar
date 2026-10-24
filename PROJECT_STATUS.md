@@ -1,26 +1,29 @@
 # Project Status
 
-**Overall Progress:** 19 of 30 canonical phases Completed, 0 Partial,
-0 in progress, 11 Planned.
-**Current Phase:** CP-018 — Admin Panel MVP (VALIDATED, merged). CP-016
-— Platform Reliability Foundation and CP-021 — Procurement are also
-merged (all three landed in this and the prior integration operation).
-**Next Phase:** No canonical CP is both genuinely unblocked and not yet
-implemented right now. CP-017 — Real Notification Delivery depends on
-CP-016 (now merged) but remains **IMPLEMENTED / VALIDATION-BLOCKED**
-(80% — a dedicated validation gate re-confirmed live, this session, that
-this sandbox has neither network egress to any external host nor a real
-provisioned SMS credential; see
-`docs/product/phase-017-validation-audit.md`) and has, deliberately, **not**
-been merged. CP-019 remains BLOCKED on domain-expert review. CP-020
-depends on CP-016 (merged)/CP-018 (merged)/CP-019 (still blocked) — not
-yet unblocked. CP-022 depends on CP-018 (merged)/CP-020 (not started) —
-not yet unblocked. See `docs/product/phase-dependency-graph.md`.
-**Last Audit:** 2026-08-22 (`docs/product/phase-016-audit.md`,
-`docs/product/phase-018-audit.md`, `docs/product/phase-021-audit.md`,
-`docs/product/phase-017-validation-audit.md`; integration operations
-recorded in `docs/product/integration-cp016-cp021.md` and
+**Overall Progress:** 19 of 40 canonical phases Completed, 0 Partial,
+1 in progress (CP-030, implemented and awaiting merge), 20 Planned.
+**Current Phase:** CP-030 — Remediation Roadmap & Review Correction
+(IMPLEMENTED, documentation only, awaiting merge). It phases the
+cross-functional review into CP-031 – CP-039 and records six new open P0
+gaps (P0-3 – P0-8), each with an owning phase. Previously merged and
+VALIDATED: CP-016, CP-018, CP-021 (see
+`docs/product/integration-cp016-cp021.md` and
 `docs/product/integration-cp018.md`).
+**Next Phase:** **CP-031 — Payment/Order/Inventory Consistency** (P0; all
+dependencies met; no external decision needed). CP-032 — Pricing & Tax
+Integrity (P0) follows, and CP-037 — Persian-aware Search is also ready.
+CP-033, CP-035, CP-036, CP-038 and CP-039 are BLOCKED on owner / domain
+decisions (the eight questions in `docs/product/remediation-roadmap.md` §7);
+CP-034 waits on CP-019. Four finished phases are **not integrated**: CP-017
+(real SMS, validation-blocked), CP-019 (prescription domain, held behind five
+owner decisions), CP-028 (API-key auth / key rotation) and CP-029
+(`/metrics`, alerting, runbook) are complete on their own branches
+(`unmergedBranch` in `roadmap.json`); integrating them is CP-039. See
+`docs/product/phase-dependency-graph.md`.
+**Last Audit:** 2026-10-24 (`docs/product/phase-030-audit.md`); earlier:
+2026-08-22 (`docs/product/phase-016-audit.md`,
+`docs/product/phase-018-audit.md`, `docs/product/phase-021-audit.md`,
+`docs/product/phase-017-validation-audit.md`).
 
 This file is a human-readable summary. The source of truth is
 [`docs/product/roadmap.json`](docs/product/roadmap.json), kept in sync by
@@ -77,13 +80,38 @@ Legend: `[x]` Completed · `[~]` In progress / Partial · `[ ]` Planned ·
 - [ ] CP-028 — Security Hardening completion
 - [ ] CP-029 — Production Readiness completion
 
+## Remediation series (CP-030 – CP-039)
+
+- [~] CP-030 — Remediation Roadmap & Review Correction _(this phase — implemented, awaiting merge; see `docs/product/remediation-roadmap.md`)_
+- [ ] CP-031 — Payment/Order/Inventory Consistency _(P0, ready)_
+- [ ] CP-032 — Pricing & Tax Integrity _(P0, ready)_
+- [!] CP-033 — Optical Catalog & Lens Pricing _(blocked: optician decisions)_
+- [ ] CP-034 — Prescription at Purchase _(needs CP-019, CP-033)_
+- [!] CP-035 — Lab Operations & Warranty _(blocked: lab / warranty policy)_
+- [!] CP-036 — Tax Invoice & Currency Presentation _(blocked: finance / legal scoping)_
+- [ ] CP-037 — Persian-aware Search _(ready)_
+- [!] CP-038 — Virtual Try-On _(blocked: "VR 5D" undefined)_
+- [!] CP-039 — Integration of Finished Phases & Release Sync _(blocked: owner merge decisions)_
+
 ## P0 blockers open right now
 
-None. Both P0s the Phase 014 audit found are resolved:
+Six, all found by the CP-030 review and each owned by a scoped phase (the
+governance rule — no P0 without an owner — is satisfied):
 
-- `CP-012/013 not on develop` — resolved by CP-015, see
-  `docs/product/integration-reconciliation.md`.
-- `CI has no Redis service; no fail-fast on Redis loss` — resolved by
-  CP-016, see `docs/product/phase-016-audit.md`.
+- `P0-3` checkout hold shorter than the payment window; expiry sweep ignores
+  live payments — **CP-031**
+- `P0-4` a payment verified after its checkout expired yields no order unless
+  the customer returns — **CP-031**
+- `P0-5` an order can be `PAID` with no stock allocated; failures swallowed —
+  **CP-031**
+- `P0-6` partial refunds sent to ZarinPal `reverse.json` without an amount —
+  **CP-031**
+- `P0-7` tax fails open (missing setting → 0 %) — **CP-032**
+- `P0-8` cart prices frozen at add-to-cart for up to 30 days; `PRICE_CHANGED`
+  never emitted — **CP-032**
+
+Resolved earlier: `CP-012/013 not on develop` (CP-015, see
+`docs/product/integration-reconciliation.md`) and `CI has no Redis service`
+(CP-016, see `docs/product/phase-016-audit.md`).
 
 Full gap list with priorities and owners: [`docs/product/gap-priority-matrix.md`](docs/product/gap-priority-matrix.md).
