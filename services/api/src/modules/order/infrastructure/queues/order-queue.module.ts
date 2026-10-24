@@ -11,10 +11,14 @@ import { InventoryModule } from '../../../inventory/inventory.module';
 import { PaymentModule } from '../../../payment/payment.module';
 import { PromotionModule } from '../../../promotion/promotion.module';
 import { InvoiceService } from '../../application/invoice.service';
+import { OrderAllocationService } from '../../application/order-allocation.service';
 import { OrderConversionService } from '../../application/order-conversion.service';
+import { OrderExceptionService } from '../../application/order-exception.service';
 import { INVOICE_REPOSITORY } from '../../domain/ports/invoice.repository.port';
+import { ORDER_EXCEPTION_REPOSITORY } from '../../domain/ports/order-exception.repository.port';
 import { ORDER_REPOSITORY } from '../../domain/ports/order.repository.port';
 import { PrismaInvoiceRepository } from '../repositories/prisma-invoice.repository';
+import { PrismaOrderExceptionRepository } from '../repositories/prisma-order-exception.repository';
 import { PrismaOrderRepository } from '../repositories/prisma-order.repository';
 
 import {
@@ -59,8 +63,11 @@ import { INVOICE_GENERATION_QUEUE, ORDER_CONVERSION_QUEUE } from './queue-names'
   ],
   providers: [
     { provide: ORDER_REPOSITORY, useClass: PrismaOrderRepository },
+    { provide: ORDER_EXCEPTION_REPOSITORY, useClass: PrismaOrderExceptionRepository },
     { provide: INVOICE_REPOSITORY, useClass: PrismaInvoiceRepository },
     { provide: AUDIT_LOG_REPOSITORY, useClass: PrismaAuditLogRepository },
+    OrderAllocationService,
+    OrderExceptionService,
     OrderConversionService,
     InvoiceService,
     OrderConversionQueueService,

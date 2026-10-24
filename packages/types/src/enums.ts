@@ -29,6 +29,21 @@ export const ORDER_STATUSES = [
 ] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
+/** `OrderException.type` (CP-031, docs/adr/ADR-031-payment-order-consistency.md)
+ * — why a *paid* order needs a human. One value today; an enum so a second
+ * kind is one reviewed addition, never a free-text convention. */
+export const ORDER_EXCEPTION_TYPES = ['STOCK_SHORTFALL'] as const;
+export type OrderExceptionType = (typeof ORDER_EXCEPTION_TYPES)[number];
+
+export const ORDER_EXCEPTION_STATUSES = ['OPEN', 'RESOLVED'] as const;
+export type OrderExceptionStatus = (typeof ORDER_EXCEPTION_STATUSES)[number];
+
+/** How an exception was closed. There is deliberately no "waived"/"forced"
+ * value: a PAID order either holds real allocated stock or stops being a
+ * sale (cancel + refund). */
+export const ORDER_EXCEPTION_RESOLUTIONS = ['ALLOCATED', 'ORDER_CANCELLED'] as const;
+export type OrderExceptionResolution = (typeof ORDER_EXCEPTION_RESOLUTIONS)[number];
+
 /** Cached alongside `status` (ADR-009 decision 3) — always derived from
  * Payment's own `PaymentTransaction`/`Refund` rows, never independently
  * tracked. */

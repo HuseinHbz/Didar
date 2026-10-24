@@ -59,6 +59,37 @@ export class PrismaInventoryReservationRepository implements InventoryReservatio
     });
     if (existing) return toDomain(existing);
 
+    try {
+      return await this.createReservation(props);
+    } catch (error) {
+      // Idempotent under *concurrent* callers too (CP-031): the lookup above
+      // is not atomic with the insert, so two callers with the same key can
+      // both reach `createReservation`. Exactly one commits; the other fails
+      // — as a unique violation on the key, or as `InsufficientStockError`
+      // when the winner just took the last units — and must hand back the
+      // winner's reservation, not surface a spurious error (the order
+      // conversion path re-acquires stock under one key from several racing
+      // callers). Broader than the plain P2002-catch-and-reread on purpose,
+      // for the same reason `PrismaPurchaseOrderRepository.receive()` is.
+      const winner = await prisma.inventoryReservation.findUnique({
+        where: { idempotencyKey: props.idempotencyKey },
+      });
+      if (winner) return toDomain(winner);
+      throw error;
+    }
+  }
+
+  private createReservation(props: {
+    productSkuId: ProductSkuId;
+    warehouseId: WarehouseId;
+    quantity: number;
+    sourceType: string;
+    sourceId: string;
+    idempotencyKey: string;
+    expiresAt?: Date | null;
+    actorUserId?: string | null;
+    correlationId: string;
+  }): Promise<InventoryReservation> {
     return prisma.$transaction(async (tx) => {
       // Pick the warehouse's location with the most available stock for
       // this SKU — the caller (application layer / allocation engine)

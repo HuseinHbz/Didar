@@ -1,5 +1,5 @@
 import type { OrderPaymentStatus } from '@iecp/types';
-import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 
 import {
   AUDIT_LOG_REPOSITORY,
@@ -21,6 +21,8 @@ import {
 import { OrderCompletionValidator } from '../domain/services/order-completion-validator';
 import { OrderStateMachine } from '../domain/services/order-state-machine';
 
+import { OrderExceptionService } from './order-exception.service';
+
 export interface OrderActor {
   customerId: string | null;
   guestToken: string | null;
@@ -34,12 +36,15 @@ export interface OrderActor {
  */
 @Injectable()
 export class OrderService {
+  private readonly logger = new Logger(OrderService.name);
+
   constructor(
     @Inject(ORDER_REPOSITORY) private readonly orders: OrderRepositoryPort,
     @Inject(FULFILLMENT_REPOSITORY) private readonly fulfillments: FulfillmentRepositoryPort,
     @Inject(AUDIT_LOG_REPOSITORY) private readonly auditLog: AuditLogRepositoryPort,
     private readonly payments: PaymentIntentService,
     private readonly refunds: RefundService,
+    private readonly exceptions: OrderExceptionService,
   ) {}
 
   async get(orderId: string, actor: OrderActor): Promise<OrderWithDetail> {
@@ -87,9 +92,15 @@ export class OrderService {
    * `PROCESSING -> READY_TO_FULFILL`, whichever the order's current
    * status makes legal. Rejects (via `OrderStateMachine`) from any other
    * status — this is deliberately not a generic "set any status" escape
-   * hatch. */
+   * hatch.
+   *
+   * CP-031 (gap P0-5): refused with HTTP 409 while the order has an `OPEN`
+   * exception (today: a line whose stock could not be allocated). `approve`
+   * is the only edge out of `PAID`, so this is what keeps an order with no
+   * stock behind it from ever reaching fulfillment. */
   async approve(orderId: string, actorUserId: string): Promise<Order> {
     const detail = await this.getForAdmin(orderId);
+    await this.exceptions.assertApprovable(orderId);
     const next = detail.order.status === 'PAID' ? 'PROCESSING' : 'READY_TO_FULFILL';
     OrderStateMachine.assertTransition(detail.order.status, next);
     const updated = await this.orders.updateStatus(orderId, next, actorUserId);
@@ -165,19 +176,35 @@ export class OrderService {
       OrderStateMachine.assertTransition(detail.order.status, 'CANCELLED');
     }
 
-    if (detail.order.paidTotal > 0n) {
+    const refundable = detail.order.paidTotal - detail.order.refundedTotal;
+    if (detail.order.paidTotal > 0n && refundable > 0n) {
       const intentDetail = await this.payments.findById(detail.order.paymentIntentId);
       const transaction = intentDetail?.transactions.find((t) => t.isVerified);
       if (transaction) {
         await this.refunds
           .requestRefund({
             paymentTransactionId: transaction.id,
-            amount: detail.order.paidTotal - detail.order.refundedTotal,
+            amount: refundable,
             reason: reason ?? 'Order cancelled',
             requestedBy: actorUserId ?? undefined,
             idempotencyKey: `order-cancel__${orderId}`,
           })
-          .catch(() => undefined);
+          .catch(async (error: unknown) => {
+            // The cancellation still goes through, but a customer who has paid
+            // and is not refunded must never be invisible (CP-031): leave a
+            // loud log line and an audit row for finance to act on. (Before
+            // this, the error vanished without a trace.)
+            this.logger.error(
+              `order_cancel_refund_request_failed orderId=${orderId} amount=${refundable} error=${String(error)}`,
+            );
+            await this.auditLog.record({
+              actorId: actorUserId,
+              action: 'ORDER_CANCEL_REFUND_REQUEST_FAILED',
+              entityType: 'Order',
+              entityId: orderId,
+              newValue: { amount: refundable.toString(), error: String(error) },
+            });
+          });
       }
     }
 
@@ -188,6 +215,9 @@ export class OrderService {
       reason ?? 'Order cancelled',
       { cancelledAt: new Date() },
     );
+    // A cancelled order has nothing left to allocate: close whatever was
+    // blocking it (CP-031).
+    await this.exceptions.resolveForCancelledOrder(orderId, actorUserId);
     await this.auditLog.record({
       actorId: actorUserId,
       action: 'ORDER_CANCELLED',

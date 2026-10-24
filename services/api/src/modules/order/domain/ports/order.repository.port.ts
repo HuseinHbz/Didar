@@ -71,6 +71,19 @@ export interface OrderRepositoryPort {
    * few milliseconds into its own transaction is not stuck, just busy. */
   listStuckPendingConversion(olderThan: Date): Promise<Order[]>;
 
+  /** `checkoutSessionId` of every payment intent that `SUCCEEDED` (a verified
+   * payment) since `since` and still has **no order** — CP-031, gap P0-4.
+   *
+   * The other two sweep passes find work through the *checkout* (CONVERTED
+   * with no order) or through an *order* (stuck PENDING_PAYMENT). A payment
+   * verified after its checkout had lapsed has neither: the checkout is
+   * EXPIRED/CANCELLED, so `markConverted` could not flip it, and no order row
+   * was ever created. The money is captured and nothing would ever turn it
+   * into an order. Keyed off the payment itself — the one fact that cannot be
+   * missing — this closes that hole. Backed by the
+   * `payment_intents (status, updated_at)` index. */
+  listPaidCheckoutIdsWithoutOrder(since: Date): Promise<string[]>;
+
   /** Generates the next order number from `commerce.order_number_seq`
    * (ADR-009 decision 6) and creates the `Order` + its `OrderItem` rows in
    * one transaction. Idempotent on `checkoutSessionId`/`paymentIntentId`

@@ -13,6 +13,7 @@ import { PurchaseOrderService } from './application/purchase-order.service';
 import { ReservationService } from './application/reservation.service';
 import { StockCountService } from './application/stock-count.service';
 import { StockQueryService } from './application/stock-query.service';
+import { StockSaleService } from './application/stock-sale.service';
 import { SupplierService } from './application/supplier.service';
 import { TransferService } from './application/transfer.service';
 import { WarehousesService } from './application/warehouses.service';
@@ -103,6 +104,7 @@ import { InventoryDomainExceptionFilter } from './presentation/filters/inventory
     StockCountService,
     LowStockService,
     AllocationService,
+    StockSaleService,
     SupplierService,
     PurchaseOrderService,
     { provide: WAREHOUSE_REPOSITORY, useClass: PrismaWarehouseRepository },
@@ -130,6 +132,16 @@ import { InventoryDomainExceptionFilter } from './presentation/filters/inventory
   // Phase 012 (ADR-012 decision 6) — `AdjustmentService` added, additively,
   // so `ReturnModule` can call `receiveReturnedStock()` directly instead of
   // re-binding `INVENTORY_ITEM_REPOSITORY` locally.
-  exports: [ReservationService, AllocationService, StockQueryService, AdjustmentService],
+  //
+  // CP-031 (ADR-031) — `StockSaleService` added, additively, so the order
+  // module can sell (or re-acquire and sell) stock for a paid order through
+  // the real reservation engine instead of swallowing a failed convert.
+  exports: [
+    ReservationService,
+    AllocationService,
+    StockQueryService,
+    AdjustmentService,
+    StockSaleService,
+  ],
 })
 export class InventoryModule {}
