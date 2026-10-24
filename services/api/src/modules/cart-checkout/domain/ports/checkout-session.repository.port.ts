@@ -58,9 +58,24 @@ export interface CheckoutSessionRepositoryPort {
     extra?: { cancelledAt?: Date; convertedAt?: Date },
   ): Promise<CheckoutSession>;
 
-  /** `POST /checkout/:id/refresh` — pushes `expiresAt` forward to a new
-   * value. Idempotent by nature (repeated calls just keep extending). */
+  /** Pushes `expiresAt` forward to `expiresAt` — **monotonic**: an earlier
+   * value never replaces a later one, and a terminal session is left alone.
+   * `POST /checkout/:id/refresh` (customer) and the payment module's
+   * hold-while-paying (CP-031, gap P0-3) both go through here, so neither can
+   * shorten the other's deadline. Implemented as one conditional `UPDATE`
+   * (the same row `claimExpiry` conditions on), which is what makes the
+   * hold-vs-expiry race decidable without a lock. Returns the row as it
+   * stands afterwards — the caller inspects `status` to learn whether the
+   * session was still alive. */
   extendExpiry(id: string, expiresAt: Date): Promise<CheckoutSession>;
+
+  /** Atomically moves a non-terminal session to `EXPIRED` — a single
+   * conditional `UPDATE … WHERE status IN (non-terminal) [AND expires_at <
+   * dueBefore]`. Returns `false` when it lost: the session was extended
+   * (hold-while-paying), converted, cancelled or already expired in the
+   * meantime. `dueBefore: null` expires unconditionally (an explicit,
+   * non-sweep call). */
+  claimExpiry(id: string, dueBefore: Date | null): Promise<boolean>;
 
   setAddress(
     checkoutSessionId: string,

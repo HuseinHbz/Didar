@@ -105,7 +105,22 @@ export class PaymentIntentService {
     }
 
     const existing = await this.intents.findByCheckoutSessionId(checkoutSessionId);
-    if (existing) return existing;
+    if (existing) {
+      // An idempotent re-entry (a double click, a retried request, a customer
+      // returning to the payment step) must keep the hold alive too — but only
+      // while this intent can still be paid, and never past its own window.
+      if (!existing.isTerminal && existing.expiresAt) {
+        await this.checkout.holdForPayment(checkoutSessionId, existing.expiresAt);
+      }
+      return existing;
+    }
+
+    const expiresAt = new Date(Date.now() + DEFAULT_INTENT_TTL_MINUTES * 60_000);
+    // Hold-while-paying (CP-031, gap P0-3): keep the checkout — and the stock
+    // it reserved — alive for the whole payment window *before* the intent
+    // exists. If the expiration sweep wins the race the hold throws (409) and
+    // no intent is created for a checkout that is already gone.
+    await this.checkout.holdForPayment(checkoutSessionId, expiresAt);
 
     return this.intents.create({
       checkoutSessionId,
@@ -115,7 +130,7 @@ export class PaymentIntentService {
       amount: checkoutDetail.session.grandTotal,
       currency: checkoutDetail.session.currency,
       idempotencyKey: options.idempotencyKey ?? randomUUID(),
-      expiresAt: new Date(Date.now() + DEFAULT_INTENT_TTL_MINUTES * 60_000),
+      expiresAt,
     });
   }
 
