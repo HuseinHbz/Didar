@@ -53,3 +53,31 @@ development until this decision is made and both P0s have an owning
 phase.** This document is that decision. CP-015 is now clear to start as
 its own phase, in its own branch, on its own prompt — not before, and not
 as part of this governance phase.
+
+## Update — CP-030 (2026-10-24): the decision above was executed; the next one
+
+The decision recorded above (CP-015 first, CP-016 right after) was carried out
+and both gates are closed (`roadmap.json`: CP-015, CP-016 `VALIDATED`; CP-018 and
+CP-021 also merged). The CP-030 review found six new P0 gaps
+([`gap-priority-matrix.md`](gap-priority-matrix.md) P0-3 – P0-8), so the same
+question — which one first — applies again.
+
+**Decision: CP-031 — Payment/Order/Inventory Consistency is the next execution
+phase; CP-032 — Pricing & Tax Integrity follows it.**
+
+| Factor                      | CP-031 (P0-3 – P0-6)                                                                                                          | CP-032 (P0-7, P0-8, P1-10)                                                                                  |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **Risk of leaving open**    | Can capture money without creating an order, sell stock that is not allocated, and diverge the refund ledger from the gateway | Silent mispricing and under-collected tax — serious, but each instance is recoverable from the order record |
+| **Blast radius if delayed** | Grows with every real payment; the first live payment that straddles the 20-minute checkout hold triggers it                  | Grows with traffic, but a wrong price is visible on the order; a lost order is not                          |
+| **External decision**       | None                                                                                                                          | The statutory VAT rate is a configuration value (Q3), not a blocker for the fail-closed code change         |
+| **File overlap**            | `cart-checkout/application/checkout.service.ts`, payment intent / refund, order conversion                                    | `checkout.service.ts` (validate / readyForPayment), cart pricing, catalog pricing                           |
+
+CP-031 first because losing an order is strictly worse than mispricing one, and
+because the two phases edit the same file — merging in this order avoids conflicts.
+CP-037 (Persian-aware search) is also ready but carries no financial risk and can
+run in parallel.
+
+**Not decided here:** the BLOCKED phases (CP-033, CP-035, CP-036, CP-038, CP-039).
+Each needs an owner or domain decision listed in
+[`remediation-roadmap.md`](remediation-roadmap.md) §7 before its Definition of Ready
+([`phase-governance.md`](phase-governance.md)) can be met.
