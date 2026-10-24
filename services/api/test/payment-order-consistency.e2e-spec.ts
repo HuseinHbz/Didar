@@ -608,6 +608,17 @@ describe('Payment / order / inventory consistency (CP-031, e2e)', () => {
         .set('Authorization', `Bearer ${clerkToken}`)
         .expect(403);
     });
+
+    it('rejects malformed list filters with a 400 instead of reaching the database', async () => {
+      await adminGet('/admin/order-exceptions?orderId=not-a-uuid').expect(400);
+      await adminGet('/admin/order-exceptions?cursor=not-a-uuid').expect(400);
+      await adminGet('/admin/order-exceptions?status=BOGUS').expect(400);
+      await adminGet('/admin/order-exceptions?limit=0').expect(400);
+      await adminGet('/admin/order-exceptions?limit=101').expect(400);
+      await adminGet('/admin/order-exceptions?limit=abc').expect(400);
+      // ...and a well-formed request still works.
+      await adminGet(`/admin/order-exceptions?orderId=${randomUUID()}&limit=5`).expect(200);
+    });
   });
 
   // -------------------------------------------------------------------

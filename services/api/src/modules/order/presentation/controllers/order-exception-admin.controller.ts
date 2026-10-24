@@ -1,19 +1,11 @@
-import { ORDER_EXCEPTION_STATUSES, type OrderExceptionStatus, type UserId } from '@iecp/types';
-import {
-  BadRequestException,
-  Controller,
-  Get,
-  Param,
-  ParseUUIDPipe,
-  Post,
-  Query,
-} from '@nestjs/common';
+import type { UserId } from '@iecp/types';
+import { Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 
 import { CurrentUserId } from '../../../identity/presentation/decorators/current-user.decorator';
 import { RequirePermission } from '../../../identity/presentation/decorators/require-permission.decorator';
 import { OrderExceptionService } from '../../application/order-exception.service';
-import { OrderExceptionResponseDto } from '../dto/order-exception.dto';
+import { ListOrderExceptionsQueryDto, OrderExceptionResponseDto } from '../dto/order-exception.dto';
 
 /**
  * CP-031 — the operator work queue for paid orders that cannot proceed on
@@ -31,26 +23,12 @@ export class OrderExceptionAdminController {
   @Get()
   @RequirePermission('order.exception.read')
   @ApiOkResponse({ type: [OrderExceptionResponseDto] })
-  async list(
-    @Query('orderId') orderId?: string,
-    @Query('status') status?: string,
-    @Query('limit') limitRaw?: string,
-    @Query('cursor') cursor?: string,
-  ) {
-    if (
-      status !== undefined &&
-      !ORDER_EXCEPTION_STATUSES.includes(status as OrderExceptionStatus)
-    ) {
-      throw new BadRequestException(
-        `status must be one of: ${ORDER_EXCEPTION_STATUSES.join(', ')}`,
-      );
-    }
-    const limit = limitRaw ? Math.min(Math.max(Number(limitRaw) || 20, 1), 100) : 20;
+  async list(@Query() query: ListOrderExceptionsQueryDto) {
     const { items, nextCursor } = await this.exceptions.list({
-      orderId,
-      status: status as OrderExceptionStatus | undefined,
-      limit,
-      cursor,
+      orderId: query.orderId,
+      status: query.status,
+      limit: query.limit ?? 20,
+      cursor: query.cursor,
     });
     return { items: items.map((item) => OrderExceptionResponseDto.fromDomain(item)), nextCursor };
   }
