@@ -17,6 +17,25 @@ interface LoginResponseBody {
   tokens?: { accessToken: string; refreshToken: string };
 }
 
+interface AvailabilityBody {
+  byWarehouse: { warehouseId: string; availableQuantity: number }[];
+}
+
+/**
+ * A warehouse's availability for one SKU. `byWarehouse` is one row per
+ * *location* (the name predates multi-location stock), so the figure is the
+ * **sum** of the warehouse's rows. Reading just the first matching row was
+ * gap P2-16: a reservation takes stock from the location with the most
+ * available units, which is not necessarily the first row, so the test
+ * compared two different locations whenever another suite had added one for
+ * the same SKU (CI-flaky depending on parallel scheduling).
+ */
+function availableIn(availability: AvailabilityBody, warehouseId: string): number {
+  return availability.byWarehouse
+    .filter((row) => row.warehouseId === warehouseId)
+    .reduce((sum, row) => sum + row.availableQuantity, 0);
+}
+
 // Same justified single-use-generic pattern as identity/catalog e2e specs.
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
 function body<T>(res: request.Response): T {
@@ -204,11 +223,7 @@ describe('Inventory (e2e)', () => {
         .get(`/internal/inventory/availability/${aviatorSkuId}`)
         .set('Authorization', `Bearer ${managerToken}`)
         .expect(200);
-      const before = body<{ byWarehouse: { warehouseId: string; availableQuantity: number }[] }>(
-        beforeRes,
-      );
-      const beforeAvailable =
-        before.byWarehouse.find((w) => w.warehouseId === mainWarehouseId)?.availableQuantity ?? 0;
+      const beforeAvailable = availableIn(body<AvailabilityBody>(beforeRes), mainWarehouseId);
 
       const sourceId = randomUUID();
       const reserveRes = await request(server)
@@ -230,11 +245,7 @@ describe('Inventory (e2e)', () => {
         .get(`/internal/inventory/availability/${aviatorSkuId}`)
         .set('Authorization', `Bearer ${managerToken}`)
         .expect(200);
-      const after = body<{ byWarehouse: { warehouseId: string; availableQuantity: number }[] }>(
-        afterRes,
-      );
-      const afterAvailable =
-        after.byWarehouse.find((w) => w.warehouseId === mainWarehouseId)?.availableQuantity ?? -1;
+      const afterAvailable = availableIn(body<AvailabilityBody>(afterRes), mainWarehouseId);
       expect(afterAvailable).toBe(beforeAvailable - 2);
 
       const ledgerRes = await request(server)
@@ -289,11 +300,7 @@ describe('Inventory (e2e)', () => {
         .get(`/internal/inventory/availability/${aviatorSkuId}`)
         .set('Authorization', `Bearer ${managerToken}`)
         .expect(200);
-      const avail = body<{ byWarehouse: { warehouseId: string; availableQuantity: number }[] }>(
-        availRes,
-      );
-      const available =
-        avail.byWarehouse.find((w) => w.warehouseId === mainWarehouseId)?.availableQuantity ?? 0;
+      const available = availableIn(body<AvailabilityBody>(availRes), mainWarehouseId);
 
       await request(server)
         .post('/internal/inventory/reservations')
