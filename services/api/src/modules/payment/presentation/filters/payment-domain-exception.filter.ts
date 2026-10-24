@@ -5,7 +5,10 @@ import { UnknownPaymentProviderError } from '../../domain/ports/payment-provider
 import { InvalidPaymentAttemptTransitionError } from '../../domain/services/payment-attempt-state-machine';
 import { InvalidPaymentIntentTransitionError } from '../../domain/services/payment-intent-state-machine';
 import { InvalidPaymentTransactionTransitionError } from '../../domain/services/payment-transaction-state-machine';
-import { InvalidRefundTransitionError } from '../../domain/services/refund-state-machine';
+import {
+  InvalidRefundTransitionError,
+  RefundAlreadyProcessingError,
+} from '../../domain/services/refund-state-machine';
 import {
   NonPositiveRefundAmountError,
   RefundExceedsTransactionAmountError,
@@ -27,6 +30,7 @@ import {
   InvalidPaymentAttemptTransitionError,
   InvalidPaymentTransactionTransitionError,
   InvalidRefundTransitionError,
+  RefundAlreadyProcessingError,
   RefundExceedsTransactionAmountError,
   NonPositiveRefundAmountError,
   UnknownPaymentProviderError,
@@ -47,7 +51,8 @@ export class PaymentDomainExceptionFilter implements ExceptionFilter {
       exception instanceof InvalidPaymentIntentTransitionError ||
       exception instanceof InvalidPaymentAttemptTransitionError ||
       exception instanceof InvalidPaymentTransactionTransitionError ||
-      exception instanceof InvalidRefundTransitionError
+      exception instanceof InvalidRefundTransitionError ||
+      exception instanceof RefundAlreadyProcessingError
     ) {
       return HttpStatus.CONFLICT;
     }

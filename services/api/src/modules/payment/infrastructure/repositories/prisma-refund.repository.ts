@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
 import { Prisma, prisma } from '@iecp/database';
-import type { RefundStatus } from '@iecp/types';
 import { Injectable } from '@nestjs/common';
 
 import type { Refund } from '../../domain/entities/refund.entity';
 import type {
+  RefundOutcome,
   RefundRepositoryPort,
+  RefundSearchFilter,
   RefundWithLines,
 } from '../../domain/ports/refund.repository.port';
 import { refundLineToDomain, refundToDomain } from '../payment.mapper';
@@ -36,6 +37,19 @@ export class PrismaRefundRepository implements RefundRepositoryPort {
 
   async listByReturnRequestId(returnRequestId: string): Promise<Refund[]> {
     const rows = await prisma.refund.findMany({ where: { returnRequestId } });
+    return rows.map(refundToDomain);
+  }
+
+  async search(filter: RefundSearchFilter, limit: number): Promise<Refund[]> {
+    const rows = await prisma.refund.findMany({
+      where: {
+        paymentTransactionId: filter.paymentTransactionId,
+        returnRequestId: filter.returnRequestId,
+        status: filter.status,
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      take: limit,
+    });
     return rows.map(refundToDomain);
   }
 
@@ -110,15 +124,32 @@ export class PrismaRefundRepository implements RefundRepositoryPort {
     }
   }
 
-  async updateStatus(
-    id: string,
-    status: RefundStatus,
-    extra?: { providerRefundReference?: string | null },
-  ): Promise<Refund> {
-    const row = await prisma.refund.update({
-      where: { id },
-      data: { status, providerRefundReference: extra?.providerRefundReference },
+  /**
+   * `UPDATE ... WHERE id = $1 AND status = 'PENDING'`: under READ COMMITTED a
+   * second concurrent UPDATE blocks on the row lock, then re-evaluates the WHERE
+   * against the committed row, finds it already `PROCESSING` and matches nothing —
+   * so exactly one caller sees `count === 1` (proven by the 20-way concurrent
+   * `process` test in `payment-order-consistency.e2e-spec.ts`).
+   */
+  async claimForProcessing(id: string): Promise<boolean> {
+    const { count } = await prisma.refund.updateMany({
+      where: { id, status: 'PENDING' },
+      data: { status: 'PROCESSING' },
     });
+    return count === 1;
+  }
+
+  async settleProcessing(id: string, outcome: RefundOutcome): Promise<Refund | null> {
+    const { count } = await prisma.refund.updateMany({
+      where: { id, status: 'PROCESSING' },
+      data: {
+        status: outcome.status,
+        providerRefundReference: outcome.providerRefundReference ?? null,
+        failureReason: outcome.failureReason ?? null,
+      },
+    });
+    if (count !== 1) return null;
+    const row = await prisma.refund.findUniqueOrThrow({ where: { id } });
     return refundToDomain(row);
   }
 }

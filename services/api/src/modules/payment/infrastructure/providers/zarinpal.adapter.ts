@@ -8,7 +8,10 @@ import type {
 } from '@iecp/types';
 import { Injectable, Logger } from '@nestjs/common';
 
-import type { PaymentProviderAdapter } from '../../domain/ports/payment-provider-adapter.port';
+import type {
+  PaymentProviderAdapter,
+  PaymentProviderCapabilities,
+} from '../../domain/ports/payment-provider-adapter.port';
 
 export interface ZarinpalAdapterConfig {
   merchantId: string;
@@ -96,6 +99,20 @@ interface ZarinpalReverseData {
 @Injectable()
 export class ZarinpalAdapter implements PaymentProviderAdapter {
   readonly providerCode = 'zarinpal';
+
+  /**
+   * `reverse.json` takes `merchant_id` and `authority` only — there is no
+   * amount field, so this adapter can reverse a transaction as a whole and
+   * nothing else (CP-031, gap P0-6). The application layer therefore never sends
+   * it a partial refund (`RefundCapabilityPolicy`); that request is rejected
+   * with a reason and settled manually instead of being sent as a whole-
+   * transaction reversal the ledger would not match.
+   *
+   * Flip `partialRefund` to `true` only after a partial-refund call is
+   * implemented here *and* verified against ZarinPal's sandbox (gap P1-6 —
+   * live behaviour is unverified from the development sandbox).
+   */
+  readonly capabilities: PaymentProviderCapabilities = { partialRefund: false };
   private readonly logger = new Logger(ZarinpalAdapter.name);
   private readonly apiBase: string;
   private readonly startPayBase: string;

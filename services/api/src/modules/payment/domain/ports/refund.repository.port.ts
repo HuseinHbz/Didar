@@ -10,6 +10,21 @@ export interface RefundWithLines {
   lines: RefundLine[];
 }
 
+/** How a refund the caller holds in `PROCESSING` ended (CP-031). `failureReason`
+ * is written only for `REJECTED`/`FAILED`. */
+export interface RefundOutcome {
+  status: Extract<RefundStatus, 'COMPLETED' | 'FAILED' | 'REJECTED'>;
+  providerRefundReference?: string | null;
+  failureReason?: string | null;
+}
+
+/** Admin listing filter; every field optional and combinable. */
+export interface RefundSearchFilter {
+  paymentTransactionId?: string;
+  returnRequestId?: string;
+  status?: RefundStatus;
+}
+
 export interface RefundRepositoryPort {
   findById(id: string): Promise<Refund | null>;
   /** Same aggregate as `findById()`, plus its `RefundLine` breakdown —
@@ -24,6 +39,12 @@ export interface RefundRepositoryPort {
    * stays a list (not `findOne`) since a first rejected attempt and a
    * later retried one can both exist as real rows. */
   listByReturnRequestId(returnRequestId: string): Promise<Refund[]>;
+
+  /** Admin listing (`GET /admin/payments/refunds`): one database query, every
+   * filter applied in SQL, newest first with an `id` tie-break so the order is
+   * deterministic, bounded by `limit`. The caller guarantees at least one
+   * filter is set — this never becomes an unfiltered scan. */
+  search(filter: RefundSearchFilter, limit: number): Promise<Refund[]>;
 
   /** Every `PENDING` refund created before `olderThan` — stuck, not
    * "about to be processed." What the `refund_status_sync` sweep drives
@@ -54,9 +75,29 @@ export interface RefundRepositoryPort {
     lines?: readonly { returnItemId: string; amount: bigint }[];
   }): Promise<Refund>;
 
-  updateStatus(
-    id: string,
-    status: RefundStatus,
-    extra?: { providerRefundReference?: string | null },
-  ): Promise<Refund>;
+  /**
+   * Atomically moves a refund `PENDING -> PROCESSING` — one conditional UPDATE,
+   * so of any number of concurrent callers (an admin double-click, the
+   * `refund_status_sync` sweep overlapping an admin request) exactly one gets
+   * `true` and is the only one allowed to send the refund to the provider.
+   * Everyone else gets `false` and must not send anything (CP-031).
+   *
+   * There is deliberately no way to claim a refund already in `PROCESSING`: if a
+   * send was lost mid-flight (a crash after the gateway accepted but before the
+   * outcome was written) the gateway may already have returned the money, and a
+   * blind re-send could be answered with an error that would then be recorded as
+   * "not refunded". A refund stuck in `PROCESSING` keeps its balance consumed and
+   * is for finance to check — the safe failure.
+   */
+  claimForProcessing(id: string): Promise<boolean>;
+
+  /**
+   * Records how a refund this caller holds in `PROCESSING` ended. Conditional on
+   * `status = 'PROCESSING'`, so a terminal state is never overwritten — the old
+   * unconditional write let a late loser flip a `COMPLETED` refund to `REJECTED`
+   * (freeing its balance although the money had already left). Returns `null`
+   * when the row was no longer `PROCESSING`; the caller treats that as a loud
+   * inconsistency, never as success.
+   */
+  settleProcessing(id: string, outcome: RefundOutcome): Promise<Refund | null>;
 }

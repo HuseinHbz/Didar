@@ -105,6 +105,7 @@ export function refundToDomain(row: PrismaRefund): Refund {
     status: row.status,
     requestedBy: row.requestedBy,
     providerRefundReference: row.providerRefundReference,
+    failureReason: row.failureReason,
     idempotencyKey: row.idempotencyKey,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
