@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0.0",
   "generatedBy": "CP-030 (Remediation Roadmap), on top of CP-015 (Integration Reconciliation) and CP-014 (Roadmap Audit & Governance)",
-  "generatedAt": "2026-10-24T00:00:00Z",
+  "generatedAt": "2026-11-03T00:00:00Z",
   "sourceOfTruthNote": "This file is the one machine-readable source of truth for phase/requirement tracking. Human-readable companions: canonical-roadmap.md, project-progress.md, requirements-matrix.md, gap-priority-matrix.md. pnpm roadmap:audit reads this file and re-derives status from repository evidence \u2014 it does not trust the values below without checking them.",
   "statusEnum": [
     "NOT_STARTED",
@@ -432,7 +432,7 @@
       "completionPercent": 70,
       "dependencies": ["CP-030", "CP-007", "CP-008", "CP-009"],
       "gitBranch": "31-feature-payment-order-consistency",
-      "latestCommit": "81d5d47",
+      "latestCommit": "dd0a42c",
       "blockingIssues": [],
       "priority": "P0"
     },
