@@ -107,12 +107,12 @@ test-determinism defect (P2-16), not a product failure.
 Read from the GitHub REST API on 2026-10-24 (job conclusions and annotations only — job logs are
 not retrievable from the sandbox this work ran in). 25 workflow runs exist in total.
 
-| Job        | Record                                                                                                                                                                                                                                                        |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lint`     | **Failed on all 24 runs since 2026-08-12**, `main` and `develop` included. Visible annotations: type-aware `no-unsafe-*` errors in `packages/database/prisma/seed.ts` (Prisma client not generated when that package is linted — hypothesis, not reproduced). |
-| `test`     | Flaky: of the 12 `develop` pushes where it ran to completion, 7 failed and 5 passed. Passed on PR #5. Cause unconfirmed (the shared seed-admin OTP contention in `CLAUDE.md` Phase 012 is a candidate).                                                       |
-| `security` | Passed through most of August; **fails today**: `pnpm audit --audit-level high` → 8 critical / 32 high advisories in 15 packages on the unchanged lockfile (reproduced locally).                                                                              |
-| `build`    | Passing except two runs on 2026-08-20.                                                                                                                                                                                                                        |
+| Job        | Record                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lint`     | **Failed on all 24 runs since 2026-08-12**, `main` and `develop` included. Visible annotations: type-aware `no-unsafe-*` errors in `packages/database/prisma/seed.ts` (Prisma client not generated when that package is linted — hypothesis, not reproduced).                                                                                                                                                                                                                    |
+| `test`     | Flaky: of the 12 `develop` pushes where it ran to completion, 7 failed and 5 passed. Passed on PR #5. Cause unconfirmed (the shared seed-admin OTP contention in `CLAUDE.md` Phase 012 is a candidate).                                                                                                                                                                                                                                                                          |
+| `security` | Passed through most of August; **fails today**: `pnpm audit --audit-level high` → 8 critical / 32 high advisories in 15 packages on the unchanged lockfile (reproduced locally). **Side effect:** the next step of the same job, `Secret scan (gitleaks)`, is **skipped** whenever the audit step fails — observed on the PR runs of 2026-10-24 and 2026-11-03 — so CI is currently running **no secret scan at all** (it ran and passed on every August `develop` run checked). |
+| `build`    | Passing except two runs on 2026-08-20.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 Consequence: Definition of Done item 3 ("integrated into `develop` with a real CI run") has not
 actually been met by any phase since August; `VALIDATED` has meant "validated in the sandbox". This
@@ -356,11 +356,13 @@ client generation. (2) `test`: read the failing test names from the logs of the 
 runs, classify them (OTP contention on the shared seed-admin phone, ordering assumptions like P2-16,
 timing) and fix at the fixture level — not with retries. (3) `security`: triage the 8 critical / 32 high
 advisories; upgrade where a fixed version exists, otherwise an `overrides` entry with a dated
-justification (the existing `pnpm-workspace.yaml` convention); never lower `--audit-level` silently.
+justification (the existing `pnpm-workspace.yaml` convention); never lower `--audit-level` silently. Also make `Secret scan (gitleaks)` independent of the audit result
+(its own job, or `if: always()`) so that a red audit can never again silently disable it.
 (4) Once green, the owner turns on branch protection requiring `quality-gate` (a GitHub setting).
 **Out of scope.** Feature work; behavioural changes beyond what a lint / type fix needs.
-**Acceptance.** Three consecutive green `quality-gate` runs; every one of the four jobs green; no
-`eslint-disable` and no audit-level downgrade added to get there.
+**Acceptance.** Three consecutive green `quality-gate` runs; every one of the four jobs green; the secret
+scan is **executed** (not skipped) on every run, including one where the audit step is deliberately made to
+fail; no `eslint-disable` and no audit-level downgrade added to get there.
 **Risk.** Dependency upgrades (`next`, `multer`, `body-parser`, …) can change behaviour — each is its own
 tested change. The fix for (1) and (2) can only be proven by real CI, not by the local harness.
 

@@ -1149,7 +1149,7 @@
     {
       "id": "P0-9",
       "priority": "P0",
-      "description": "The real CI quality gate has not been green on develop since August: lint fails on every recorded run since 2026-08-12 (type-aware ESLint errors in packages/database/prisma/seed.ts), the e2e job alternates between pass and fail on develop pushes, and the security job fails today on the unchanged lockfile (pnpm audit --audit-level high: 8 critical and 32 high advisories across 15 packages). Definition of Done item 3 (a green real CI run) has therefore never been met for any phase",
+      "description": "The real CI quality gate has not been green on develop since August: lint fails on every recorded run since 2026-08-12 (type-aware ESLint errors in packages/database/prisma/seed.ts), the e2e job alternates between pass and fail on develop pushes, and the security job fails today on the unchanged lockfile (pnpm audit --audit-level high: 8 critical and 32 high advisories across 15 packages) — and because the gitleaks secret-scan step comes after it in the same job it is skipped whenever the audit fails, so no secret scan is running in CI. Definition of Done item 3 (a green real CI run) has therefore never been met for any phase",
       "ownerPhase": "CP-041"
     }
   ],
