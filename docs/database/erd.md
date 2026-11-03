@@ -530,7 +530,12 @@ table and a new `refund_lines` child table (the per-`ReturnItem`
 breakdown of one refund). Every existing `refunds` column and row is
 untouched; there remains exactly one refund pathway
 (`RefundService.requestRefund()`/`processRefund()`), extended, never
-duplicated. The diagram below is intentionally minimal — only
+duplicated. CP-031 (see [`order-erd.md`](./order-erd.md) and
+[`payment-erd.md`](./payment-erd.md)) added one more table here —
+`order_exceptions`, the blocking work item for a `PAID` order whose stock
+could not be allocated, `order_id`-FK'd to `orders` — plus a nullable
+`refunds.failure_reason` and a `payment_intents(status, updated_at)` index;
+purely additive again. The diagram below is intentionally minimal — only
 `carts`/`cart_items`, the one part of this schema simple enough to still
 show inline — see
 `cart-checkout-erd.md`/`payment-erd.md`/`order-erd.md`/`promotion-erd.md`/

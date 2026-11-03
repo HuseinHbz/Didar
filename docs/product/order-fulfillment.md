@@ -147,3 +147,35 @@ below).
 - **Loyalty/wallet settlement** on order completion.
 - **A frontend** — `apps/admin`/`apps/storefront`/`apps/pwa`/`apps/mobile`
   remain untouched, same precedent every backend phase has set.
+
+## What CP-031 changed for the business (stock behind every paid order)
+
+Rationale: [`docs/adr/ADR-031-payment-order-consistency.md`](../adr/ADR-031-payment-order-consistency.md).
+Order managers should read this section before go-live.
+
+- **A captured payment always yields exactly one order, whether or not the customer comes back to
+  the site.** A background sweep now creates the order from any verified payment that has none.
+- **A paid order always has stock taken out of the warehouse, or a visible exception.** On creation
+  each line's stock is sold from the checkout's reservation or, if that was released, taken afresh.
+  If the stock is genuinely gone the order is still created and `PAID` (the customer has paid) and a
+  **blocking exception** appears in `GET /admin/order-exceptions`. While it is open the order cannot
+  be approved (`409`).
+- **Two ways to clear an exception, no third:** receive stock and call
+  `POST /admin/order-exceptions/:id/retry-allocation` (`409` while still short), or cancel the
+  order (which requests the refund). There is no "approve anyway". Permissions:
+  `order.exception.read` to watch the queue, `order.exception.resolve` to act — granted to `admin`
+  and `order_manager`, **not** to `fulfillment_clerk`.
+- **Someone has to watch that queue.** A queue nobody reads is the same failure as a swallowed log
+  line; there is no notification yet when an exception opens (not scoped to any phase — raise it
+  with the owner if a Telegram/SMS alert is wanted).
+- **Cancelling an order** refunds only what was paid and not yet refunded. If the refund request
+  itself fails the order is still cancelled, the failure is logged and audited, and finance must
+  settle it with `POST /admin/orders/:id/refund` — it is not retried automatically (P1-18, CP-040).
+- Partial refunds of an order are `REJECTED` and settled by hand while ZarinPal is the only gateway —
+  see `docs/product/payment.md`.
+
+**Still not built (owned by CP-040):** a coupon's usage slot released when a checkout expired is not
+re-acquired when the order is created from a late payment (P1-17); a SKU whose stock is spread over
+several locations of one warehouse can be reported short even though the total suffices (P2-17,
+which shows up as a false `STOCK_SHORTFALL` — the safe direction). Inventory restock on
+cancellation remains deferred (ADR-011 decision 8).

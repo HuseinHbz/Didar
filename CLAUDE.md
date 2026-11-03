@@ -468,6 +468,22 @@ and `docs/architecture/returns.md`'s own Phase 013 section for the full
 account. **Backend-only, same precedent**:
 `apps/admin`/`apps/storefront` are still untouched.
 
+Phases 014 onward are governed by `docs/product/roadmap.json` (the source
+of truth, validated by `pnpm roadmap:audit`) and summarised in
+`PROJECT_STATUS.md` — this file is **not** updated per phase after Phase
+013, so read those two for the current status and the actual next phase;
+the "Next up" paragraph below is the Phase 013-era ordering. The most
+recent implemented phase is CP-031 (payment/order/inventory consistency,
+`docs/adr/ADR-031-payment-order-consistency.md`): the checkout is held for
+the whole payment window; an order is always created from a verified
+payment, whether or not the customer returns; a paid order never exists
+without allocated stock or a blocking `OrderException` (no override — the
+exits are real stock or cancel); a partial refund is never sent to a
+gateway that cannot express it (adapters declare capabilities; with
+ZarinPal only, partial refunds are settled by hand — see
+`docs/operations/refund-manual-settlement-runbook.md`); and a refund is
+sent at most once. **Backend-only, same precedent**.
+
 **Next up** is the rest of Phase 1 (see end of blueprint doc "وضعیت
 فعلی"): the remaining real domain modules beyond
 `identity`/`catalog`/`inventory`/`cart-checkout`/`payment`/`order`/

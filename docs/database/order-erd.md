@@ -271,3 +271,45 @@ migration's own header records the exact pre-migration row counts
 (`commerce.orders`: 108, `commerce.fulfillments`: 28, `commerce.shipments`: 10
 at authoring time in the live dev database — real seed + e2e-generated
 data, not an empty table).
+
+## CP-031 — `order_exceptions`
+
+Migration `packages/database/prisma/migrations/20261024000000_payment_order_consistency/`
+(purely additive; rationale in
+[`docs/adr/ADR-031-payment-order-consistency.md`](../adr/ADR-031-payment-order-consistency.md)).
+One new table, in the `commerce` schema, `order_id`-FK'd to `orders` with `ON DELETE CASCADE`:
+the durable, blocking work item raised when a `PAID` order cannot get its stock allocated. While
+an exception is `OPEN`, `OrderService.approve()` refuses with `409`.
+
+```mermaid
+erDiagram
+    orders ||--o{ order_exceptions : "blocks approve while OPEN"
+
+    order_exceptions {
+        uuid id PK
+        uuid order_id FK "ON DELETE CASCADE"
+        enum type "STOCK_SHORTFALL"
+        enum status "OPEN|RESOLVED, default OPEN"
+        uuid product_sku_id "nullable, -> catalog.product_skus.id, unenforced"
+        int requested_quantity "nullable"
+        string dedupe_key UK "STOCK_SHORTFALL:<orderId>:<sku>"
+        jsonb detail "nullable — why the allocation was short"
+        timestamp opened_at "default now"
+        timestamp resolved_at "nullable"
+        enum resolution "nullable — ALLOCATED|ORDER_CANCELLED"
+        uuid resolved_by "nullable, -> identity.users.id, unenforced"
+    }
+```
+
+Indexes: `UNIQUE (dedupe_key)` — racing conversions, sweeps and retries of one shortfall collapse onto
+a single row (`P2002`-catch-and-reread, proven under 12 concurrent conversions);
+`(order_id)`; `(status, opened_at)` — the operator queue, oldest first.
+
+- **There is deliberately no "waived"/"forced" resolution.** `ALLOCATED` (real stock) and
+  `ORDER_CANCELLED` are the only values; the schema cannot express an override.
+- `product_sku_id` and `resolved_by` are cross-schema pointers and, like every other one in this
+  database, are not database-enforced FKs (see "Cross-schema references" above).
+- `dedupe_key` is an internal idempotency detail and is not exposed by the API.
+
+Not in this table by design: nothing records a `REJECTED` refund's manual settlement — that is gap
+P1-16 and needs the Q9 owner decision first (CP-040).

@@ -184,3 +184,32 @@ and ADR-008's own "Deferred" section:
 - Chargeback/dispute handling beyond what reconciliation surfaces.
 - A refund-triggered inventory restock or `Order`-status transition.
 - KMS-backed secret rotation for provider credentials — env vars only.
+
+## CP-031 — the checkout is held while paying; a refund is sent at most once
+
+Full rationale: [`docs/adr/ADR-031-payment-order-consistency.md`](../../../../../docs/adr/ADR-031-payment-order-consistency.md);
+operator procedure: [`docs/operations/refund-manual-settlement-runbook.md`](../../../../../docs/operations/refund-manual-settlement-runbook.md).
+
+- **`PaymentIntentService.createIntent`** calls `CheckoutService.holdForPayment()` before it creates
+  or re-uses an intent: the checkout is held until the intent's payment window closes plus 5 minutes
+  (`409` if the checkout is already terminal — no intent is created for a checkout that is gone).
+- **`PaymentProviderAdapter.capabilities`** (`PaymentProviderCapabilities { partialRefund }`, required)
+  — ZarinPal declares `partialRefund: false` (`reverse.json` takes no amount). **`RefundCapabilityPolicy`**
+  (pure domain service) decides before anything is sent: the whole transaction is sendable, a smaller
+  amount needs the capability, a larger one never is. A refused refund ends `REJECTED` with
+  `failureReason` (new column) and is **never sent**.
+- **`RefundRepositoryPort.claimForProcessing` / `settleProcessing`** replace the read-then-write in
+  `processRefund`: one conditional `UPDATE … WHERE status = 'PENDING'` lets exactly one caller send;
+  the outcome is written only `WHERE status = 'PROCESSING'`; `updateStatus` is removed from the port.
+  Everyone else gets `RefundAlreadyProcessingError` (`409`). A refund already `PROCESSING` is never
+  re-sent. Transaction, provider and adapter are resolved before the claim, so a configuration fault
+  leaves the refund `PENDING` and retryable.
+- **`GET /admin/payments/refunds`** gained `status` and `limit` filters (validated at the boundary; at
+  least one filter is still required). `?status=REJECTED` is finance's queue.
+- **Tests**: `RefundCapabilityPolicy` and `RefundService` unit specs, and the P0-6 group of
+  `test/payment-order-consistency.e2e-spec.ts` (20 concurrent `process` calls → one gateway send).
+
+**Operational consequence:** with ZarinPal as the only gateway every partial refund is `REJECTED` and
+settled by hand; recording that settlement is not built (P1-16, owner decision Q9). Whether `reverse.json`
+is valid for an already-verified transaction is unverified from the sandbox (P1-6). Owned by CP-040:
+P1-16, P1-19 (no safe recovery for a `PROCESSING` refund), P1-20.

@@ -81,3 +81,44 @@ run in parallel.
 Each needs an owner or domain decision listed in
 [`remediation-roadmap.md`](remediation-roadmap.md) §7 before its Definition of Ready
 ([`phase-governance.md`](phase-governance.md)) can be met.
+
+## Update — CP-031 (2026-11-03): implemented; the next decision is CP-041, then CP-032
+
+CP-031 is implemented on `31-feature-payment-order-consistency` (draft PR, stacked on
+the CP-030 PR) and closes P0-3, P0-4, P0-5, P0-6 and P2-16 — each reproduced first on
+the `develop` source (15 failing / 5 passing controls) and then proven closed on real
+PostgreSQL ([`phase-031-audit.md`](phase-031-audit.md),
+[`ADR-031`](../adr/ADR-031-payment-order-consistency.md)). The same question —
+which one first — applies again, and the answer changes because of something CP-031
+itself had to establish.
+
+**Decision: CP-041 — CI Gate Restoration (P0-9) is the next execution phase; CP-032
+— Pricing & Tax Integrity follows it.**
+
+| Factor                  | CP-041 (P0-9)                                                                                                                                          | CP-032 (P0-7, P0-8, P1-10)                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| **What is wrong today** | `lint` red on every run since 2026-08-12, `e2e` intermittently failing, `security` (`pnpm audit --audit-level high`) red on the advisories in P0-9     | Silent mispricing and under-collected tax on a placed order                                               |
+| **Why it ranks first**  | Definition of Done item 3 ("CI green") cannot be met by _any_ phase until it is repaired; CP-031 itself is IMPLEMENTED, not VALIDATED, for this reason | Serious, but each instance is visible on the order and recoverable                                        |
+| **External decision**   | Only the merge policy while the gate is red and the advisory-upgrade policy (Q10) — neither blocks the lint and flaky-test work                        | The statutory VAT rate is configuration finance must confirm (Q3), not a blocker for the fail-closed code |
+| **Effort**              | Small, mostly mechanical (lint rules in `seed.ts`, one flaky e2e, dependency bumps)                                                                    | Medium — pricing pipeline plus a tax model                                                                |
+| **File overlap**        | Tooling, lockfile, `seed.ts`; no product code                                                                                                          | `checkout.service.ts`, cart pricing, catalog pricing — also edited by CP-031                              |
+
+CP-041 first because a gate that is red for reasons unrelated to the change cannot
+distinguish a regression from the baseline, so every later phase would be merged on
+trust rather than on evidence — the failure mode the governance process exists to
+prevent. It touches no product code, so it does not conflict with CP-031 or CP-032.
+CP-032 second, branched from CP-031 (or after CP-031 merges), because both edit
+`checkout.service.ts`. CP-037 (Persian-aware search) is still ready and independent.
+
+**Not decided here:** the BLOCKED phases (CP-033, CP-035, CP-036, CP-038, CP-039) and
+CP-040 (payment recovery and refund settlement — it is blocked on Q9, who settles a
+rejected partial refund by hand and what record proves it, and it owns the residual
+gaps P1-16 – P1-20 and P2-17 that CP-031 documented but deliberately did not widen
+its scope to cover).
+
+**What changes for operations the moment CP-031 is deployed:** with ZarinPal as the
+only gateway every partial refund is `REJECTED` (it cannot express a partial reversal)
+and is settled manually — see
+[`../operations/refund-manual-settlement-runbook.md`](../operations/refund-manual-settlement-runbook.md);
+and `POST /admin/payments/refunds/:id/process` on a refund that is already
+`PROCESSING` now returns 409 instead of sending it to the gateway a second time.

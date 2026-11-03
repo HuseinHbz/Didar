@@ -426,14 +426,14 @@
     {
       "id": "CP-031",
       "name": "Payment/Order/Inventory Consistency",
-      "gitPhase": null,
+      "gitPhase": "31",
       "blueprintPhase": null,
-      "status": "NOT_STARTED",
-      "completionPercent": 0,
+      "status": "IMPLEMENTED",
+      "completionPercent": 70,
       "dependencies": ["CP-030", "CP-007", "CP-008", "CP-009"],
-      "gitBranch": null,
-      "latestCommit": null,
-      "blockingIssues": ["P0-3", "P0-4", "P0-5", "P0-6"],
+      "gitBranch": "31-feature-payment-order-consistency",
+      "latestCommit": "81d5d47",
+      "blockingIssues": [],
       "priority": "P0"
     },
     {
@@ -539,6 +539,32 @@
       "latestCommit": null,
       "blockingIssues": ["P1-15"],
       "priority": "P1"
+    },
+    {
+      "id": "CP-040",
+      "name": "Payment Recovery & Refund Settlement",
+      "gitPhase": null,
+      "blueprintPhase": null,
+      "status": "BLOCKED",
+      "completionPercent": 0,
+      "dependencies": ["CP-031"],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P1-16", "P1-17", "P1-18", "P1-19", "P1-20", "P2-17"],
+      "priority": "P1"
+    },
+    {
+      "id": "CP-041",
+      "name": "CI Gate Restoration",
+      "gitPhase": null,
+      "blueprintPhase": null,
+      "status": "NOT_STARTED",
+      "completionPercent": 0,
+      "dependencies": [],
+      "gitBranch": null,
+      "latestCommit": null,
+      "blockingIssues": ["P0-9"],
+      "priority": "P0"
     }
   ],
   "requirements": [
@@ -729,21 +755,21 @@
       "phase": "CP-031",
       "domain": "payment-order",
       "userType": "customer",
-      "status": "PLANNED"
+      "status": "PARTIAL"
     },
     {
       "id": "REQ-FIN-02",
       "phase": "CP-031",
       "domain": "inventory",
       "userType": "system",
-      "status": "PLANNED"
+      "status": "PARTIAL"
     },
     {
       "id": "REQ-FIN-03",
       "phase": "CP-031",
       "domain": "payment",
       "userType": "system",
-      "status": "PLANNED"
+      "status": "PARTIAL"
     },
     {
       "id": "REQ-PRICE-01",
@@ -811,6 +837,27 @@
     {
       "id": "REQ-REL-01",
       "phase": "CP-039",
+      "domain": "platform",
+      "userType": "system",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-FIN-04",
+      "phase": "CP-040",
+      "domain": "payment",
+      "userType": "admin",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-FIN-05",
+      "phase": "CP-040",
+      "domain": "payment-order",
+      "userType": "customer",
+      "status": "PLANNED"
+    },
+    {
+      "id": "REQ-CI-01",
+      "phase": "CP-041",
       "domain": "platform",
       "userType": "system",
       "status": "PLANNED"
@@ -959,25 +1006,33 @@
       "id": "P0-3",
       "priority": "P0",
       "description": "Checkout stock hold (20 min) is shorter than the payment window (30 min) and the expiry sweep ignores live payment intents",
-      "ownerPhase": "CP-031"
+      "ownerPhase": "CP-031",
+      "status": "RESOLVED",
+      "resolvedBy": "CP-031 - CheckoutService.holdForPayment extends the checkout (and its reservations) over the whole payment window plus a grace period; expiry is a conditional UPDATE that cannot beat a hold; proven by test/payment-order-consistency.e2e-spec.ts. Implemented on 31-feature-payment-order-consistency (draft PR); not on develop until merged"
     },
     {
       "id": "P0-4",
       "priority": "P0",
       "description": "A payment verified after its checkout stopped being eligible for CONVERTED produces no order unless the customer returns (order_conversion sweep cannot see it)",
-      "ownerPhase": "CP-031"
+      "ownerPhase": "CP-031",
+      "status": "RESOLVED",
+      "resolvedBy": "CP-031 - order_conversion sweep gains a third pass over SUCCEEDED payment intents with no order (listPaidCheckoutIdsWithoutOrder), so an order no longer depends on the customer returning; markConverted on an ineligible checkout is now a WARN, not silent. Implemented on 31-feature-payment-order-consistency (draft PR); not on develop until merged"
     },
     {
       "id": "P0-5",
       "priority": "P0",
       "description": "An order can become PAID with no stock allocated; reservation-convert failures are swallowed and non-ACTIVE reservations are skipped silently",
-      "ownerPhase": "CP-031"
+      "ownerPhase": "CP-031",
+      "status": "RESOLVED",
+      "resolvedBy": "CP-031 - conversion sells the checkout reservation or re-acquires the stock (StockSaleService/OrderAllocationService, exactly-once); a genuine shortfall opens a blocking OrderException and approve() answers 409 until it is resolved by retry-allocation or cancel; reservation release/convert/expire serialised on the reservation row. Implemented on 31-feature-payment-order-consistency (draft PR); not on develop until merged"
     },
     {
       "id": "P0-6",
       "priority": "P0",
       "description": "Partial refunds are sent to the ZarinPal reverse API without an amount; local ledger and gateway can diverge",
-      "ownerPhase": "CP-031"
+      "ownerPhase": "CP-031",
+      "status": "RESOLVED",
+      "resolvedBy": "CP-031 - adapters declare capabilities (ZarinPal partialRefund=false); RefundCapabilityPolicy makes a refund the gateway cannot express REJECTED with a failureReason and never sends it; each refund reaches the gateway at most once (claimForProcessing/settleProcessing). Partial refunds on ZarinPal now need manual settlement (runbook; recording it is P1-16). Implemented on 31-feature-payment-order-consistency (draft PR); not on develop until merged"
     },
     {
       "id": "P0-7",
@@ -1051,15 +1106,59 @@
       "id": "P2-16",
       "priority": "P2",
       "description": "inventory e2e test assumes one availability row per warehouse but availability is returned per (warehouse, location) from an unordered query",
-      "ownerPhase": "CP-031"
+      "ownerPhase": "CP-031",
+      "status": "RESOLVED",
+      "resolvedBy": "CP-031 - the test now sums the warehouse's per-location availability rows instead of reading an arbitrary first row; the API was correct. Implemented on 31-feature-payment-order-consistency (draft PR); not on develop until merged"
+    },
+    {
+      "id": "P1-16",
+      "priority": "P1",
+      "description": "A REJECTED refund that finance settles by hand is not recorded: Order.refundedTotal/paymentStatus and a return's status were set when the refund was requested, and the refund balance check cannot see the manual payout (owner decision Q9)",
+      "ownerPhase": "CP-040"
+    },
+    {
+      "id": "P1-17",
+      "priority": "P1",
+      "description": "Coupon redemption is not re-acquired when an order is created from a payment that outlived its checkout: the order keeps its discount but the coupon's usage slot was released at checkout expiry",
+      "ownerPhase": "CP-040"
+    },
+    {
+      "id": "P1-18",
+      "priority": "P1",
+      "description": "A refund requested by OrderService.cancel() that fails is now logged and audited but never retried; a repeat cancel is a no-op, so nothing re-requests it",
+      "ownerPhase": "CP-040"
+    },
+    {
+      "id": "P1-19",
+      "priority": "P1",
+      "description": "A refund stuck in PROCESSING (send lost mid-flight) has no in-system recovery or manual-review state; it must be checked at the gateway and settled by hand",
+      "ownerPhase": "CP-040"
+    },
+    {
+      "id": "P1-20",
+      "priority": "P1",
+      "description": "A payment completed after the payment intent itself expired (30 min) is never verified: verifyPayment returns early for a terminal intent and the verification-retry sweep only looks at non-terminal ones",
+      "ownerPhase": "CP-040"
+    },
+    {
+      "id": "P2-17",
+      "priority": "P2",
+      "description": "reserve() takes stock from a single location, so a SKU whose warehouse total is sufficient but spread across locations is reported short (a false STOCK_SHORTFALL on the re-acquire path; safe direction)",
+      "ownerPhase": "CP-040"
+    },
+    {
+      "id": "P0-9",
+      "priority": "P0",
+      "description": "The real CI quality gate has not been green on develop since August: lint fails on every recorded run since 2026-08-12 (type-aware ESLint errors in packages/database/prisma/seed.ts), the e2e job alternates between pass and fail on develop pushes, and the security job fails today on the unchanged lockfile (pnpm audit --audit-level high: 8 critical and 32 high advisories across 15 packages). Definition of Done item 3 (a green real CI run) has therefore never been met for any phase",
+      "ownerPhase": "CP-041"
     }
   ],
-  "nextPhase": "CP-031 (Payment/Order/Inventory Consistency) is the recommended next execution phase: it owns four P0 gaps (P0-3..P0-6), all of its dependencies are met, and it needs no external decision. CP-032 (Pricing & Tax Integrity, P0-7/P0-8/P1-10) follows; merge CP-031 first because both edit checkout.service.ts. CP-037 (Persian-aware Search) is also ready and independent. CP-033, CP-035, CP-036, CP-038 and CP-039 are BLOCKED on owner or domain decisions (docs/product/remediation-roadmap.md section 7). CP-034 waits on CP-019 and CP-033. The earlier guidance that CP-021 is the next phase is obsolete: CP-021 is VALIDATED. CP-017/019/028/029 are complete on unmerged branches (see their unmergedBranch fields); integrating them is CP-039. See phase-dependency-graph.md for the full graph.",
+  "nextPhase": "CP-041 (CI Gate Restoration, P0-9) is the recommended next execution phase: the real CI quality gate has not been green on develop since August (lint, an intermittently failing e2e job and, today, the dependency-audit job), so no phase can meet Definition of Done item 3 until it is repaired; it is small, needs no product decision, and every other phase benefits. CP-032 (Pricing & Tax Integrity, P0-7/P0-8/P1-10) follows: it owns the two remaining open P0 product gaps, its dependencies are met, and it needs no external decision (the statutory VAT rate is a configuration value finance must confirm - docs/product/remediation-roadmap.md section 7 Q3). CP-031 (Payment/Order/Inventory Consistency; closed P0-3..P0-6 and P2-16) is IMPLEMENTED on 31-feature-payment-order-consistency and awaits review of its draft PR; CP-032 should branch from it or wait for it to merge, because both edit checkout.service.ts. CP-037 (Persian-aware Search) is also ready and independent. CP-033, CP-035, CP-036, CP-038, CP-039 and CP-040 are BLOCKED on owner or domain decisions (remediation-roadmap.md section 7, Q1-Q10). CP-034 waits on CP-019 and CP-033. CP-017/019/028/029 are complete on unmerged branches (see their unmergedBranch fields); integrating them is CP-039. See phase-dependency-graph.md for the full graph.",
   "aggregate": {
     "completedPhases": 19,
     "partialPhases": 0,
-    "inProgressPhases": 1,
-    "plannedPhases": 20,
-    "totalPhases": 40
+    "inProgressPhases": 2,
+    "plannedPhases": 21,
+    "totalPhases": 42
   }
 }

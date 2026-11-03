@@ -1,4 +1,4 @@
-# Order, invoice, and fulfillment architecture (Phase 009, hardened Phase 011)
+# Order, invoice, and fulfillment architecture (Phase 009, hardened Phase 011, consistency CP-031)
 
 Full design rationale: [`docs/adr/ADR-009-order-fulfillment.md`](../adr/ADR-009-order-fulfillment.md)
 (the original module) and
@@ -294,3 +294,68 @@ side, not by touching this method's own signature or `Order`'s schema:
 one caller per return ever invokes `recordReturnRefund()` at all. No
 other behavior in this module changed — `OrderService` itself, its own
 state machine, and every other existing call path are untouched.
+
+## CP-031 — a payment, an order and the stock behind it cannot silently disagree
+
+Full rationale: [`docs/adr/ADR-031-payment-order-consistency.md`](../adr/ADR-031-payment-order-consistency.md);
+evidence and reproduction numbers: [`docs/product/phase-031-audit.md`](../product/phase-031-audit.md).
+Backend-only, additive (migration `20261024000000_payment_order_consistency`), same precedent as
+every prior phase.
+
+```
+payment verified (SUCCEEDED intent)
+        │
+        ├── customer returns  ──▶ GET /orders/by-checkout/:id ─┐
+        ├── order_conversion sweep, pass 3 (NEW) ──────────────┤  one idempotent method
+        │     SUCCEEDED intents with no order                  │
+        └── admin POST /admin/orders/:checkoutSessionId/convert ──────────────┘
+                                   │
+                    OrderConversionService.convertFromCheckout()
+                                   │   Order PENDING_PAYMENT
+                    for every line: OrderAllocationService.allocateLine()
+                                   │      1. sell the checkout's own reservation (normal path)
+                                   │      2. else re-acquire under key order__<orderId>__<sku>, sell it
+                                   │      → SOLD | SHORT      (StockSaleService, inventory module)
+                       ┌───────────┴───────────┐
+                    all SOLD                any SHORT
+                       │                       │  OrderException(STOCK_SHORTFALL), UNIQUE dedupe_key
+                       │                       │  (order is still created and PAID — money is real)
+                       └───────────┬───────────┘
+                              Order PAID + invoice
+                                   │
+                  approve ── 409 while any exception is OPEN ── the only edge out of PAID
+                                   │
+              exit only via POST /admin/order-exceptions/:id/retry-allocation (stock) or cancel
+```
+
+- **An order is created from the payment, not from the checkout's status.** Before CP-031 a
+  payment verified after its checkout lapsed produced no order (`markConverted` ignored the
+  illegal `EXPIRED → CONVERTED` move, and no sweep could find a `SUCCEEDED` intent whose
+  checkout was not `CONVERTED`). The third sweep pass reads `payment_intents(status, updated_at)`
+  — a new index — and converts through the same idempotent method the customer's return uses.
+- **Stock is taken out exactly once, or the failure is recorded.** `StockSaleService` is a thin
+  classifier over the real, row-locked, ledger-writing `ReservationService` that returns a
+  _value_ (`SOLD` — also when an earlier or racing call already sold it — `NOT_HELD`, `SHORT`).
+  No stock rule is re-implemented here. An unexpected failure (database down…) is deliberately
+  not caught: the order stays `PENDING_PAYMENT` and the sweep resumes it.
+- **`OrderException` is a blocking work item, not a log line.** Status `OPEN → RESOLVED`,
+  resolution `ALLOCATED | ORDER_CANCELLED` — no "waived" value exists. Opening one is audited
+  once even under N racing conversions. Operator surface: `/admin/order-exceptions`
+  (`docs/api/order.md`).
+- **`cancel()`** refunds only the refundable remainder (`paidTotal − refundedTotal`), closes the
+  order's exceptions as `ORDER_CANCELLED`, and no longer swallows a failed refund request: it is
+  logged at `ERROR` and audited (`ORDER_CANCEL_REFUND_REQUEST_FAILED`). It is still not retried
+  automatically — gap P1-18 (CP-040).
+
+What changed outside `modules/order`: `cart-checkout` (hold-while-paying, see
+`docs/architecture/cart-checkout.md`), `inventory` (reservation-row locking and
+`StockSaleService`, see `docs/architecture/inventory.md`), `payment` (refund capability guard and
+single sender, see `docs/architecture/payment.md`).
+
+### Known gaps this phase documents rather than hides
+
+Owned by CP-040 (`roadmap.json`): P1-17 (a coupon redemption released by checkout expiry is not
+re-acquired when the order is created late), P1-18 (above), P1-20 (a payment that completes after
+the _intent_ itself expired is never verified). P2-17 (single-location `reserve()` can report a
+false `STOCK_SHORTFALL`) is the inventory-side one. Inventory restock-on-cancellation remains
+deferred (ADR-011 decision 8).

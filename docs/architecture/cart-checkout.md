@@ -1,4 +1,4 @@
-# Cart/checkout architecture (Phase 007)
+# Cart/checkout architecture (Phase 007, payment hold added in CP-031)
 
 Full design rationale: [`docs/adr/ADR-007-cart-checkout.md`](../adr/ADR-007-cart-checkout.md).
 Full layering/scope detail: [`services/api/src/modules/cart-checkout/README.md`](../../services/api/src/modules/cart-checkout/README.md).
@@ -124,3 +124,33 @@ silently falling back to the update branch. Both affected repository
 methods now catch that violation and re-read the winner's row, so
 "idempotent" holds for concurrent racers, not only sequential retries. See
 that e2e file's own doc comments for the full account.
+
+## CP-031 — the checkout is held for the whole payment window
+
+Full rationale: [`docs/adr/ADR-031-payment-order-consistency.md`](../adr/ADR-031-payment-order-consistency.md)
+(decision 2). A checkout lived 20 minutes and its payment intent 30, so a customer still on the
+gateway page at minute 21 lost both the checkout and the stock it reserved — and the successful
+payment that followed found nothing to convert (gap P0-3).
+
+- **`CheckoutService.holdForPayment(checkoutId, paymentWindowEndsAt)`** — called by the payment
+  module _before_ it creates or re-uses an intent. The deadline becomes the intent's window end
+  plus `CHECKOUT_PAYMENT_GRACE_MINUTES` (5). It throws `409` for a checkout that is already
+  terminal, so no intent is ever created for a checkout that is gone.
+- **Atomicity without a new lock.** `extendExpiry` and `claimExpiry` are each a single conditional
+  `UPDATE` on the same `checkout_sessions` row: `extendExpiry` only moves a deadline _later_
+  (monotonic — `POST /checkout/:id/refresh` can no longer pull a payment hold back to "now + 20
+  min"), `claimExpiry` only expires a session whose deadline is still before the sweep's
+  `dueBefore`. Of a racing hold and expiry exactly one wins, decided by the database.
+- **`expire(checkoutId, { dueBefore })`** (the `checkout_expiration` sweep's call) re-checks the
+  deadline against `dueBefore` before releasing reservations and again atomically at the final
+  `UPDATE`. It keeps its crash-safe order — release reservations, then claim. If a hold lands in the
+  milliseconds after the reservations were released, the checkout correctly stays alive, the
+  event is logged at `WARN` (`checkout_expiry_lost_race`), and the stock is re-acquired — or
+  surfaced as an `OrderException` — when the order is created (`docs/architecture/order.md`).
+  Without `dueBefore` the call is an explicit, unconditional expiry (tests, operator tooling).
+- **`markConverted`** on a checkout that is not `READY_FOR_PAYMENT` is now a `WARN` carrying the
+  checkout id and status instead of a silent return; the order no longer depends on that flip.
+
+Not changed: the coupon redemption released by an expiry is still **not** re-acquired when an order
+is created from a late payment (P1-17, owned by CP-040) — P0-3 makes that situation rare, not
+impossible.

@@ -1,10 +1,12 @@
-# Payment security (Phase 008)
+# Payment security (Phase 008, refund sending hardened in CP-031)
 
 This document is `docs/security/README.md`'s "In place today" table,
 expanded for the one module Phase 008 added. Read
 [`README.md`](./README.md) first for what applies service-wide (rate
 limiting, secrets, dependency scanning, ...); this document only covers
-what's specific to the payment domain.
+what's specific to the payment domain. CP-031 rationale (refund capability
+guard, single-sender refunds):
+[`docs/adr/ADR-031-payment-order-consistency.md`](../adr/ADR-031-payment-order-consistency.md).
 
 Unlike `docs/security/cart-checkout-security.md`, this module has **two**
 distinct access-control models on two disjoint route groups — see
@@ -167,6 +169,42 @@ written — a rejection here never reaches the repository, which is why
 provider-side decline is what `REJECTED` means, a distinct failure mode
 this validator never produces).
 
+## A refund is never sent to a gateway that cannot express it, and is sent at most once (CP-031)
+
+Two defects let the ledger and the gateway disagree about money; both are closed and proven
+on real PostgreSQL (`test/payment-order-consistency.e2e-spec.ts`, each reproduced against
+unmodified `develop` first):
+
+- **Capability guard.** A _partial_ refund used to be sent to ZarinPal's `reverse.json`, which
+  takes no amount — the ledger recorded a partial refund while the gateway reversed the whole
+  transaction (or refused it). Adapters now **declare** `PaymentProviderCapabilities`
+  (`partialRefund`; ZarinPal declares `false`, the field is required so a new gateway cannot
+  forget to answer), and `RefundCapabilityPolicy` decides before anything is sent: the whole
+  transaction is sendable, a smaller amount needs the capability, a larger one never is. A
+  refused refund ends `REJECTED` with a `failureReason` and **never reaches the gateway**. The
+  capability comes from the adapter, never from the caller.
+- **Single sender.** `process` was read-check-then-write, so two concurrent callers (an admin
+  double-click, or the `refund_status_sync` sweep overlapping an admin request) could both
+  reach the gateway, and the loser's answer — typically "already reversed" — could overwrite a
+  `COMPLETED` refund with `REJECTED`, freeing its balance after the money had left.
+  `claimForProcessing` (one conditional `UPDATE … WHERE status = 'PENDING'`) lets exactly one
+  caller proceed and `settleProcessing` writes the outcome only `WHERE status = 'PROCESSING'`,
+  so a terminal state is never overwritten. 20 concurrent `process` calls → one gateway send.
+  The unconditional `updateStatus` was **removed from the repository port**: no unguarded
+  status write remains.
+- **A `PROCESSING` refund is never re-sent.** If a send was lost mid-flight the gateway may
+  already have returned the money; a blind re-send could be answered with an error that would
+  then be recorded as "not refunded". It keeps its balance consumed (the safe failure) and is
+  listed under `GET /admin/payments/refunds?status=PROCESSING` for finance to check at the
+  gateway. This removes an unsafe manual re-drive; safe recovery is gap P1-19 (CP-040).
+
+Residual risk, stated plainly: with ZarinPal as the only gateway **every partial refund is now
+`REJECTED` and settled by hand** (`docs/operations/refund-manual-settlement-runbook.md`), and
+that manual payout is **not recorded or four-eyes-approved in the system** (gap P1-16, owner
+decision Q9). Refund `process` and its `REJECTED` outcome are still **not written to
+`system.AuditLog`** — the Phase 008 gap below is unchanged; a rejection is a `WARN` log plus
+the persisted `failureReason`, visible in refund history.
+
 ## Reconciliation never silently corrects local state
 
 `ReconciliationService`'s only mutator on an existing finding
@@ -200,6 +238,11 @@ established.
   section for the exact failure mode and fix.
 - **No amount this module ever settles or refunds can be client-forged**
   — traced above for both intent creation and refund requests.
+- **A refund is never sent twice and a terminal state is never overwritten** (CP-031) — 20
+  concurrent `process` calls on one refund yield one `201`, nineteen `409`s and exactly one
+  gateway send (counted by the fake adapter); a partial refund on a gateway without the
+  capability is `REJECTED` and the fake gateway records zero sends; a `PROCESSING` refund
+  answers `409` and is not re-sent.
 
 ## Deliberately not built this phase
 

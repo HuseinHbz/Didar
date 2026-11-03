@@ -256,3 +256,41 @@ transitioned: boolean }` so callers can skip audit-logging on a race
   comment), and a new `ADR-011 hardening` section in
   `test/order.e2e-spec.ts` (functional + RBAC + idempotency + IDOR
   coverage for everything above).
+
+## CP-031 — stock behind every paid order, or a blocking exception
+
+Full rationale: [`docs/adr/ADR-031-payment-order-consistency.md`](../../../../../docs/adr/ADR-031-payment-order-consistency.md);
+evidence: [`docs/product/phase-031-audit.md`](../../../../../docs/product/phase-031-audit.md);
+architecture view: [`docs/architecture/order.md`](../../../../../docs/architecture/order.md).
+Additive — the layering and every aggregate above are unchanged.
+
+- **`OrderAllocationService`** (application, new) — `allocateLine()` sells the checkout's own
+  reservation if it still holds the units, otherwise re-acquires stock under the deterministic key
+  `order__<orderId>__<sku>` and sells that. It returns `SOLD | SHORT` and never throws for a
+  shortfall; unexpected failures propagate so the order stays `PENDING_PAYMENT` and the sweep
+  resumes it. The stock rules live in `InventoryModule`'s `StockSaleService`, not here.
+- **`OrderConversionService.convertFromCheckout()`** now allocates every line before the order
+  becomes `PAID`; a `SHORT` line opens an exception. The previous loop converted only still-`ACTIVE`
+  reservations and logged-and-ignored every other outcome.
+- **`order_conversion` sweep, pass 3** — every payment intent `SUCCEEDED` in the lookback window
+  with no order is converted through the same idempotent method, so the customer need not return to
+  the site (`listPaidCheckoutIdsWithoutOrder`, index `payment_intents(status, updated_at)`).
+- **`OrderException`** (entity), **`OrderExceptionPolicy`** (pure domain service + the two errors
+  `OrderHasOpenExceptionError`/`StockStillShortError`, both `409` in `OrderDomainExceptionFilter`),
+  **`OrderExceptionRepositoryPort`** and **`OrderExceptionService`** (`openStockShortfall`,
+  `markAllocated`, `retryAllocation`, `resolveForCancelledOrder`). `UNIQUE dedupe_key` makes racing
+  callers collapse onto one row and one `ORDER_EXCEPTION_OPENED` audit entry.
+- **`OrderService.approve()`** answers `409` while any exception is `OPEN` — the only edge out of
+  `PAID`. There is no override; the exits are `retry-allocation` or `cancel`.
+- **`OrderService.cancel()`** requests only `paidTotal − refundedTotal`, closes the order's
+  exceptions as `ORDER_CANCELLED`, and logs + audits (`ORDER_CANCEL_REFUND_REQUEST_FAILED`) a failed
+  refund request instead of swallowing it (not retried — gap P1-18).
+- **`OrderExceptionAdminController`** (`/admin/order-exceptions`), permissions
+  `order.exception.read` / `order.exception.resolve` (admin + `order_manager`; **not**
+  `fulfillment_clerk`). List filters are validated by `ListOrderExceptionsQueryDto`.
+- **Tests**: unit specs for `OrderExceptionPolicy` and `OrderAllocationService`, and
+  `test/payment-order-consistency.e2e-spec.ts` (21 tests, real PostgreSQL, written before any fix and
+  run against unmodified `develop` first: 15 failed / 5 passed controls).
+
+Open, owned by CP-040: P1-17 (coupon redemption not re-acquired on a late conversion), P1-18
+(cancel's failed refund request not retried), P1-20 (payment after intent expiry never verified).

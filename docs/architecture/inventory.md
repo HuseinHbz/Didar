@@ -1,4 +1,4 @@
-# Inventory architecture (Phase 006)
+# Inventory architecture (Phase 006, reservation lifecycle hardened in CP-031)
 
 Full design rationale: [`docs/adr/ADR-006-inventory-architecture.md`](../adr/ADR-006-inventory-architecture.md).
 Full layering/scope detail: [`services/api/src/modules/inventory/README.md`](../../services/api/src/modules/inventory/README.md).
@@ -105,3 +105,33 @@ directly against this Prisma version), proven with a real, non-simulated
 concurrency test: 100 simultaneous reservation requests against 10 available
 units yield exactly 10 successes and 0 oversells (`test/inventory.e2e-spec.ts`'s
 "Concurrency safety (mandatory)" suite, and ADR-006 decision 4).
+
+## CP-031 — the reservation lifecycle is serialised on the reservation row
+
+Full rationale: [`docs/adr/ADR-031-payment-order-consistency.md`](../adr/ADR-031-payment-order-consistency.md)
+(decisions 4 and 7). The suite written to reproduce the order-side defects found a defect here that
+reading the code had not: `release` and `convert` both read a reservation, decided it was `ACTIVE`,
+and wrote — without locking the _reservation_ row (only the inventory item was locked). Twenty
+concurrent `convert` calls on one reservation succeeded **9 and 10 times in two runs** (expected 1),
+leaving phantom negative `reserved`/`on_hand` buckets that
+`available = on_hand − reserved − …` happily netted to a healthy-looking positive number; in a
+`release` × `convert` race 10 of 20 won in both runs.
+
+- **Lock order is fixed: reservation row, then inventory item** (`SELECT … FOR UPDATE` on each, in
+  that order — no deadlock between the two). `release`, `convert` and `expire` read the status only
+  _after_ holding the reservation lock; the loser of a race sees a non-`ACTIVE` reservation and gets
+  `ReservationNotActiveError` (`409` via the inventory exception filter).
+- **Non-negativity is checked per stored bucket**, not only on the derived `available`
+  (`AvailableQuantityCalculator.assertNonNegative`): two wrong buckets can cancel out in the sum.
+- **`reserve()` is idempotent under concurrent callers with one key** — it hands back the winner's
+  reservation instead of a spurious error, which the order module's re-acquire path
+  (`order__<orderId>__<sku>`) relies on.
+- **`StockSaleService`** (new, exported with `ReservationService`) classifies the outcome of
+  selling a reservation as a _value_ — `SOLD` (also when an earlier or racing call already sold it:
+  selling is exactly-once), `NOT_HELD`, `SHORT` — over the real, row-locked, ledger-writing
+  `ReservationService`. It implements no stock rule of its own; unexpected failures propagate.
+- **Not changed:** `getAvailability()` still returns one row per `(warehouse, location)` — the
+  one-row-per-warehouse assumption in an old test was the bug (P2-16), fixed in the test. `reserve()`
+  still takes a SKU's stock from the **single** location with the most available, so a SKU whose
+  warehouse total suffices but is spread across locations is reported short — safe direction, but a
+  false `STOCK_SHORTFALL` on the order module's re-acquire path (P2-17, owned by CP-040).
