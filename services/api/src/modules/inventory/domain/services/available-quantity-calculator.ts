@@ -40,12 +40,36 @@ export class AvailableQuantityCalculator {
 
   /** Throws `InsufficientStockError` if the computed available quantity for
    * this snapshot would be negative — the one place this invariant is
-   * actually enforced (ADR-006 decision 3). */
+   * actually enforced (ADR-006 decision 3).
+   *
+   * CP-031 — every *stored* bucket must be non-negative too, not just the
+   * derived `available`. `available` is a signed sum, so two wrong buckets
+   * can cancel out: a double-applied `convert` took `reservedQuantity` and
+   * `onHandQuantity` negative together and `available` still read as a
+   * healthy positive number — phantom stock nothing could see. A negative
+   * bucket is never a legitimate state (you cannot have −1 units reserved),
+   * so it is refused at the same choke point, before any write. */
   static assertNonNegative(snapshot: QuantitySnapshot): number {
+    for (const [bucket, value] of AvailableQuantityCalculator.buckets(snapshot)) {
+      if (value < 0) {
+        throw new InsufficientStockError(bucket, 0, value);
+      }
+    }
     const available = AvailableQuantityCalculator.compute(snapshot);
     if (available < 0) {
       throw new InsufficientStockError('available_quantity', 0, available);
     }
     return available;
+  }
+
+  private static buckets(snapshot: QuantitySnapshot): readonly (readonly [string, number])[] {
+    return [
+      ['on_hand_quantity', snapshot.onHandQuantity],
+      ['reserved_quantity', snapshot.reservedQuantity],
+      ['in_transit_quantity', snapshot.inTransitQuantity],
+      ['damaged_quantity', snapshot.damagedQuantity],
+      ['quarantined_quantity', snapshot.quarantinedQuantity],
+      ['blocked_quantity', snapshot.blockedQuantity],
+    ];
   }
 }

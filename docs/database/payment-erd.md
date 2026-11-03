@@ -194,3 +194,21 @@ drift at every step; `catalog.products`/`inventory.warehouses`/
 rollback restores the exact Phase 003 placeholder `payments`/`refunds`
 shape (0 rows either way — nothing to carry back), so the round trip is
 reproducible regardless of how many times it repeats.
+
+## CP-031 additions
+
+Migration `20261024000000_payment_order_consistency` (purely additive; rationale in
+[`docs/adr/ADR-031-payment-order-consistency.md`](../adr/ADR-031-payment-order-consistency.md)):
+
+- **`commerce.refunds.failure_reason`** — nullable `TEXT`, written only when a refund ends
+  `REJECTED` or `FAILED` (for example `The payment provider cannot refund a partial amount, so
+nothing was sent`). Every pre-existing row has `NULL`, which is correct: none carried a reason.
+  Exposed on `RefundResponseDto.failureReason`; finance's queue is
+  `GET /admin/payments/refunds?status=REJECTED`.
+- **Index `payment_intents(status, updated_at)`** — makes the order-conversion sweep's third pass
+  ("`SUCCEEDED` intents updated in the lookback window that have no order yet") a range scan instead
+  of a read of every `SUCCEEDED` intent ever written. Built without `CONCURRENTLY` (migrations run in
+  one transaction); on a very large table apply it in a quiet window.
+
+No new table, no enum change, no status added to `RefundStatus`: `REJECTED` and `FAILED` already
+existed and remain terminal; what changed is that the code now says _why_.

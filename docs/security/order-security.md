@@ -1,4 +1,4 @@
-# Order security (Phase 009, hardened Phase 011)
+# Order security (Phase 009, hardened Phase 011, exceptions added CP-031)
 
 This document is `docs/security/README.md`'s "In place today" table,
 expanded for the one module Phase 009 added. Read
@@ -6,6 +6,8 @@ expanded for the one module Phase 009 added. Read
 limiting, secrets, dependency scanning, ...); this document only covers
 what's specific to the order/invoice/fulfillment domain. Phase 011
 rationale: [`docs/adr/ADR-011-order-lifecycle-hardening.md`](../adr/ADR-011-order-lifecycle-hardening.md).
+CP-031 rationale (order exceptions, no override for an unallocated paid order):
+[`docs/adr/ADR-031-payment-order-consistency.md`](../adr/ADR-031-payment-order-consistency.md).
 
 Same two-model split `docs/security/payment-security.md` documents —
 see `docs/api/order.md`'s "Auth" section for the exact route grouping.
@@ -28,27 +30,29 @@ see `docs/api/order.md`'s "Auth" section for the exact route grouping.
 
 ## RBAC model
 
-15 `order.*` permissions (14 from Phase 009 plus one Phase 011
-addition), matching exactly what every controller checks
+17 `order.*` permissions (14 from Phase 009, one Phase 011 addition and
+two CP-031 additions), matching exactly what every controller checks
 (`docs/api/order.md` has the full route-to-permission mapping):
 
-| Permission               | Meaning                                                                                                            |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `order.read`             | Read any order (admin/support scope)                                                                               |
-| `order.create`           | Manually retry checkout->order conversion for a verified payment                                                   |
-| `order.update`           | Update a fulfillment record on an order                                                                            |
-| `order.cancel`           | Cancel an order                                                                                                    |
-| `order.approve`          | Approve an order for processing                                                                                    |
-| `order.fulfill`          | Create a fulfillment for an order                                                                                  |
-| `order.ship`             | Create a shipment for a fulfillment                                                                                |
-| `order.complete`         | Mark an order `COMPLETED`                                                                                          |
-| `order.refund`           | Request a partial refund against a paid order                                                                      |
-| `order.invoice.read`     | Read an order's invoice                                                                                            |
-| `order.invoice.create`   | Manually (re)issue an invoice for an order                                                                         |
-| `order.invoice.void`     | Void an issued invoice                                                                                             |
-| `order.shipment.read`    | Read an order's shipments (Phase 011: and look one up by tracking number)                                          |
-| `order.shipment.update`  | Update a shipment status/tracking event — never `DELIVERED` (Phase 011; see below)                                 |
-| `order.shipment.deliver` | Phase 011: confirm delivery of a shipment — the one permission that can move a shipment/fulfillment to `DELIVERED` |
+| Permission                | Meaning                                                                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `order.read`              | Read any order (admin/support scope)                                                                                            |
+| `order.create`            | Manually retry checkout->order conversion for a verified payment                                                                |
+| `order.update`            | Update a fulfillment record on an order                                                                                         |
+| `order.cancel`            | Cancel an order                                                                                                                 |
+| `order.approve`           | Approve an order for processing                                                                                                 |
+| `order.fulfill`           | Create a fulfillment for an order                                                                                               |
+| `order.ship`              | Create a shipment for a fulfillment                                                                                             |
+| `order.complete`          | Mark an order `COMPLETED`                                                                                                       |
+| `order.refund`            | Request a partial refund against a paid order                                                                                   |
+| `order.invoice.read`      | Read an order's invoice                                                                                                         |
+| `order.invoice.create`    | Manually (re)issue an invoice for an order                                                                                      |
+| `order.invoice.void`      | Void an issued invoice                                                                                                          |
+| `order.shipment.read`     | Read an order's shipments (Phase 011: and look one up by tracking number)                                                       |
+| `order.shipment.update`   | Update a shipment status/tracking event — never `DELIVERED` (Phase 011; see below)                                              |
+| `order.shipment.deliver`  | Phase 011: confirm delivery of a shipment — the one permission that can move a shipment/fulfillment to `DELIVERED`              |
+| `order.exception.read`    | CP-031: read the order-exception work queue (paid orders that cannot proceed on their own, e.g. no stock behind a payment)      |
+| `order.exception.resolve` | CP-031: retry the stock allocation of an order exception — the only action that can unblock a paid order short of cancelling it |
 
 Two roles, real least-privilege boundaries, not labels:
 
@@ -65,11 +69,15 @@ Two roles, real least-privilege boundaries, not labels:
   `order.shipment.update`), but confirming delivery — which can gate
   order completion — needs the more senior permission.
   `approve`/`cancel`/`refund`/`complete`/`invoice.void`/`shipment.deliver`
-  all stay out of reach.
+  all stay out of reach. CP-031: it has neither `order.exception.*`
+  permission either — the warehouse-floor role cannot reach the action
+  that releases its own blocked work.
 
 `admin` continues to receive every `order.*` permission alongside its
 existing `catalog.*`/`inventory.*`/`payment.*` grants — no separate
-carve-out.
+carve-out. `order.exception.read` and `order.exception.resolve` are split
+on purpose (a read-only auditor can be given `read` alone); `order_manager`
+receives both through its `order.*` rule.
 
 ## IDOR protection on the customer/guest-facing routes
 
@@ -198,6 +206,27 @@ route that already existed — they cannot be used to retrieve an order an
 information-disclosure surface, just a real query instead of client-side
 filtering over an unfiltered fetch.
 
+## A paid order with no stock behind it cannot be waved through (CP-031)
+
+If the stock for a paid order is gone, the order is still created and `PAID` — the customer
+has paid, and hiding that would hide money — but a durable `OrderException` is opened and
+`OrderService.approve()` (the only edge out of `PAID`) answers `409` while any exception is
+`OPEN`. Security-relevant properties:
+
+- **No override exists.** The resolution vocabulary is `ALLOCATED` | `ORDER_CANCELLED` — there
+  is deliberately no "waived" or "forced" value and no route that sets one. The only exits are
+  real stock (`POST /admin/order-exceptions/:id/retry-allocation`, `409` while still short) or
+  cancelling the order (which requests the refund). This is the repository's standing
+  "no force-complete path for any state machine" rule applied to a new state machine.
+- **Two permissions, not one** (see the RBAC table): reading the queue and acting on it are
+  separate boundaries, and neither is held by `fulfillment_clerk`.
+- **Every state change is audited** — `ORDER_EXCEPTION_OPENED` (once, even when N conversions
+  race: `UNIQUE dedupe_key`) and `ORDER_EXCEPTION_RESOLVED` with the actor.
+- **Inputs are validated at the boundary** — `orderId`/`cursor` are UUIDs, `status` is an enum,
+  `limit` is bounded; a malformed value is `400`. (A raw query string reaching PostgreSQL used
+  to surface as an HTTP `500`; the e2e suite reproduces and now guards that case.)
+- **Nothing internal leaks** — the response omits `dedupeKey`.
+
 ## Refunds requested from this module never exceed what's refundable
 
 `OrderService.cancel()`/`requestPartialRefund()` never move money
@@ -205,6 +234,14 @@ themselves — both call `RefundService.requestRefund()` (Phase 008), which
 runs `RefundValidator.assertRefundable()` before any row is written. This
 module adds no new money-movement code path; it only decides _when_ to
 ask Phase 008 to refund, never _how much is safe to refund_.
+
+CP-031: `cancel()` requests only the refundable remainder
+(`paidTotal − refundedTotal`), and a refund request that fails is no longer
+swallowed — the order is still cancelled (the operator's intent stands), but the
+failure is logged at `ERROR` and written to `system.AuditLog` as
+`ORDER_CANCEL_REFUND_REQUEST_FAILED`. It is not retried automatically (gap P1-18,
+CP-040); the money-side guarantees (no partial refund sent to a gateway that cannot
+express it, a refund sent at most once) live in `docs/security/payment-security.md`.
 
 ## Idempotency and replay
 
@@ -248,6 +285,12 @@ own mandatory concurrency suite, not only sequential retries.
   paths.
 - **Order completion cannot be forced by a cache-column lie** (Phase 011) — proven via `409` on both a `SHIPPED`-but-undelivered order and
   a zero-fulfillment order, `201` only once delivery is real.
+- **An unallocated paid order cannot be approved, and the exception queue is permissioned**
+  (CP-031) — `test/payment-order-consistency.e2e-spec.ts` on real PostgreSQL: `approve` is `409`
+  while an exception is `OPEN` and succeeds only after `retry-allocation` or cancel;
+  `fulfillment_clerk` gets `403` on the queue; 12 concurrent conversions of one shortfall
+  yield exactly one exception row; malformed filters are `400`, not `500`. Each defect was
+  reproduced against unmodified `develop` first (`docs/product/phase-031-audit.md`).
 
 ## Deliberately not built this phase
 
@@ -263,7 +306,9 @@ own mandatory concurrency suite, not only sequential retries.
   admin mutation (`ORDER_STATUS_CHANGED`, `ORDER_CANCELLED`,
   `ORDER_REFUND_REQUESTED`, `FULFILLMENT_CREATED`,
   `FULFILLMENT_STATUS_CHANGED`, `SHIPMENT_CREATED`,
-  `SHIPMENT_STATUS_CHANGED`, and, Phase 011, `SHIPMENT_DELIVERED`) —
+  `SHIPMENT_STATUS_CHANGED`, Phase 011's `SHIPMENT_DELIVERED`, and CP-031's
+  `ORDER_EXCEPTION_OPENED`/`ORDER_EXCEPTION_RESOLVED`/
+  `ORDER_CANCEL_REFUND_REQUEST_FAILED`) —
   reusing `AUDIT_LOG_REPOSITORY` the same way `catalog`/`inventory` do,
   closing the gap Phase 008 itself left open rather than repeating it.
   Phase 011's new `Fulfillment`/`Shipment` status-update methods only

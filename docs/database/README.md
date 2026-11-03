@@ -175,6 +175,20 @@ migrate diff` against a fresh shadow database confirming zero drift in
   Round-tripped UP -> DOWN -> UP with row counts identical on every
   unrelated table throughout, and `prisma migrate diff` against a fresh
   shadow database confirming zero drift.
+- `20261024000000_payment_order_consistency` (CP-031) — purely additive,
+  three sections: `commerce.order_exceptions` (the durable, blocking work
+  item raised when a `PAID` order cannot get its stock allocated — three
+  new enums `OrderExceptionType`/`OrderExceptionStatus`/
+  `OrderExceptionResolution`, `UNIQUE dedupe_key`, FK to `orders` `ON DELETE
+CASCADE`), `commerce.refunds.failure_reason` (nullable `TEXT`: why a refund
+  ended `REJECTED`/`FAILED`), and the `payment_intents(status, updated_at)`
+  index behind the order-conversion sweep's third pass. No drop, no data
+  transform, no existing row touched. Full detail:
+  [`order-erd.md`](./order-erd.md)'s and [`payment-erd.md`](./payment-erd.md)'s
+  CP-031 sections and
+  [`docs/adr/ADR-031-payment-order-consistency.md`](../adr/ADR-031-payment-order-consistency.md).
+  Round-tripped UP -> DOWN -> UP on a populated database; **`prisma migrate
+diff` was not run** (see the Migrations section below).
 
 This is **not** full coverage of blueprint §57's eventual table list. See
 ["Deliberately out of scope"](#deliberately-out-of-scope) below for exactly
@@ -432,6 +446,23 @@ real local PostgreSQL:
   is a safe no-op, verified via two consecutive seed runs), and `prisma
 migrate diff` against a fresh shadow database confirming zero drift.
   See [`return-erd.md`](./return-erd.md)'s own Phase 013 section.
+- CP-031: purely additive (`commerce.order_exceptions` + three enums,
+  `commerce.refunds.failure_reason`, index `payment_intents(status,
+updated_at)`) — no table drops. Round-tripped — up -> down -> up — on a
+  populated development database: after `down.sql` the table, column, index
+  and enums are gone, after the second `migration.sql` they are back, and
+  `commerce.orders` (94 rows), the core columns of `commerce.refunds` (21)
+  and `commerce.payment_intents` (112) have an **identical md5 before and
+  after**; running `down.sql` twice is harmless. `down.sql` discards any
+  `order_exceptions` rows and `failure_reason` values written since the
+  migration — the intended cost of removing a table/column that exists only
+  to hold them. **Not verified here:** `prisma migrate diff` (schema vs
+  migrations drift) — it needs Prisma's native engine, which this sandbox
+  cannot download. CI runs `prisma migrate deploy`, the seed and the e2e
+  suite against the migrated database, which would fail on a column or table
+  the generated client expects but the migration lacks; CI has **no**
+  explicit `migrate diff` step, so run it once wherever the engine is
+  available before relying on "zero drift".
 
 ## Seeding
 
@@ -469,7 +500,11 @@ timestamp populated) for each of those two return fixtures plus 3 new
 `return.settlement.*` permissions (commerce, Phase 013 — deliberately
 not seeding `PENDING_RESTOCK`/`MANUAL_REVIEW`/`FAILED_TERMINAL` example
 rows, since those are crash/stuck states with no honest one-shot-seed
-story; exercised by the e2e suite's own fixture setup instead).
+story; exercised by the e2e suite's own fixture setup instead), and CP-031's
+two `order.exception.read`/`order.exception.resolve` permissions (granted to
+`admin` and, through its `order.*` rule, `order_manager` — not to
+`fulfillment_clerk`; no `order_exceptions` row is seeded, for the same reason:
+a stock shortfall is a runtime state with no honest one-shot-seed story).
 Idempotent throughout (`upsert`, keyed on each
 model's real unique constraint, or a `findUnique`-then-create guard
 where no natural unique key exists) — safe to run against a

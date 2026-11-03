@@ -8,13 +8,14 @@ import {
   AUDIT_LOG_REPOSITORY,
   type AuditLogRepositoryPort,
 } from '../../identity/domain/ports/audit-log.repository.port';
-import { ReservationService } from '../../inventory/application/reservation.service';
 import { PaymentIntentService } from '../../payment/application/payment-intent.service';
 import { CouponRedemptionService } from '../../promotion/application/coupon-redemption.service';
 import type { Order } from '../domain/entities/order.entity';
 import { ORDER_REPOSITORY, type OrderRepositoryPort } from '../domain/ports/order.repository.port';
 
 import { InvoiceService } from './invoice.service';
+import { OrderAllocationService } from './order-allocation.service';
+import { OrderExceptionService } from './order-exception.service';
 
 /**
  * ADR-009 decision 4 — the single place an `Order` is ever created.
@@ -42,7 +43,8 @@ export class OrderConversionService {
     @Inject(AUDIT_LOG_REPOSITORY) private readonly auditLog: AuditLogRepositoryPort,
     private readonly checkout: CheckoutService,
     private readonly payments: PaymentIntentService,
-    private readonly reservations: ReservationService,
+    private readonly allocation: OrderAllocationService,
+    private readonly exceptions: OrderExceptionService,
     private readonly skus: SkusService,
     private readonly products: ProductsService,
     private readonly invoices: InvoiceService,
@@ -169,26 +171,39 @@ export class OrderConversionService {
       }
     }
 
-    // Reconcile inventory reservation -> allocation (ADR-009 decision 4
-    // step 4). Skipped defensively for any reservation already CONVERTED
-    // so a retried/duplicate conversion attempt never double-consumes
-    // stock (the order-creation race above always collapses to one
-    // Order, but this loop still runs again on that same call).
+    // Allocate stock for every line (CP-031, gap P0-5). The customer has paid,
+    // so the order is created either way — but a PAID order must never exist
+    // with no stock behind it and nobody knowing. Each line's units are taken
+    // out of the warehouse exactly once (the checkout's own reservation if it
+    // still holds them, otherwise re-acquired afresh); a line whose stock is
+    // genuinely gone opens a STOCK_SHORTFALL `OrderException`, which blocks
+    // `approve` until an operator allocates or cancels. The previous loop
+    // converted only still-ACTIVE reservations and logged-and-ignored every
+    // other outcome — including a failed convert — so a lapsed checkout
+    // produced a PAID, approvable order with zero SALE rows.
+    //
+    // Unexpected failures (database down…) are deliberately NOT caught: the
+    // call fails, the order stays PENDING_PAYMENT, and the order_conversion
+    // sweep resumes it — every step below is idempotent.
     for (const checkoutReservation of checkoutDetail.reservations) {
-      const reservation = await this.reservations
-        .get(checkoutReservation.inventoryReservationId)
-        .catch(() => null);
-      if (reservation?.status === 'ACTIVE') {
-        await this.reservations
-          .convert(checkoutReservation.inventoryReservationId, null, {
-            referenceType: 'ORDER',
-            referenceId: order.id,
-          })
-          .catch((error: unknown) => {
-            this.logger.warn(
-              `reservation_convert_failed orderId=${order.id} reservationId=${checkoutReservation.inventoryReservationId} error=${String(error)}`,
-            );
-          });
+      const outcome = await this.allocation.allocateLine({
+        orderId: order.id,
+        productSkuId: checkoutReservation.productSkuId,
+        quantity: checkoutReservation.quantity,
+        checkoutReservationId: checkoutReservation.inventoryReservationId,
+      });
+      if (outcome.kind === 'SHORT') {
+        await this.exceptions.openStockShortfall({
+          orderId: order.id,
+          productSkuId: checkoutReservation.productSkuId,
+          requestedQuantity: checkoutReservation.quantity,
+          reason: outcome.reason,
+          checkoutReservationId: checkoutReservation.inventoryReservationId,
+        });
+      } else if (existingOrder) {
+        // A resumed conversion: a shortfall recorded by the earlier attempt
+        // may have been fixed since (stock arrived). Close it.
+        await this.exceptions.markAllocated(order.id, checkoutReservation.productSkuId);
       }
     }
 

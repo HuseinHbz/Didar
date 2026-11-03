@@ -337,6 +337,18 @@ async function main(): Promise<void> {
       description:
         'Confirm delivery of a shipment (Phase 011 — a distinct, more-sensitive boundary from shipment.update, since delivery can gate order completion)',
     },
+    {
+      module: 'order',
+      action: 'exception.read',
+      description:
+        'Read the order-exception work queue (CP-031 — paid orders that cannot proceed on their own, e.g. no stock behind a payment)',
+    },
+    {
+      module: 'order',
+      action: 'exception.resolve',
+      description:
+        'Retry the stock allocation of an order exception (CP-031 — a distinct, more-sensitive boundary from exception.read; deliberately withheld from fulfillment_clerk)',
+    },
 
     // Phase 010 — promotion/discount/coupon engine (§19, see
     // docs/adr/ADR-010-promotion-engine.md). Deletion is never given to

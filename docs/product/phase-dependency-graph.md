@@ -44,22 +44,50 @@ CP-018 + CP-019 ─▶ CP-020 (storefront)
   └─▶ CP-022 (mobile real features) [also needs CP-018]
   └─▶ CP-026 (AI) [needs real usage data]
   └─▶ CP-027 (advanced analytics) [needs real usage data]
+
+CP-014 + CP-015 ─▶ CP-030 (remediation roadmap — docs only) ── **IMPLEMENTED**, defines the series below
+  ├─▶ CP-031 (payment/order/inventory consistency) [P0] ── **IMPLEMENTED** (draft PR, awaiting review)
+  │     merge before CP-032: both edit checkout.service.ts (merge order, not a hard dependency)
+  │     └─▶ CP-040 (payment recovery & refund settlement) [BLOCKED: Q9 — who settles a rejected partial refund]
+  ├─▶ CP-032 (pricing & tax integrity) [P0, ready]
+  │     ├─▶ CP-033 (optical catalog & lens pricing) [BLOCKED: optician decisions]
+  │     │     ├─▶ CP-034 (prescription at purchase) [also needs CP-019]
+  │     │     │     └─▶ CP-035 (lab operations & warranty) [BLOCKED: lab/warranty policy]
+  │     │     └─▶ CP-038 (virtual try-on) [also needs CP-020; BLOCKED: "VR 5D" undefined]
+  │     └─▶ CP-036 (tax invoice & currency presentation) [BLOCKED: finance/legal scoping]
+  └─▶ CP-037 (Persian-aware search) [ready]
+
+CP-039 (integration of finished phases & release sync) ── independent, BLOCKED on owner merge decisions
+
+CP-041 (CI gate restoration) ── independent of every product phase [P0, ready, recommended next]
+  no dependency edge, but it gates Definition of Done item 3 for all of them (see below)
 ```
 
 ## Dependency table by domain
 
-| Domain                                      | Depends on             | Because                                                                                                                                                                                                                              |
-| ------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Database** (CP-003)                       | CP-001                 | Needs the monorepo/toolchain to exist first                                                                                                                                                                                          |
-| **Identity/RBAC** (CP-004)                  | CP-003                 | Every table it needs lives in `identity` schema, created by CP-003                                                                                                                                                                   |
-| **Commerce** (CP-007/008/009/012/013)       | CP-004, CP-005, CP-006 | Every commerce route is RBAC-gated or ownership-checked (CP-004); references real SKUs (CP-005) and real stock (CP-006)                                                                                                              |
-| **Inventory** (CP-006)                      | CP-003, CP-004, CP-005 | Ledger schema (CP-003), admin RBAC (CP-004), SKU identity reused not duplicated (CP-005)                                                                                                                                             |
-| **Finance** (CP-008, CP-009's invoice half) | CP-007                 | Payment/invoice both require a real checkout session to attach to                                                                                                                                                                    |
-| **Notification** (CP-017)                   | CP-016                 | Real provider credentials need the secret-handling convention CP-016 doesn't change but the rate-limit/observability minimums should land first so a real SMS integration isn't the first thing exposed to an unbounded request rate |
-| **CMS** (CP-023)                            | CP-018                 | Zero value without an admin UI to author content                                                                                                                                                                                     |
-| **Analytics** (CP-027)                      | CP-020                 | Meaningless without real customer/order volume, which requires a reachable storefront                                                                                                                                                |
-| **Mobile** (CP-022)                         | CP-018, CP-020         | Deliberately sequenced after the same UX is proven once on web, per the roadmap's own "do not build the same product twice in parallel" reasoning                                                                                    |
-| **AI** (CP-026)                             | CP-020                 | Recommendation/stylist features need real usage data to be anything but speculative                                                                                                                                                  |
+| Domain                                            | Depends on                     | Because                                                                                                                                                                                                                              |
+| ------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Database** (CP-003)                             | CP-001                         | Needs the monorepo/toolchain to exist first                                                                                                                                                                                          |
+| **Identity/RBAC** (CP-004)                        | CP-003                         | Every table it needs lives in `identity` schema, created by CP-003                                                                                                                                                                   |
+| **Commerce** (CP-007/008/009/012/013)             | CP-004, CP-005, CP-006         | Every commerce route is RBAC-gated or ownership-checked (CP-004); references real SKUs (CP-005) and real stock (CP-006)                                                                                                              |
+| **Inventory** (CP-006)                            | CP-003, CP-004, CP-005         | Ledger schema (CP-003), admin RBAC (CP-004), SKU identity reused not duplicated (CP-005)                                                                                                                                             |
+| **Finance** (CP-008, CP-009's invoice half)       | CP-007                         | Payment/invoice both require a real checkout session to attach to                                                                                                                                                                    |
+| **Notification** (CP-017)                         | CP-016                         | Real provider credentials need the secret-handling convention CP-016 doesn't change but the rate-limit/observability minimums should land first so a real SMS integration isn't the first thing exposed to an unbounded request rate |
+| **CMS** (CP-023)                                  | CP-018                         | Zero value without an admin UI to author content                                                                                                                                                                                     |
+| **Analytics** (CP-027)                            | CP-020                         | Meaningless without real customer/order volume, which requires a reachable storefront                                                                                                                                                |
+| **Mobile** (CP-022)                               | CP-018, CP-020                 | Deliberately sequenced after the same UX is proven once on web, per the roadmap's own "do not build the same product twice in parallel" reasoning                                                                                    |
+| **Payment/Order/Inventory consistency** (CP-031)  | CP-030, CP-007, CP-008, CP-009 | Edits the cart-checkout expiry sweep, the payment intent/refund path and order conversion; cannot be safely changed without the modules it composes already existing                                                                 |
+| **Pricing & tax integrity** (CP-032)              | CP-030, CP-005, CP-007         | Enforces catalog price windows and tax inside the cart-checkout pricing pipeline                                                                                                                                                     |
+| **Optical catalog & lens pricing** (CP-033)       | CP-032, CP-005                 | Lens surcharges extend the pricing pipeline CP-032 hardens first; lens taxonomy extends catalog attributes                                                                                                                           |
+| **Prescription at purchase** (CP-034)             | CP-019, CP-033                 | Needs the prescription store (CP-019, decision-gated) and a lens taxonomy to check compatibility against                                                                                                                             |
+| **Lab operations & warranty** (CP-035)            | CP-034, CP-009                 | A lab job exists only for an order line that carries a verified prescription                                                                                                                                                         |
+| **Tax invoice & currency presentation** (CP-036)  | CP-032, CP-009                 | Legal invoice fields are only meaningful once tax computation is trustworthy; extends the CP-009 invoice                                                                                                                             |
+| **Persian-aware search** (CP-037)                 | CP-030, CP-005                 | Extends catalog search; independent of the commerce chain                                                                                                                                                                            |
+| **Virtual try-on** (CP-038)                       | CP-020, CP-033                 | Needs a storefront to host it and frame fit attributes from the optical catalog                                                                                                                                                      |
+| **Release sync** (CP-039)                         | —                              | A git/release operation over finished branches; gated on owner decisions, not on other phases                                                                                                                                        |
+| **Payment recovery & refund settlement** (CP-040) | CP-031                         | Closes the residual gaps CP-031 documented (late-payment recovery, PROCESSING-refund recovery, manual-settlement record); extends the CP-031 `order_exceptions` and refund single-sender claim, so it cannot start before they exist |
+| **CI gate restoration** (CP-041)                  | —                              | Tooling and dependency repair (lint, flaky e2e, `pnpm audit`); touches no product code, so no phase is a prerequisite — but every phase's Definition of Done item 3 depends on it                                                    |
+| **AI** (CP-026)                                   | CP-020                         | Recommendation/stylist features need real usage data to be anything but speculative                                                                                                                                                  |
 
 ## What can run in parallel today (once CP-015/CP-016 close)
 
@@ -76,6 +104,21 @@ CP-018 + CP-019 ─▶ CP-020 (storefront)
   prerequisites, but doesn't block CP-017/021/028/029 from proceeding
   alongside it.
 
+## Remediation series (CP-030 – CP-041)
+
+- **Done:** CP-031 (`IMPLEMENTED`, draft PR on `31-feature-payment-order-consistency`).
+- **Can start now, no external decision:** CP-041 (recommended first — it restores
+  the gate every other phase is judged against), CP-032, CP-037. CP-031 and CP-032
+  touch the same file (`checkout.service.ts`), so CP-032 branches from CP-031 or
+  waits for it to merge.
+- **Cannot start until an owner / domain decision is made:** CP-033, CP-035,
+  CP-036, CP-038, CP-039, CP-040 (`roadmap.json` status `BLOCKED`; the questions
+  are in [`remediation-roadmap.md`](remediation-roadmap.md) §7 — CP-040 waits on
+  Q9, who settles a rejected partial refund by hand). CP-034 additionally waits
+  on CP-019.
+- **CP-039** touches no product code and can run at any time the owner decides;
+  the earlier it runs, the less `roadmap.json` drifts from the branches.
+
 ## What must be strictly sequential
 
 CP-015 → CP-016 (the two gates, in that order — see
@@ -90,6 +133,7 @@ merge order).
 ## No circular dependencies found
 
 Verified by walking the graph above end to end — every arrow points
-strictly toward a later phase, no cycle exists. This was also verified
+strictly toward a later phase, no cycle exists (CP-030 – CP-041 included;
+`pnpm roadmap:audit` re-checks this mechanically). This was also verified
 architecturally in the Phase 014 audit (no circular NestJS module
 imports found in the built modules).

@@ -19,6 +19,10 @@ import {
   checkoutValidationToDomain,
 } from '../checkout.mapper';
 
+/** Every status from which a session can still be paid for or expired —
+ * i.e. the non-terminal ones (`CheckoutStateMachine`). */
+const ACTIVE_STATUSES: CheckoutStatus[] = ['OPEN', 'VALIDATING', 'READY_FOR_PAYMENT'];
+
 const DETAIL_INCLUDE = {
   address: true,
   totalsHistory: { orderBy: { calculatedAt: 'desc' as const }, take: 1 },
@@ -48,7 +52,7 @@ export class PrismaCheckoutSessionRepository implements CheckoutSessionRepositor
   async listExpirable(now: Date): Promise<CheckoutSession[]> {
     const rows = await prisma.checkoutSession.findMany({
       where: {
-        status: { in: ['OPEN', 'VALIDATING', 'READY_FOR_PAYMENT'] },
+        status: { in: ACTIVE_STATUSES },
         expiresAt: { lt: now },
       },
     });
@@ -126,9 +130,36 @@ export class PrismaCheckoutSessionRepository implements CheckoutSessionRepositor
     return checkoutSessionToDomain(row);
   }
 
+  /**
+   * One conditional `UPDATE`: only an *active* session whose current deadline
+   * is earlier than the requested one moves, so an earlier value can never
+   * shorten a later hold. `claimExpiry()` below conditions on the same row, so
+   * of a racing "hold" and "expire" exactly one wins — the loser re-evaluates
+   * its `WHERE` against the winner's committed row (READ COMMITTED).
+   */
   async extendExpiry(id: string, expiresAt: Date): Promise<CheckoutSession> {
-    const row = await prisma.checkoutSession.update({ where: { id }, data: { expiresAt } });
+    await prisma.checkoutSession.updateMany({
+      where: {
+        id,
+        status: { in: ACTIVE_STATUSES },
+        OR: [{ expiresAt: null }, { expiresAt: { lt: expiresAt } }],
+      },
+      data: { expiresAt },
+    });
+    const row = await prisma.checkoutSession.findUniqueOrThrow({ where: { id } });
     return checkoutSessionToDomain(row);
+  }
+
+  async claimExpiry(id: string, dueBefore: Date | null): Promise<boolean> {
+    const { count } = await prisma.checkoutSession.updateMany({
+      where: {
+        id,
+        status: { in: ACTIVE_STATUSES },
+        ...(dueBefore ? { expiresAt: { lt: dueBefore } } : {}),
+      },
+      data: { status: 'EXPIRED' },
+    });
+    return count === 1;
   }
 
   async setAddress(

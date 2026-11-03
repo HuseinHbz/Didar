@@ -5,7 +5,7 @@ import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { CurrentUserId } from '../../../identity/presentation/decorators/current-user.decorator';
 import { RequirePermission } from '../../../identity/presentation/decorators/require-permission.decorator';
 import { RefundService } from '../../application/refund.service';
-import { CreateRefundDto, RefundResponseDto } from '../dto/refund.dto';
+import { CreateRefundDto, ListRefundsQueryDto, RefundResponseDto } from '../dto/refund.dto';
 
 /** Admin-only — refunding a `VERIFIED` transaction is a privileged
  * action (ADR-008 decision 6), same "permission-controlled and audited"
@@ -20,15 +20,13 @@ export class RefundController {
   /** ADR-012's own reconnaissance flagged this as a pre-existing gap
    * (no list route existed despite the original Phase 008 brief asking
    * for one) — closed here, additively, not reworking anything else on
-   * this controller. */
+   * this controller. CP-031 added `status` (finance's `?status=REJECTED`
+   * queue) and `limit`, and validates the filters at the boundary. */
   @Get()
   @RequirePermission('payment.refund.read')
   @ApiOkResponse({ type: [RefundResponseDto] })
-  async list(
-    @Query('paymentTransactionId') paymentTransactionId?: string,
-    @Query('returnRequestId') returnRequestId?: string,
-  ): Promise<RefundResponseDto[]> {
-    const refunds = await this.refunds.list({ paymentTransactionId, returnRequestId });
+  async list(@Query() query: ListRefundsQueryDto): Promise<RefundResponseDto[]> {
+    const refunds = await this.refunds.list(query);
     return refunds.map((refund) => RefundResponseDto.fromDomain(refund));
   }
 

@@ -206,7 +206,31 @@ for the underlying commands/greps/live reproductions.
 - **Git branch:** `21-feature-procurement` · **Latest commit:** see this phase's completion report
 - **Next action:** none
 
-## Planned phases (CP-017 – CP-020, CP-022 – CP-029) — most not yet started; CP-017/018 implemented but unmerged
+## Implemented, awaiting merge
+
+### CP-030 — Remediation Roadmap & Review Correction
+
+- **Objective:** Turn the cross-functional review (finance, optical, marketing, project/product management) into phased, governed remediation work (CP-030 – CP-039); correct the first review's stale-base errors; record finished-but-unmerged phases.
+- **Completion:** 70% — everything except Integration (the branch is not merged). Scored per [`progress-scoring.md`](progress-scoring.md) for a documentation-only phase (Database, Backend/API, Frontend, Mobile, Security, Production Readiness are N/A and excluded with weight redistributed): Architecture 100 · Testing 75 (structural and format checks only; no code) · Integration 0 · Documentation 100 · CI/CD 50.
+- **Audit status:** IMPLEMENTED — see [`phase-030-audit.md`](phase-030-audit.md); becomes VALIDATED when merged into `develop` with a green CI run.
+- **Deliverables:** [`remediation-roadmap.md`](remediation-roadmap.md) (corrected review, findings register P0-3 – P2-16, phase map, sequencing, open decisions), [`ADR-030`](../adr/ADR-030-remediation-roadmap.md), `roadmap.json` (+10 phases, +13 requirements, +16 gaps), and re-synchronised governance documents.
+- **Blocking issues:** none
+- **Dependencies:** CP-014, CP-015
+- **Git branch:** `30-feature-remediation-roadmap` · **Latest commit:** see this phase's audit
+- **Next action:** merge (the CP-031 branch is stacked on it — merge with a merge commit, not a squash)
+
+### CP-031 — Payment ↔ Order ↔ Inventory Consistency
+
+- **Objective:** guarantee money, order and stock cannot silently disagree — a captured payment always yields one `PAID` order; a `PAID` order never reaches fulfilment without allocated stock (or an open blocking exception); a refund is never sent to a gateway that cannot honour it, nor sent twice. Closes P0-3, P0-4, P0-5, P0-6, P2-16.
+- **Completion:** 70% — everything except Integration. Scored per [`progress-scoring.md`](progress-scoring.md) for a backend-only phase (Frontend/Admin and Mobile N/A, weight redistributed): Architecture 75 · Database 75 (UP→DOWN→UP verified; schema-drift check left to CI) · Backend/API 75 · Security 75 · Testing 75 (unit +59, real-PostgreSQL e2e +21, full suite green twice; local Prisma harness, not the native engine) · Integration 50 (on a stacked branch, not merged) · Documentation 75 (ADR, audit, runbook; the manual-settlement procedure is interim until Q9) · CI/CD 50 (no real run yet; gate red for pre-existing reasons — P0-9) · Production Readiness 50 (every ZarinPal partial refund now needs manual settlement; no alerting on the new queues). Each "75" has a named open gap (P1-16 – P1-20, P2-17).
+- **Audit status:** IMPLEMENTED — see [`phase-031-audit.md`](phase-031-audit.md); becomes VALIDATED when merged into `develop` with a green CI run, which first needs CP-041. **Real CI (draft PR #6, run on `3b920e8`, 2026-11-03):** `test` ✓ (unit, migrations and seed with the native Prisma engine, full e2e on real Postgres + Redis) and `build` ✓; `lint` ✗ and `security` ✗ — both pre-existing and unchanged by this phase (P0-9), so the `quality gate` is red.
+- **Deliverables:** hold-while-paying checkout, order-from-payment sweep, exactly-once stock sale with blocking `OrderException`, serialised reservation lifecycle, refund capability guard and single-send refunds, migration `20261024000000_payment_order_consistency`, [`ADR-031`](../adr/ADR-031-payment-order-consistency.md), [`runbook`](../operations/refund-manual-settlement-runbook.md), and the reproduction suite `services/api/test/payment-order-consistency.e2e-spec.ts`.
+- **Blocking issues:** none for the phase itself; P1-16 – P1-20 and P2-17 are owned by CP-040, P0-9 by CP-041.
+- **Dependencies:** CP-030 (stacked branch), CP-007, CP-008, CP-009
+- **Git branch:** `31-feature-payment-order-consistency` · **Latest commit:** see this phase's audit
+- **Next action:** review and merge after PR #5; then CP-032
+
+## Planned phases (CP-017 – CP-020, CP-022 – CP-029, CP-032 – CP-041) — most not yet started; CP-017/019/028/029 implemented but unmerged
 
 CP-017 and CP-018 each have real implementation on their own branches
 (see the table below) but were deliberately **not** merged as part of
@@ -225,19 +249,29 @@ above/below, `docs/product/integration-cp016-cp021.md`, and
 `docs/product/integration-cp018.md`. All three are excluded from the
 "still not started" table below.
 
-| CP ID  | Name                            | Priority | Dependencies           | Status                            | Next action                                                      |
-| ------ | ------------------------------- | -------- | ---------------------- | --------------------------------- | ---------------------------------------------------------------- |
-| CP-017 | Real Notification Delivery      | P1       | CP-016                 | IMPLEMENTED (80%, not VALIDATED)  | Verify live SMS delivery against real network egress, then merge |
-| CP-019 | Customer Domain & Prescription  | P1       | CP-015, CP-016         | BLOCKED                           | Needs optometry-domain-expert review before implementation       |
-| CP-020 | Storefront MVP                  | P1       | CP-016, CP-018, CP-019 | NOT_STARTED — CP-019 still blocks | First real customer-facing surface                               |
-| CP-022 | Mobile real features            | P2       | CP-018, CP-020         | NOT_STARTED — CP-020 still blocks | Sequenced after web UX proven                                    |
-| CP-023 | CMS                             | P2       | CP-018                 | NOT_STARTED                       | Needs admin UI to author content                                 |
-| CP-024 | CRM beyond coupons              | P2       | CP-019, CP-020         | NOT_STARTED                       | Needs real customer data to segment                              |
-| CP-025 | Store/POS/omnichannel           | P2       | CP-018, CP-021         | NOT_STARTED                       | Separate operational model, deferred                             |
-| CP-026 | AI                              | P2       | CP-020                 | NOT_STARTED                       | Needs real usage data                                            |
-| CP-027 | Advanced Analytics              | P2       | CP-020                 | NOT_STARTED                       | Needs real volume                                                |
-| CP-028 | Security Hardening completion   | P1       | CP-016                 | NOT_STARTED                       | Before any phase is genuinely public                             |
-| CP-029 | Production Readiness completion | P1       | CP-016                 | NOT_STARTED                       | Before any "production-ready" claim                              |
+| CP ID  | Name                                          | Priority | Dependencies           | Status                                                       | Next action                                                                |
+| ------ | --------------------------------------------- | -------- | ---------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| CP-017 | Real Notification Delivery                    | P1       | CP-016                 | IMPLEMENTED (80%, not VALIDATED)                             | Verify live SMS delivery against real network egress, then merge           |
+| CP-019 | Customer Domain & Prescription                | P1       | CP-015, CP-016         | BLOCKED (implemented on unmerged branch 19)                  | Owner decisions Q1–Q5 (`phase-019-domain-review.md`), then integrate       |
+| CP-020 | Storefront MVP                                | P1       | CP-016, CP-018, CP-019 | NOT_STARTED — CP-019 still blocks                            | First real customer-facing surface                                         |
+| CP-022 | Mobile real features                          | P2       | CP-018, CP-020         | NOT_STARTED — CP-020 still blocks                            | Sequenced after web UX proven                                              |
+| CP-023 | CMS                                           | P2       | CP-018                 | NOT_STARTED                                                  | Needs admin UI to author content                                           |
+| CP-024 | CRM beyond coupons                            | P2       | CP-019, CP-020         | NOT_STARTED                                                  | Needs real customer data to segment                                        |
+| CP-025 | Store/POS/omnichannel                         | P2       | CP-018, CP-021         | NOT_STARTED                                                  | Separate operational model, deferred                                       |
+| CP-026 | AI                                            | P2       | CP-020                 | NOT_STARTED                                                  | Needs real usage data                                                      |
+| CP-027 | Advanced Analytics                            | P2       | CP-020                 | NOT_STARTED                                                  | Needs real volume                                                          |
+| CP-028 | Security Hardening completion                 | P1       | CP-016                 | NOT_STARTED on `develop` (implemented on unmerged branch 28) | Integrate (CP-039) before any phase is genuinely public                    |
+| CP-029 | Production Readiness completion               | P1       | CP-016                 | NOT_STARTED on `develop` (implemented on unmerged branch 29) | Integrate (CP-039) before any "production-ready" claim                     |
+| CP-032 | Pricing & tax integrity                       | P0       | CP-030, CP-005, CP-007 | NOT_STARTED — ready                                          | Closes P0-7, P0-8, P1-10; merge after CP-031                               |
+| CP-033 | Optical catalog & lens pricing                | P1       | CP-032, CP-005         | BLOCKED                                                      | Needs optician decisions (Q4)                                              |
+| CP-034 | Prescription at purchase                      | P1       | CP-019, CP-033         | NOT_STARTED — CP-019 / CP-033 block                          | Needs the prescription store                                               |
+| CP-035 | Lab operations & warranty                     | P1       | CP-034, CP-009         | BLOCKED                                                      | Needs lab / warranty policy (Q5)                                           |
+| CP-036 | Tax invoice & currency presentation           | P1       | CP-032, CP-009         | BLOCKED                                                      | Needs finance / legal scoping (Q6, Q7)                                     |
+| CP-037 | Persian-aware search                          | P2       | CP-030, CP-005         | NOT_STARTED — ready                                          | Independent of the commerce chain                                          |
+| CP-038 | Virtual try-on                                | P2       | CP-020, CP-033         | BLOCKED                                                      | "VR 5D" undefined (Q1)                                                     |
+| CP-039 | Integration of finished phases & release sync | P1       | —                      | BLOCKED                                                      | Owner merge decisions (Q2)                                                 |
+| CP-040 | Payment recovery & refund settlement          | P1       | CP-031                 | BLOCKED                                                      | Needs Q9 (who settles a rejected refund) and the live-gateway check (P1-6) |
+| CP-041 | CI gate restoration                           | P0       | —                      | NOT_STARTED — ready                                          | Closes P0-9; do first — nothing reaches VALIDATED while the gate is red    |
 
 ## Aggregate
 
@@ -246,12 +280,15 @@ above/below, `docs/product/integration-cp016-cp021.md`, and
   and CP-021 — both merged out of numeric order per their own actual
   dependencies: CP-018 needed CP-015+CP-016, CP-021 needed only CP-015)
 - **Partial:** 0
-- **In progress:** 0
-- **Planned (zero implementation, or implemented-but-unmerged — CP-017):** 11 (CP-017, CP-019–CP-020, CP-022–CP-029)
-- **Total canonical phases tracked:** 30
+- **In progress (implemented on a branch, awaiting merge):** 2 (CP-030, CP-031)
+- **Planned (zero implementation on `develop`):** 21 (CP-017 — implemented on an
+  unmerged branch, counted here per its earlier precedent — CP-019–CP-020,
+  CP-022–CP-029, CP-032–CP-041; CP-019, CP-028 and CP-029 are likewise
+  implemented on unmerged branches, see their `unmergedBranch` fields in
+  `roadmap.json`)
+- **Total canonical phases tracked:** 42
 
 This count is the authoritative input to the "Number of completed/
 partial/planned phases" figures required in every future phase's final
-report — see [`gap-priority-matrix.md`](gap-priority-matrix.md) for what
-blocks CP-012/013 from becoming fully Completed, and
-[`next-phase-decision.md`](next-phase-decision.md) for what happens next.
+report — see [`gap-priority-matrix.md`](gap-priority-matrix.md) for the open
+gaps and [`next-phase-decision.md`](next-phase-decision.md) for what happens next.

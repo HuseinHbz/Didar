@@ -66,11 +66,18 @@ export class CheckoutExpirationProcessor extends WorkerHost {
   }
 
   async process(_job: Job): Promise<{ expiredCount: number }> {
-    const due = await this.sessions.listExpirable(new Date());
+    const now = new Date();
+    const due = await this.sessions.listExpirable(now);
+    let expiredCount = 0;
     for (const session of due) {
-      await this.checkout.expire(session.id);
-      this.logger.log(`checkout_session_expired checkoutSessionId=${session.id}`);
+      // `dueBefore` re-checks the deadline at the moment of expiry: a customer
+      // who started paying since the listing has pushed it out (CP-031).
+      const detail = await this.checkout.expire(session.id, { dueBefore: now });
+      if (detail.session.status === 'EXPIRED') {
+        expiredCount += 1;
+        this.logger.log(`checkout_session_expired checkoutSessionId=${session.id}`);
+      }
     }
-    return { expiredCount: due.length };
+    return { expiredCount };
   }
 }

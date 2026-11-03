@@ -12,6 +12,7 @@ import type {
 import type {
   PaymentProviderAdapter,
   PaymentProviderAdapterRegistry,
+  PaymentProviderCapabilities,
 } from '../../src/modules/payment/domain/ports/payment-provider-adapter.port';
 
 /**
@@ -41,7 +42,30 @@ export class FakePaymentProviderAdapter implements PaymentProviderAdapter {
   readonly providerCode = 'zarinpal';
   private readonly verifyOverrides = new Map<string, PaymentProviderVerifyResult>();
   private readonly refundOverrides = new Map<string, PaymentProviderRefundResult>();
+  private declaredCapabilities: PaymentProviderCapabilities = { partialRefund: true };
   public verifyCallCount = 0;
+  private readonly refundSends = new Map<string, number>();
+
+  /** Declared capabilities (CP-031): defaults to a gateway that can refund
+   * any amount, so every pre-existing suite keeps its behaviour; a test
+   * flips it to model ZarinPal's whole-transaction-only `reverse.json`. */
+  get capabilities(): PaymentProviderCapabilities {
+    return this.declaredCapabilities;
+  }
+
+  setCapabilities(capabilities: PaymentProviderCapabilities): void {
+    this.declaredCapabilities = capabilities;
+  }
+
+  /** How many refunds actually reached the (fake) gateway for one
+   * `providerReference` — what the CP-031 refund tests assert on to prove a
+   * refund was sent exactly once, or never. Counted per reference rather than as
+   * one global number on purpose: the `refund_status_sync` sweep runs in every
+   * app instance on a shared queue and may legitimately send *another* test's
+   * stale PENDING refund through this same adapter. */
+  refundSendsFor(providerReference: string): number {
+    return this.refundSends.get(providerReference) ?? 0;
+  }
 
   /** Configures what `verifyPayment()` returns for one specific
    * `providerAuthority` — the default (no override) is "verified,
@@ -106,6 +130,7 @@ export class FakePaymentProviderAdapter implements PaymentProviderAdapter {
     providerReference: string;
     amount: bigint;
   }): Promise<PaymentProviderRefundResult> {
+    this.refundSends.set(props.providerReference, this.refundSendsFor(props.providerReference) + 1);
     const override = this.refundOverrides.get(props.providerReference);
     if (override) return Promise.resolve(override);
     return Promise.resolve({

@@ -66,6 +66,21 @@ export class ReservationService {
     return reservation;
   }
 
+  /** Non-throwing read — `get()` raises 404, which a caller that is
+   * deciding *what to do* about a possibly-missing reservation (rather than
+   * serving an HTTP read) does not want. */
+  findById(id: string): Promise<InventoryReservation | null> {
+    return this.reservations.findById(id);
+  }
+
+  /** The reservation created under `key`, if any — lets a caller that uses
+   * deterministic keys (the order conversion's re-acquire step) tell "I
+   * already did this" from "nothing is held yet" before it consults live
+   * availability. */
+  findByIdempotencyKey(key: string): Promise<InventoryReservation | null> {
+    return this.reservations.findByIdempotencyKey(key);
+  }
+
   async reserve(input: {
     productSkuId: ProductSkuId;
     warehouseId: WarehouseId;

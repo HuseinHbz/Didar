@@ -20,6 +20,10 @@ export class Refund {
     public readonly status: RefundStatus,
     public readonly requestedBy: UserId | null,
     public readonly providerRefundReference: string | null,
+    /** Why a refund ended `REJECTED`/`FAILED` — set only on those two states
+     * (CP-031, gap P0-6): e.g. the gateway cannot refund a partial amount, so the
+     * request was never sent. This is what finance reads to settle it by hand. */
+    public readonly failureReason: string | null,
     public readonly idempotencyKey: string,
     public readonly createdAt: Date,
     public readonly updatedAt: Date,
@@ -33,6 +37,7 @@ export class Refund {
     status?: RefundStatus;
     requestedBy?: string | null;
     providerRefundReference?: string | null;
+    failureReason?: string | null;
     idempotencyKey: string;
     createdAt: Date;
     updatedAt: Date;
@@ -45,6 +50,7 @@ export class Refund {
       props.status ?? 'PENDING',
       props.requestedBy ? asUserId(props.requestedBy) : null,
       props.providerRefundReference ?? null,
+      props.failureReason ?? null,
       props.idempotencyKey,
       props.createdAt,
       props.updatedAt,

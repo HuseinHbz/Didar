@@ -11,20 +11,25 @@ import { PromotionModule } from '../promotion/promotion.module';
 
 import { FulfillmentService } from './application/fulfillment.service';
 import { InvoiceService } from './application/invoice.service';
+import { OrderAllocationService } from './application/order-allocation.service';
 import { OrderConversionService } from './application/order-conversion.service';
+import { OrderExceptionService } from './application/order-exception.service';
 import { OrderService } from './application/order.service';
 import { FULFILLMENT_REPOSITORY } from './domain/ports/fulfillment.repository.port';
 import { INVOICE_REPOSITORY } from './domain/ports/invoice.repository.port';
+import { ORDER_EXCEPTION_REPOSITORY } from './domain/ports/order-exception.repository.port';
 import { ORDER_REPOSITORY } from './domain/ports/order.repository.port';
 import { SHIPPING_PROVIDER } from './domain/ports/shipping-provider.port';
 import { ManualShippingProvider } from './infrastructure/providers/manual-shipping-provider';
 import { OrderQueueModule } from './infrastructure/queues/order-queue.module';
 import { PrismaFulfillmentRepository } from './infrastructure/repositories/prisma-fulfillment.repository';
 import { PrismaInvoiceRepository } from './infrastructure/repositories/prisma-invoice.repository';
+import { PrismaOrderExceptionRepository } from './infrastructure/repositories/prisma-order-exception.repository';
 import { PrismaOrderRepository } from './infrastructure/repositories/prisma-order.repository';
 import { FulfillmentAdminController } from './presentation/controllers/fulfillment-admin.controller';
 import { InvoiceAdminController } from './presentation/controllers/invoice-admin.controller';
 import { OrderAdminController } from './presentation/controllers/order-admin.controller';
+import { OrderExceptionAdminController } from './presentation/controllers/order-exception-admin.controller';
 import { OrderController } from './presentation/controllers/order.controller';
 import { ShipmentLookupAdminController } from './presentation/controllers/shipment-lookup-admin.controller';
 import { OrderDomainExceptionFilter } from './presentation/filters/order-domain-exception.filter';
@@ -66,16 +71,20 @@ import { OrderDomainExceptionFilter } from './presentation/filters/order-domain-
   controllers: [
     OrderController,
     OrderAdminController,
+    OrderExceptionAdminController,
     FulfillmentAdminController,
     ShipmentLookupAdminController,
     InvoiceAdminController,
   ],
   providers: [
     { provide: ORDER_REPOSITORY, useClass: PrismaOrderRepository },
+    { provide: ORDER_EXCEPTION_REPOSITORY, useClass: PrismaOrderExceptionRepository },
     { provide: INVOICE_REPOSITORY, useClass: PrismaInvoiceRepository },
     { provide: FULFILLMENT_REPOSITORY, useClass: PrismaFulfillmentRepository },
     { provide: SHIPPING_PROVIDER, useClass: ManualShippingProvider },
     { provide: AUDIT_LOG_REPOSITORY, useClass: PrismaAuditLogRepository },
+    OrderAllocationService,
+    OrderExceptionService,
     OrderConversionService,
     OrderService,
     InvoiceService,

@@ -8,6 +8,10 @@ import {
 import { InvalidFulfillmentTransitionError } from '../../domain/services/fulfillment-state-machine';
 import { InvalidInvoiceTransitionError } from '../../domain/services/invoice-state-machine';
 import { OrderNotReadyToCompleteError } from '../../domain/services/order-completion-validator';
+import {
+  OrderHasOpenExceptionError,
+  StockStillShortError,
+} from '../../domain/services/order-exception-policy';
 import { InvalidOrderTransitionError } from '../../domain/services/order-state-machine';
 import { InvalidShipmentTransitionError } from '../../domain/services/shipment-state-machine';
 
@@ -25,6 +29,11 @@ import { InvalidShipmentTransitionError } from '../../domain/services/shipment-s
  * decision 3) is 409 — the order exists and the request is well-formed,
  * it just isn't actually done yet, the same "real conflict, not a
  * validation error" shape every other state-conflict case here uses.
+ *
+ * CP-031 — `OrderHasOpenExceptionError` (approving an order that still has an
+ * open exception) and `StockStillShortError` (a retry that found the stock
+ * still missing) are 409s for the same reason: the request is well-formed,
+ * the resource's current state is what refuses it.
  */
 @Catch(
   InvalidOrderTransitionError,
@@ -34,6 +43,8 @@ import { InvalidShipmentTransitionError } from '../../domain/services/shipment-s
   OverFulfillmentError,
   NonPositiveFulfillmentQuantityError,
   OrderNotReadyToCompleteError,
+  OrderHasOpenExceptionError,
+  StockStillShortError,
 )
 export class OrderDomainExceptionFilter implements ExceptionFilter {
   catch(exception: Error, host: ArgumentsHost): void {
@@ -53,7 +64,9 @@ export class OrderDomainExceptionFilter implements ExceptionFilter {
       exception instanceof InvalidInvoiceTransitionError ||
       exception instanceof InvalidShipmentTransitionError ||
       exception instanceof OverFulfillmentError ||
-      exception instanceof OrderNotReadyToCompleteError
+      exception instanceof OrderNotReadyToCompleteError ||
+      exception instanceof OrderHasOpenExceptionError ||
+      exception instanceof StockStillShortError
     ) {
       return HttpStatus.CONFLICT;
     }

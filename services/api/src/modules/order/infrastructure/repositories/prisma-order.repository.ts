@@ -117,6 +117,15 @@ export class PrismaOrderRepository implements OrderRepositoryPort {
     return rows.map(orderToDomain);
   }
 
+  async listPaidCheckoutIdsWithoutOrder(since: Date): Promise<string[]> {
+    const rows = await prisma.paymentIntent.findMany({
+      where: { status: 'SUCCEEDED', updatedAt: { gte: since }, order: { is: null } },
+      select: { checkoutSessionId: true },
+      orderBy: { updatedAt: 'asc' },
+    });
+    return rows.map((row) => row.checkoutSessionId);
+  }
+
   /**
    * Idempotent on `checkoutSessionId`/`paymentIntentId` under real
    * concurrency (ADR-009 decision 4) — same P2002-catch-and-reread

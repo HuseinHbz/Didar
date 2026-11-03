@@ -1,4 +1,4 @@
-# Payment orchestration architecture (Phase 008)
+# Payment orchestration architecture (Phase 008, refund sending hardened in CP-031)
 
 Full design rationale: [`docs/adr/ADR-008-payment-orchestration.md`](../adr/ADR-008-payment-orchestration.md).
 Full layering/scope detail: [`services/api/src/modules/payment/README.md`](../../services/api/src/modules/payment/README.md).
@@ -122,3 +122,37 @@ calls for the same attempt collapse into one `PaymentTransaction` row the
 same way. All three genuinely raced during the actual test run (visible
 in the captured Prisma error log — real unique-constraint collisions,
 not fabricated).
+
+## CP-031 — the checkout outlives the payment, and a refund is sent at most once
+
+Full rationale: [`docs/adr/ADR-031-payment-order-consistency.md`](../adr/ADR-031-payment-order-consistency.md);
+operator procedure: [`docs/operations/refund-manual-settlement-runbook.md`](../operations/refund-manual-settlement-runbook.md).
+Additive only — no table was dropped or reshaped; `refunds.failure_reason` and
+`payment_intents(status, updated_at)` are the only schema changes this module sees.
+
+- **Hold-while-paying.** `PaymentIntentService.createIntent` calls
+  `CheckoutService.holdForPayment(checkoutId, paymentWindowEndsAt)` _before_ it creates or re-uses
+  an intent. The checkout's deadline becomes the intent's own window end plus
+  `CHECKOUT_PAYMENT_GRACE_MINUTES` (5), so the checkout (and the stock it reserved) can no longer
+  expire under a customer who is still on the gateway page; deriving it from the intent's own
+  `expiresAt` means changing either TTL later cannot reintroduce the mismatch. Hold and expiry are
+  each one conditional `UPDATE` on the same row, so exactly one wins; if the expiry wins the
+  hold throws (`409`) and no intent is created for a checkout that is gone.
+- **Provider capabilities are part of the adapter contract.** `PaymentProviderAdapter.capabilities`
+  (`PaymentProviderCapabilities { partialRefund }`) is a required field. ZarinPal declares
+  `partialRefund: false` (`reverse.json` takes no amount). `RefundCapabilityPolicy` — a pure domain
+  service — decides before anything is sent; a refused refund ends `REJECTED` with `failureReason`
+  and never reaches the gateway.
+- **One sender per refund.** `RefundRepositoryPort.claimForProcessing` (`UPDATE … WHERE status =
+'PENDING'`) and `settleProcessing` (`… WHERE status = 'PROCESSING'`) replace the old
+  read-then-write; `updateStatus` is gone from the port. A refund already `PROCESSING` is never
+  re-sent (`409`).
+- **Verification stays server-to-server.** Nothing in CP-031 changes how a payment is verified;
+  the new order-conversion sweep pass _consumes_ `SUCCEEDED` intents, it does not create them.
+
+Open, owned by CP-040: P1-16 (a manually settled `REJECTED` refund is not recorded),
+P1-19 (no safe recovery for a `PROCESSING` refund), P1-20 (a payment completing after the
+_intent_ expired is never verified). Whether `reverse.json` is even valid for an already-verified
+transaction, and whether ZarinPal offers an amount-bearing refund call, is **unverified** from this
+sandbox (P1-6) — the capability flag exists so that flipping it is a one-line change once a real
+call is implemented and checked against the gateway's sandbox.

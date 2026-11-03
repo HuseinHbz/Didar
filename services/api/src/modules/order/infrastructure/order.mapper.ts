@@ -4,6 +4,7 @@ import type {
   Invoice as PrismaInvoice,
   InvoiceItem as PrismaInvoiceItem,
   Order as PrismaOrder,
+  OrderException as PrismaOrderException,
   OrderItem as PrismaOrderItem,
   OrderPromotion as PrismaOrderPromotion,
   OrderStatusHistory as PrismaOrderStatusHistory,
@@ -15,6 +16,7 @@ import { FulfillmentItem } from '../domain/entities/fulfillment-item.entity';
 import { Fulfillment } from '../domain/entities/fulfillment.entity';
 import { InvoiceItem } from '../domain/entities/invoice-item.entity';
 import { Invoice } from '../domain/entities/invoice.entity';
+import { OrderException } from '../domain/entities/order-exception.entity';
 import { OrderItem } from '../domain/entities/order-item.entity';
 import { OrderPromotion } from '../domain/entities/order-promotion.entity';
 import { OrderStatusHistory } from '../domain/entities/order-status-history.entity';
@@ -175,5 +177,27 @@ export function shipmentEventToDomain(row: PrismaShipmentEvent): ShipmentEvent {
     details: row.details as Record<string, unknown> | null,
     source: row.source,
     occurredAt: row.occurredAt,
+  });
+}
+
+export function orderExceptionToDomain(row: PrismaOrderException): OrderException {
+  return OrderException.create({
+    id: row.id,
+    orderId: row.orderId,
+    type: row.type,
+    status: row.status,
+    productSkuId: row.productSkuId,
+    requestedQuantity: row.requestedQuantity,
+    dedupeKey: row.dedupeKey,
+    detail:
+      row.detail !== null && typeof row.detail === 'object' && !Array.isArray(row.detail)
+        ? row.detail
+        : null,
+    openedAt: row.openedAt,
+    resolvedAt: row.resolvedAt,
+    resolution: row.resolution,
+    resolvedBy: row.resolvedBy,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   });
 }

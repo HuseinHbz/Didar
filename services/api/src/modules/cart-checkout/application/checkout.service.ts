@@ -1,7 +1,14 @@
 import { randomUUID } from 'node:crypto';
 
 import { asProductSkuId, asWarehouseId } from '@iecp/types';
-import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 
 import { ProductsService } from '../../catalog/application/products.service';
 import { SkusService } from '../../catalog/application/skus.service';
@@ -35,6 +42,13 @@ import { CartPricingService } from './cart-pricing.service';
 
 const DEFAULT_CHECKOUT_TTL_MINUTES = 20;
 
+/** CP-031 (gap P0-3) — how long a checkout is kept alive *after* its payment
+ * window closes: time for the gateway's callback, the server-side verify and
+ * the order conversion to land. Without it a payment verified in the last
+ * seconds of the window could still find the checkout (and its reserved
+ * stock) already gone. */
+export const CHECKOUT_PAYMENT_GRACE_MINUTES = 5;
+
 export interface CheckoutActor {
   customerId: string | null;
   guestToken: string | null;
@@ -63,6 +77,8 @@ export interface CheckoutAddressInput {
  */
 @Injectable()
 export class CheckoutService {
+  private readonly logger = new Logger(CheckoutService.name);
+
   constructor(
     @Inject(CHECKOUT_SESSION_REPOSITORY) private readonly sessions: CheckoutSessionRepositoryPort,
     @Inject(CART_REPOSITORY) private readonly carts: CartRepositoryPort,
@@ -360,8 +376,37 @@ export class CheckoutService {
     const detail = await this.get(checkoutId, actor);
     this.assertNotTerminal(detail.session);
     const expiresAt = new Date(Date.now() + DEFAULT_CHECKOUT_TTL_MINUTES * 60_000);
+    // Monotonic (CP-031): if a payment is in flight the hold-while-paying
+    // deadline is later than "now + 20 min", and a refresh must not pull it back.
     await this.sessions.extendExpiry(detail.session.id, expiresAt);
     return this.get(checkoutId, actor);
+  }
+
+  /**
+   * Hold-while-paying (CP-031, gap P0-3). A checkout lives 20 minutes; a
+   * payment intent lives 30, and the customer may sit on the gateway page for
+   * all of them. Before this existed the expiration sweep released the
+   * customer's reserved stock and marked the checkout `EXPIRED` while they
+   * were still typing their card number — and the successful payment that
+   * followed found no live checkout to convert.
+   *
+   * The payment module calls this **before** it creates (or re-uses) an
+   * intent, passing the moment the payment window closes; the checkout is
+   * kept alive until then plus `CHECKOUT_PAYMENT_GRACE_MINUTES`. It is
+   * monotonic (never shortens a deadline — see `extendExpiry`) and atomic
+   * against `expire()`: of a racing hold and expiry exactly one wins, and when
+   * the expiry wins this throws, so no intent is ever created for a checkout
+   * that is already gone.
+   */
+  async holdForPayment(checkoutId: string, paymentWindowEndsAt: Date): Promise<CheckoutSession> {
+    const until = new Date(paymentWindowEndsAt.getTime() + CHECKOUT_PAYMENT_GRACE_MINUTES * 60_000);
+    const session = await this.sessions.extendExpiry(checkoutId, until);
+    if (session.isTerminal) {
+      throw new ConflictException(
+        `Checkout session is ${session.status}; it can no longer be held for payment`,
+      );
+    }
+    return session;
   }
 
   /** `POST /checkout/:id/cancel` — idempotent by construction via the
@@ -391,18 +436,46 @@ export class CheckoutService {
    * an already-terminal session is a no-op. Releases every held
    * reservation through `ReservationService.release()` exactly like
    * `cancel()` does, since an expired checkout must give its held stock
-   * back just as surely as a cancelled one. */
-  async expire(checkoutId: string): Promise<CheckoutSessionWithDetail> {
+   * back just as surely as a cancelled one.
+   *
+   * `options.dueBefore` is what the sweep passes (CP-031, gap P0-3): the
+   * session is only expired if its deadline is *still* earlier than that
+   * instant. The sweep lists due sessions and then expires them one by one;
+   * in between, a customer may have started a payment, which pushes the
+   * deadline out (`holdForPayment`). The check is made again just before the
+   * reservations are released, and the final `UPDATE` repeats it atomically
+   * (`claimExpiry`) — so a hold that lands at any point wins cleanly instead
+   * of being overwritten. Without `dueBefore` the call is an explicit,
+   * unconditional expiry (tests, operator tooling). */
+  async expire(
+    checkoutId: string,
+    options: { dueBefore?: Date } = {},
+  ): Promise<CheckoutSessionWithDetail> {
     const detail = await this.sessions.findById(checkoutId);
     if (!detail) throw new NotFoundException('Checkout session not found');
     if (CheckoutStateMachine.isNoOp(detail.session.status, 'EXPIRED')) return detail;
     if (!CheckoutStateMachine.canTransition(detail.session.status, 'EXPIRED')) return detail;
 
+    const dueBefore = options.dueBefore ?? null;
+    if (dueBefore && !(detail.session.expiresAt && detail.session.expiresAt < dueBefore)) {
+      return detail; // extended since the sweep listed it — not due any more
+    }
+
     for (const reservation of detail.reservations) {
       await this.reservations.release(reservation.inventoryReservationId).catch(() => undefined);
     }
     await this.couponRedemption.release(detail.session.id).catch(() => undefined);
-    await this.sessions.updateStatus(detail.session.id, 'EXPIRED');
+    const claimed = await this.sessions.claimExpiry(detail.session.id, dueBefore);
+    if (!claimed) {
+      // A hold (or a conversion/cancel) landed in the few milliseconds between
+      // the due-check above and this update. The checkout correctly stays
+      // alive; its already-released stock is re-acquired — or surfaced as a
+      // STOCK_SHORTFALL exception — when the order is created from the
+      // verified payment (CP-031 allocation), never silently lost.
+      this.logger.warn(
+        `checkout_expiry_lost_race checkoutSessionId=${detail.session.id} — kept alive after its reservations were released`,
+      );
+    }
     const updated = await this.sessions.findById(checkoutId);
     if (!updated) throw new NotFoundException('Checkout session not found');
     return updated;
@@ -523,15 +596,25 @@ export class CheckoutService {
    * Same idempotent-by-construction shape as `expire()`: converting an
    * already-`CONVERTED` session is a no-op, and a session that isn't in
    * `READY_FOR_PAYMENT` at all (already `CANCELLED`/`EXPIRED`) is left
-   * alone rather than forced — a verified payment against a session that
-   * expired out from under it is the payment module's own inconsistency
-   * to surface, not something this method silently overrides.
+   * alone rather than forced — and, since CP-031, logged at WARN rather
+   * than skipped silently. A verified payment against a session that
+   * expired out from under it still yields its order: that no longer
+   * depends on this status flip (see `OrderConversionService`).
    */
   async markConverted(checkoutId: string): Promise<CheckoutSessionWithDetail> {
     const detail = await this.sessions.findById(checkoutId);
     if (!detail) throw new NotFoundException('Checkout session not found');
     if (CheckoutStateMachine.isNoOp(detail.session.status, 'CONVERTED')) return detail;
-    if (!CheckoutStateMachine.canTransition(detail.session.status, 'CONVERTED')) return detail;
+    if (!CheckoutStateMachine.canTransition(detail.session.status, 'CONVERTED')) {
+      // Loud, not silent (CP-031): a payment verified against a checkout that
+      // is no longer READY_FOR_PAYMENT used to vanish here without a trace.
+      // The order does not depend on this status flip — it is created from the
+      // verified payment itself by the order_conversion sweep.
+      this.logger.warn(
+        `checkout_mark_converted_skipped checkoutSessionId=${detail.session.id} status=${detail.session.status} — payment verified against a checkout that is not READY_FOR_PAYMENT`,
+      );
+      return detail;
+    }
 
     await this.sessions.updateStatus(detail.session.id, 'CONVERTED', { convertedAt: new Date() });
     const updated = await this.sessions.findById(checkoutId);

@@ -197,3 +197,24 @@ and ADR-007's own "Deferred" section:
   graphs.
 - A dedicated generic idempotency-key store — idempotency is achieved
   per-operation via existing unique keys / state-machine no-op checks.
+
+## CP-031 — the checkout is held for the whole payment window
+
+Full rationale: [`docs/adr/ADR-031-payment-order-consistency.md`](../../../../../docs/adr/ADR-031-payment-order-consistency.md)
+(decision 2); architecture view: [`docs/architecture/cart-checkout.md`](../../../../../docs/architecture/cart-checkout.md).
+
+- **`CheckoutService.holdForPayment(checkoutId, paymentWindowEndsAt)`** — called by the payment module
+  before it creates or re-uses an intent; moves the deadline to the window end plus
+  `CHECKOUT_PAYMENT_GRACE_MINUTES` (5). `409` for a terminal checkout.
+- **`extendExpiry` / `claimExpiry`** (repository) are each one conditional `UPDATE` on the same row —
+  `extendExpiry` only moves a deadline _later_ (so `POST /checkout/:id/refresh` can no longer shorten a
+  payment hold), `claimExpiry` only expires a session whose deadline is still before the sweep's
+  `dueBefore`. Of a racing hold and expiry exactly one wins.
+- **`expire(checkoutId, { dueBefore })`** (the `checkout_expiration` sweep) re-checks the deadline and
+  keeps its crash-safe order (release reservations, then claim). A hold landing in between leaves the
+  checkout alive and is logged at `WARN` (`checkout_expiry_lost_race`); the released stock is
+  re-acquired — or becomes an `OrderException` — when the order is created.
+- **`markConverted`** on a checkout that is not `READY_FOR_PAYMENT` is a `WARN` instead of a silent
+  return.
+- **Unchanged / open (CP-040, P1-17):** a coupon redemption released by an expiry is not re-acquired
+  when an order is created from a late payment.

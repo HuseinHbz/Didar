@@ -1949,6 +1949,7 @@ model Order {
   fulfillments    Fulfillment[]
   promotions      OrderPromotion[]
   returnRequests  ReturnRequest[]
+  exceptions      OrderException[] // CP-031 — durable, blocking operator work items
 
   @@index([customerId])
   @@index([guestToken])
@@ -2041,6 +2042,68 @@ model OrderStatusHistory {
 
   @@index([orderId])
   @@map("order_status_history")
+  @@schema("commerce")
+}
+
+/// CP-031 (docs/adr/ADR-031-payment-order-consistency.md) — why an order
+/// needs a human. Today only `STOCK_SHORTFALL`: the customer has paid, the
+/// order exists, but the stock for one of its lines could not be allocated
+/// (the checkout's hold lapsed and the units were sold or written off
+/// meanwhile). The vocabulary is an enum so a second kind is one
+/// `ALTER TYPE ... ADD VALUE`, never a free-text convention.
+enum OrderExceptionType {
+  STOCK_SHORTFALL
+
+  @@schema("commerce")
+}
+
+enum OrderExceptionStatus {
+  OPEN
+  RESOLVED
+
+  @@schema("commerce")
+}
+
+/// How an exception was closed. There is deliberately no "waived" /
+/// "forced" value: a PAID order must either hold real allocated stock
+/// (`ALLOCATED`, the same reservation-and-sale path every order uses) or
+/// stop existing as a sale (`ORDER_CANCELLED`, which also refunds).
+enum OrderExceptionResolution {
+  ALLOCATED
+  ORDER_CANCELLED
+
+  @@schema("commerce")
+}
+
+/// A durable, blocking work item raised when an order cannot be completed
+/// automatically (CP-031, gap P0-5). While any row for an order is `OPEN`,
+/// `OrderService.approve()` refuses with HTTP 409 — so an order with no
+/// stock behind it can never reach fulfillment. `dedupeKey`
+/// (`STOCK_SHORTFALL:<orderId>:<productSkuId>`) is `@unique`: racing
+/// conversions/sweeps collapse onto one row (the repository's
+/// P2002-catch-and-reread pattern). Rows are never deleted; resolving one
+/// records `resolution`/`resolvedAt`/`resolvedBy` and an audit-log entry.
+model OrderException {
+  id                String                    @id @default(uuid()) @db.Uuid
+  orderId           String                    @map("order_id") @db.Uuid
+  type              OrderExceptionType
+  status            OrderExceptionStatus      @default(OPEN)
+  productSkuId      String?                   @map("product_sku_id") @db.Uuid // -> catalog.product_skus.id, unenforced (the SKU may later be deleted)
+  requestedQuantity Int?                      @map("requested_quantity")
+  dedupeKey         String                    @unique @map("dedupe_key")
+  detail            Json?
+  openedAt          DateTime                  @default(now()) @map("opened_at")
+  resolvedAt        DateTime?                 @map("resolved_at")
+  resolution        OrderExceptionResolution?
+  resolvedBy        String?                   @map("resolved_by") @db.Uuid // -> identity.users.id, unenforced; null = resolved by the system
+  createdAt         DateTime                  @default(now()) @map("created_at")
+  updatedAt         DateTime                  @updatedAt @map("updated_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([status, openedAt])
+  @@map("order_exceptions")
   @@schema("commerce")
 }
 
@@ -2512,6 +2575,10 @@ model PaymentIntent {
 
   @@index([customerId])
   @@index([status])
+  // CP-031 — the `order_conversion` sweep's "SUCCEEDED intents updated in
+  // the last 24h that have no order yet" scan: a range scan on this
+  // index instead of reading every SUCCEEDED intent ever written.
+  @@index([status, updatedAt])
   @@map("payment_intents")
   @@schema("commerce")
 }
@@ -2608,6 +2675,10 @@ model Refund {
   status                  RefundStatus @default(PENDING)
   requestedBy             String?      @map("requested_by") @db.Uuid // -> identity.users.id, unenforced
   providerRefundReference String?      @map("provider_refund_reference")
+  // CP-031 (gap P0-6) — why a refund ended `REJECTED`/`FAILED` (e.g. the
+  // gateway cannot refund a partial amount, so the request was never
+  // sent). Nullable and written only on those two terminal states.
+  failureReason           String?      @map("failure_reason")
   idempotencyKey          String       @unique @map("idempotency_key")
   createdAt               DateTime     @default(now()) @map("created_at")
   updatedAt               DateTime     @updatedAt @map("updated_at")

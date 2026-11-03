@@ -8,6 +8,25 @@ import type {
 } from '@iecp/types';
 
 /**
+ * What a gateway can actually express (CP-031, gap P0-6). Declared by the
+ * adapter — the one place that knows the gateway's API — and consulted by the
+ * application layer *before* money is sent, so the system never asks a gateway
+ * for something it cannot do and then records a ledger entry that disagrees
+ * with what the gateway did.
+ *
+ * Every field defaults, in every adapter, to the conservative value: add a
+ * capability here only when the application's behaviour changes with it, and
+ * declare it `true` in an adapter only once that call is implemented and
+ * verified against the gateway.
+ */
+export interface PaymentProviderCapabilities {
+  /** Whether `refundPayment()` can refund an amount smaller than the original
+   * transaction. `false` means the gateway can only reverse a transaction as a
+   * whole, so a partial refund must never be sent to it. */
+  readonly partialRefund: boolean;
+}
+
+/**
  * The actual provider-independence boundary (ADR-008 decision 5).
  * Implemented once for real against ZarinPal's documented REST contract
  * (`infrastructure/providers/zarinpal.adapter.ts`) — no application-layer
@@ -17,6 +36,9 @@ import type {
  */
 export interface PaymentProviderAdapter {
   readonly providerCode: string;
+
+  /** What this gateway can express (see `PaymentProviderCapabilities`). */
+  readonly capabilities: PaymentProviderCapabilities;
 
   /** Opens the provider-side handle a `PaymentAttempt` is created
    * against (ZarinPal's `PaymentRequest.json` -> `Authority`). */
@@ -46,6 +68,10 @@ export interface PaymentProviderAdapter {
    * verification-retry jobs). */
   queryPayment(providerReference: string): Promise<PaymentProviderVerifyResult>;
 
+  /** Refunds `amount` of the original payment. The application layer calls this
+   * only after `RefundCapabilityPolicy` has confirmed the gateway can express
+   * that amount (`capabilities.partialRefund`), so an implementation may assume
+   * a partial amount is only ever requested when it declared support for it. */
   refundPayment(props: {
     providerReference: string;
     amount: bigint;

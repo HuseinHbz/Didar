@@ -6,7 +6,10 @@ import { InvalidAdjustmentError } from '../../domain/services/adjustment-validat
 import { InsufficientStockError } from '../../domain/services/available-quantity-calculator';
 import { InvalidPurchaseOrderLineError } from '../../domain/services/purchase-order-line-validator';
 import { InvalidPurchaseOrderTransitionError } from '../../domain/services/purchase-order-state-machine';
-import { InvalidReservationOperationError } from '../../domain/services/reservation-rules';
+import {
+  InvalidReservationOperationError,
+  ReservationNotActiveError,
+} from '../../domain/services/reservation-rules';
 import { InvalidTransferTransitionError } from '../../domain/services/transfer-state-machine';
 
 /**
@@ -29,6 +32,7 @@ import { InvalidTransferTransitionError } from '../../domain/services/transfer-s
 @Catch(
   InsufficientStockError,
   InvalidReservationOperationError,
+  ReservationNotActiveError,
   InvalidTransferTransitionError,
   InvalidAdjustmentError,
   InvalidPurchaseOrderTransitionError,
@@ -39,6 +43,7 @@ export class InventoryDomainExceptionFilter implements ExceptionFilter {
     exception:
       | InsufficientStockError
       | InvalidReservationOperationError
+      | ReservationNotActiveError
       | InvalidTransferTransitionError
       | InvalidAdjustmentError
       | InvalidPurchaseOrderTransitionError
@@ -48,6 +53,7 @@ export class InventoryDomainExceptionFilter implements ExceptionFilter {
     const response = host.switchToHttp().getResponse<Response>();
     const status =
       exception instanceof InsufficientStockError ||
+      exception instanceof ReservationNotActiveError ||
       exception instanceof InvalidTransferTransitionError ||
       exception instanceof InvalidPurchaseOrderTransitionError
         ? HttpStatus.CONFLICT

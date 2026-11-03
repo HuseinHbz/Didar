@@ -315,3 +315,25 @@ not 20).
 - Otherwise reuses `services/api`'s existing `DATABASE_URL`/identity JWT
   config wholesale — every admin/internal route sits behind the same global
   `JwtAuthGuard`/`AuthorizationGuard` Phase 004 installed.
+
+## CP-031 — the reservation lifecycle is serialised on the reservation row
+
+Full rationale: [`docs/adr/ADR-031-payment-order-consistency.md`](../../../../../docs/adr/ADR-031-payment-order-consistency.md)
+(decisions 4 and 7); architecture view: [`docs/architecture/inventory.md`](../../../../../docs/architecture/inventory.md).
+
+- **`release`, `convert` and `expire` lock the reservation row first, then the inventory item**
+  (`SELECT … FOR UPDATE`, fixed order — no deadlock), and read the status only after holding the lock.
+  Found by the CP-031 reproduction suite: 20 concurrent `convert` calls on one reservation succeeded 9
+  and 10 times in two runs (expected 1) and left phantom negative buckets. The loser now gets
+  `ReservationNotActiveError` (`409` via `InventoryDomainExceptionFilter`).
+- **`AvailableQuantityCalculator.assertNonNegative`** rejects any negative stored bucket, not only a
+  negative derived `available` (two wrong buckets could cancel out).
+- **`reserve()`** is idempotent under concurrent callers sharing one key — it returns the winner's
+  reservation rather than a spurious error.
+- **`StockSaleService`** (new, exported alongside `ReservationService`) — `SOLD | NOT_HELD | SHORT` as
+  a value over the real, row-locked, ledger-writing `ReservationService`; selling is exactly-once,
+  including when an earlier or racing call already sold it. No stock rule is re-implemented.
+- **Unchanged:** `reserve()` still takes a SKU's stock from the single location with the most available,
+  so a SKU spread over several locations of one warehouse can be reported short (P2-17, owned by CP-040).
+  `getAvailability()` correctly returns one row per `(warehouse, location)`; the old test that assumed
+  one row per warehouse was the bug (P2-16).

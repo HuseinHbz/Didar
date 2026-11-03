@@ -1,13 +1,20 @@
 import { randomUUID } from 'node:crypto';
 
-import { prisma, type InventoryReservation as PrismaInventoryReservation } from '@iecp/database';
+import {
+  Prisma,
+  prisma,
+  type InventoryReservation as PrismaInventoryReservation,
+} from '@iecp/database';
 import type { ProductSkuId, WarehouseId } from '@iecp/types';
 import { Injectable } from '@nestjs/common';
 
 import { InventoryReservation } from '../../domain/entities/inventory-reservation.entity';
 import type { InventoryReservationRepositoryPort } from '../../domain/ports/inventory-reservation.repository.port';
 import { InsufficientStockError } from '../../domain/services/available-quantity-calculator';
-import { ReservationRules } from '../../domain/services/reservation-rules';
+import {
+  ReservationNotActiveError,
+  ReservationRules,
+} from '../../domain/services/reservation-rules';
 import { mutateInventoryItem } from '../inventory-item-mutator';
 
 @Injectable()
@@ -52,6 +59,37 @@ export class PrismaInventoryReservationRepository implements InventoryReservatio
     });
     if (existing) return toDomain(existing);
 
+    try {
+      return await this.createReservation(props);
+    } catch (error) {
+      // Idempotent under *concurrent* callers too (CP-031): the lookup above
+      // is not atomic with the insert, so two callers with the same key can
+      // both reach `createReservation`. Exactly one commits; the other fails
+      // — as a unique violation on the key, or as `InsufficientStockError`
+      // when the winner just took the last units — and must hand back the
+      // winner's reservation, not surface a spurious error (the order
+      // conversion path re-acquires stock under one key from several racing
+      // callers). Broader than the plain P2002-catch-and-reread on purpose,
+      // for the same reason `PrismaPurchaseOrderRepository.receive()` is.
+      const winner = await prisma.inventoryReservation.findUnique({
+        where: { idempotencyKey: props.idempotencyKey },
+      });
+      if (winner) return toDomain(winner);
+      throw error;
+    }
+  }
+
+  private createReservation(props: {
+    productSkuId: ProductSkuId;
+    warehouseId: WarehouseId;
+    quantity: number;
+    sourceType: string;
+    sourceId: string;
+    idempotencyKey: string;
+    expiresAt?: Date | null;
+    actorUserId?: string | null;
+    correlationId: string;
+  }): Promise<InventoryReservation> {
     return prisma.$transaction(async (tx) => {
       // Pick the warehouse's location with the most available stock for
       // this SKU — the caller (application layer / allocation engine)
@@ -106,9 +144,9 @@ export class PrismaInventoryReservationRepository implements InventoryReservatio
     props: { actorUserId?: string | null; correlationId: string; reason?: string | null },
   ): Promise<InventoryReservation> {
     return prisma.$transaction(async (tx) => {
-      const reservation = await tx.inventoryReservation.findUniqueOrThrow({ where: { id } });
+      const reservation = await lockReservation(tx, id);
       if (reservation.status !== 'ACTIVE') {
-        throw new Error(`Reservation ${id} is not ACTIVE (status: ${reservation.status})`);
+        throw new ReservationNotActiveError(id, reservation.status);
       }
 
       const item = await tx.inventoryItem.findUniqueOrThrow({
@@ -149,9 +187,9 @@ export class PrismaInventoryReservationRepository implements InventoryReservatio
     },
   ): Promise<InventoryReservation> {
     return prisma.$transaction(async (tx) => {
-      const reservation = await tx.inventoryReservation.findUniqueOrThrow({ where: { id } });
+      const reservation = await lockReservation(tx, id);
       if (reservation.status !== 'ACTIVE') {
-        throw new Error(`Reservation ${id} is not ACTIVE (status: ${reservation.status})`);
+        throw new ReservationNotActiveError(id, reservation.status);
       }
 
       const item = await tx.inventoryItem.findUniqueOrThrow({
@@ -183,7 +221,7 @@ export class PrismaInventoryReservationRepository implements InventoryReservatio
 
   async expire(id: string, props: { correlationId: string }): Promise<InventoryReservation> {
     return prisma.$transaction(async (tx) => {
-      const reservation = await tx.inventoryReservation.findUniqueOrThrow({ where: { id } });
+      const reservation = await lockReservation(tx, id);
       if (reservation.status !== 'ACTIVE') return toDomain(reservation);
 
       const item = await tx.inventoryItem.findUniqueOrThrow({
@@ -217,6 +255,42 @@ export class PrismaInventoryReservationRepository implements InventoryReservatio
       return toDomain(updated);
     });
   }
+}
+
+/**
+ * Row-locks one reservation (`SELECT … FOR UPDATE`) and returns its state
+ * *as of the lock* — never as of an earlier, unlocked read.
+ *
+ * `release` / `convert` / `expire` used to read the reservation, check
+ * `status === 'ACTIVE'` and only then take the *inventory item* lock inside
+ * `mutateInventoryItem`. N concurrent callers therefore all passed the
+ * status check against the same ACTIVE snapshot and each applied the delta
+ * in turn: 20 concurrent `convert()` calls reported 9 successes and wrote 9
+ * `SALE` ledger rows for one reservation, leaving `reservedQuantity` and
+ * `onHandQuantity` negative — phantom stock that `available` could not see
+ * (CP-031 reproduction, gap P0-5; `payment-order-consistency.e2e-spec.ts`,
+ * "reservation lifecycle is race-safe").
+ *
+ * Locking the reservation first makes "is it still ACTIVE?" and "move it out
+ * of ACTIVE" one atomic step: the loser of a race blocks here until the
+ * winner commits, re-reads, sees a final state and stops instead of
+ * mutating stock a second time.
+ *
+ * Lock order is always reservation → inventory item. `reserve()` locks only
+ * the item and then *inserts* a brand-new reservation row (no other
+ * transaction can hold it), and every other inventory operation locks items
+ * only, so no cycle — hence no deadlock — can form.
+ */
+async function lockReservation(
+  tx: Prisma.TransactionClient,
+  id: string,
+): Promise<PrismaInventoryReservation> {
+  await tx.$queryRaw(
+    Prisma.sql`SELECT id FROM inventory.inventory_reservations WHERE id = ${id}::uuid FOR UPDATE`,
+  );
+  // READ COMMITTED takes a fresh snapshot per statement, so this read sees
+  // whatever the previous lock-holder committed.
+  return tx.inventoryReservation.findUniqueOrThrow({ where: { id } });
 }
 
 function toDomain(row: PrismaInventoryReservation): InventoryReservation {

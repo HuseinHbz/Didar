@@ -98,3 +98,30 @@ ReconciliationRecord (MATCHED|AMOUNT_MISMATCH|STATUS_MISMATCH|MISSING_LOCAL|MISS
   are `Order`-lifecycle concerns.
 - **KMS-backed rotation for provider credentials.** Environment variables
   only, same gap `docs/security/README.md` already tracks service-wide.
+
+## What CP-031 changed for the business (refund sending hardened)
+
+Rationale: [`docs/adr/ADR-031-payment-order-consistency.md`](../adr/ADR-031-payment-order-consistency.md).
+Finance should read this section before go-live.
+
+- **A customer who is still on the gateway page when the 20-minute checkout hold would have run out
+  keeps both the checkout and the stock** — the checkout is now held until the payment window closes
+  plus five minutes. (Before this, that customer's payment succeeded and no order existed.)
+- **Every partial refund must be settled by hand while ZarinPal is the only gateway.** ZarinPal's
+  `reverse.json` takes no amount, so the system now refuses to send a partial refund (it used to send
+  it as a reversal of the _whole_ transaction). The refund request is still recorded, ends
+  `REJECTED` with a reason, and appears in finance's queue —
+  `GET /admin/payments/refunds?status=REJECTED`. Only a refund of the whole transaction (for
+  example an order cancelled before anything shipped) is sent automatically. Procedure:
+  [`docs/operations/refund-manual-settlement-runbook.md`](../operations/refund-manual-settlement-runbook.md).
+- **A refund is sent to the gateway at most once.** Two people (or a person and the background sweep)
+  can no longer both send the same refund, and a refund whose send may have been lost
+  (`?status=PROCESSING`) is never re-sent automatically — finance checks it at the gateway first.
+  `POST /admin/payments/refunds/:id/process` on such a refund now answers `409` (release-note item).
+
+**Not built yet (owned by CP-040, `BLOCKED` on the Q9 owner decision):** the system does not record
+that finance settled a `REJECTED` refund by hand — no payout reference, no second approver — so the
+order's `refundedTotal` reflects the _request_, not the payout (P1-16); a payment that completes
+after the payment intent itself expired is never verified (P1-20); and a refund stuck in
+`PROCESSING` has no automatic recovery (P1-19). Whether ZarinPal offers an amount-bearing refund
+call this adapter can use is unverified from this sandbox (P1-6).

@@ -50,6 +50,11 @@ export class OrderConversionQueueService implements OnModuleInit {
  *    the same way: `convertFromCheckout(order.checkoutSessionId)`, which
  *    now resumes cleanly from exactly this state (see that method's own
  *    doc comment) instead of returning the stuck row as-is.
+ * 3. Every payment intent `SUCCEEDED` in the lookback window that still has
+ *    no order (CP-031, gap P0-4) — a payment verified after its checkout
+ *    lapsed leaves the checkout EXPIRED/CANCELLED (never `CONVERTED`) and no
+ *    order row, so neither pass above can see it; the payment itself is the
+ *    one fact that cannot be missing.
  */
 @Processor(ORDER_CONVERSION_QUEUE)
 export class OrderConversionProcessor extends WorkerHost {
@@ -83,11 +88,27 @@ export class OrderConversionProcessor extends WorkerHost {
       if (result) resumed += 1;
     }
 
-    const scanned = convertedSessions.length + stuckOrders.length;
+    // Pass 3 (CP-031, gap P0-4) — a verified payment whose checkout had lapsed
+    // (EXPIRED/CANCELLED, so never CONVERTED) and which never got an order:
+    // found through the payment itself. Anything pass 1/2 already handled this
+    // run is skipped; `convertFromCheckout` is idempotent either way.
+    const handled = new Set<string>([
+      ...convertedSessions.map((session) => session.id),
+      ...stuckOrders.map((order) => order.checkoutSessionId),
+    ]);
+    const paidWithoutOrder = await this.orders.listPaidCheckoutIdsWithoutOrder(since);
+    let recovered = 0;
+    for (const checkoutSessionId of paidWithoutOrder) {
+      if (handled.has(checkoutSessionId)) continue;
+      const result = await this.tryConvert(checkoutSessionId);
+      if (result) recovered += 1;
+    }
+
+    const scanned = convertedSessions.length + stuckOrders.length + paidWithoutOrder.length;
     this.logger.log(
-      `order_conversion_sweep scanned=${scanned} converted=${converted} resumed=${resumed}`,
+      `order_conversion_sweep scanned=${scanned} converted=${converted} resumed=${resumed} recovered=${recovered}`,
     );
-    return { scanned, converted: converted + resumed };
+    return { scanned, converted: converted + resumed + recovered };
   }
 
   private async tryConvert(checkoutSessionId: string) {

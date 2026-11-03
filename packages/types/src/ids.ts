@@ -168,6 +168,11 @@ export const asFulfillmentItemId = brandedId<'FulfillmentItemId'>('FulfillmentIt
 export const asShipmentId = brandedId<'ShipmentId'>('ShipmentId').as;
 export const asShipmentEventId = brandedId<'ShipmentEventId'>('ShipmentEventId').as;
 
+// CP-031 — payment/order consistency (see
+// docs/adr/ADR-031-payment-order-consistency.md).
+export type OrderExceptionId = Brand<string, 'OrderExceptionId'>;
+export const asOrderExceptionId = brandedId<'OrderExceptionId'>('OrderExceptionId').as;
+
 // Phase 010 — promotion/discount/coupon engine (see
 // docs/adr/ADR-010-promotion-engine.md).
 export type PromotionId = Brand<string, 'PromotionId'>;
